@@ -86,7 +86,6 @@ jobs:
           [ "${{ inputs.prerelease }}" = "true" ] && RELEASE="pre" || RELEASE=""
           sed -i "s/^RR_RELEASE=.*$/RR_RELEASE=\"${RELEASE}\"/" files/initrd/opt/rr/include/consts.sh
           if [ -n "${VERSION}" ]; then
-            # Modify Source File
             echo "${VERSION}" >VERSION
             echo "${VERSION}" >files/mnt/p1/RR_VERSION
             sed -i "s/^RR_VERSION=.*$/RR_VERSION=\"${VERSION}\"/" files/initrd/opt/rr/include/consts.sh
@@ -139,14 +138,11 @@ jobs:
           cd rr
           . scripts/func.sh "${{ secrets.RRORG }}"
 
-          echo "Create RR_2GB image"
-          IMAGE_FILE="rr_2GB.img"
-          gzip -dc "files/initrd/opt/rr/grub.img.gz" >"${IMAGE_FILE}"
-          fdisk -l "${IMAGE_FILE}"
-          repackImg files "${IMAGE_FILE}"
-
-          echo "Create RR_4GB image"
-          resizeImg "rr_2GB.img" "+2048M" "rr.img"
+          echo "Create RR image"
+          gzip -dc "files/initrd/opt/rr/grub.img.gz" >"grub.img"
+          resizeImg "grub.img" "+2048M" "rr.img"
+          fdisk -l "rr.img"
+          repackImg files "rr.img"
 
           echo "Create RR ova"
           convertova "rr.img" "rr.ova"
@@ -162,9 +158,6 @@ jobs:
           TAGDATE="${{ env.TAGDATE }}"
           VERSION="${{ env.VERSION }}"
           VERSION="${VERSION:-"${TAGDATE}"}"
-
-          sha256sum rr_2GB.img >sha256sum
-          zip -9 "rr_2GB-${VERSION}.img.zip" rr_2GB.img sha256sum
 
           sha256sum rr.img >sha256sum
           zip -9 "rr-${VERSION}.img.zip" rr.img sha256sum
@@ -253,14 +246,6 @@ jobs:
           name: updateall
           path: |
             rr/updateall-*.zip
-          retention-days: 5
-
-      - name: Upload to Artifacts
-        uses: actions/upload-artifact@v7
-        with:
-          name: rr_2GB.img
-          path: |
-            rr/rr_2GB-*.zip
           retention-days: 5
 
       - name: Upload to Artifacts
