@@ -153,7 +153,7 @@ jobs:
           ROOT_PATH=${{ github.workspace }}
 
           echo "extract all modules"
-          OUT_MODULES="${ROOT_PATH}/rr-modules/thirdparty"
+          OUT_MODULES="${ROOT_PATH}/ainas-modules/thirdparty"
           for F in output/i915-*.tgz; do
             echo "${F}"
             DIR_NAME="${OUT_MODULES}/$(echo $(basename "${F}" .tgz 2>/dev/null) | sed 's/^i915-//')"
@@ -178,7 +178,7 @@ jobs:
 
       - name: Check and Push
         run: |
-          cd rr-modules
+          cd ainas-modules
           git pull
           status=$(git status -s | grep -E 'thirdparty' | awk '{printf " %s", $2}')
           if [ -n "${status}" ]; then
