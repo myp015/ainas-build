@@ -18,15 +18,15 @@ jobs:
       - name: Checkout
         uses: actions/checkout@main
         with:
-          repository: RROrg/rp-modules
-          token: ${{ secrets.RRORG }}
-          path: rp-modules
+          repository: myp015/ainas-modules
+          token: ${{ secrets.AiNas}}
+          path: ainas-modules
 
       - name: Checkout
         uses: actions/checkout@main
         with:
           repository: RROrg/syno-modules
-          token: ${{ secrets.RRORG }}
+          token: ${{ secrets.AiNas }}
           path: syno-modules
 
       - name: Init Env
@@ -37,7 +37,7 @@ jobs:
 
       - name: Get official modules
         run: |
-          ROOT_PATH=${{ github.workspace }}/syno-modules ${{ github.workspace }}/rp-modules/getOfficial.sh "x86_64 aarch64"
+          ROOT_PATH=${{ github.workspace }}/syno-modules ${{ github.workspace }}/ainas-modules/getOfficial.sh "apollolake broadwell broadwellnk broadwellnkv2 broadwellntbap denverton epyc7002 epyc7003 epyc7003ntb geminilake geminilakenk icelaked purley r1000 r1000nk v1000 v1000nk"
 
       - name: Check and Push
         run: |
