@@ -97,7 +97,7 @@ jobs:
           . ${ROOT_PATH}/rp-modules/compile.sh
           KVER="$(getKver "${ROOT_PATH}" "${VERSION}" "${PLATFORM}")"
 
-          OFFICIAL_PATH="${ROOT_PATH}/syno-modules/hda1/${PLATFORM}-${VERSION}-${KVER}"
+          OFFICIAL_PATH="${ROOT_PATH}/syno-modules/official/hda1/${PLATFORM}-${VERSION}-${KVER}"
           PARTY3RD_PATH="${ROOT_PATH}/rr-modules/thirdparty/${PLATFORM}-${VERSION}-${KVER}"
 
 
