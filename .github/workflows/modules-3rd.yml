@@ -56,8 +56,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@main
         with:
-          repository: RROrg/intel-gpu-i915-backports
-          token: ${{ secrets.RRORG }}
+          repository: myp015/intel-gpu-i915-backports
+          token: ${{ secrets.AiNas }}
           path: intel-gpu-i915-backports
 
       - name: Init Env
@@ -125,9 +125,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@main
         with:
-          repository: RROrg/rr-modules
-          token: ${{ secrets.RRORG }}
-          path: rr-modules
+          repository: myp015/ainas-modules
+          token: ${{ secrets.AiNas }}
+          path: ainas-modules
 
       - name: Init Env
         run: |
