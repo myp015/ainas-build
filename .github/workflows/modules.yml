@@ -405,6 +405,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@main
 
+      - name: Checkout syno-modules
+        uses: actions/checkout@main
+        with:
+          repository: myp015/syno-modules
+          token: ${{ secrets.AiNas }}
+          path: syno-modules
+
       - name: Init Env
         run: |
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
@@ -413,18 +420,19 @@ jobs:
 
       - name: Calculate version
         run: |
-          # Calculate version
-          VERSION=""
-          if [ -n "${{ inputs.version }}" ]; then
-            if [ "$(echo ${{ inputs.version }} | cut -d '.' -f 1,2)" = "$(date +'%y.%-m')" ]; then
-              VERSION="${{ inputs.version }}"
+          # 默认以当天日期为版本号（如 26.9.12），同日重复跑则自动递增补丁位
+          VERSION="$(date +'%y.%-m.%-d')"
+          # 显式传入 version 且格式匹配当前年月时，以传入为准
+          if [ -n "${{ inputs.version }}" ] && [ "$(echo ${{ inputs.version }} | cut -d '.' -f 1,2)" = "$(date +'%y.%-m')" ]; then
+            VERSION="${{ inputs.version }}"
+          fi
+          # 查 syno-modules 最新 tag：若前 3 段与当前版本相同（同日），则递增第 4 段
+          LATEST_TAG="$(curl -skLH "Authorization: token ${{ secrets.AiNas }}" "https://api.github.com/repos/myp015/syno-modules/releases" | jq -r '.[0].tag_name' 2>/dev/null)"
+          if [ -n "${LATEST_TAG}" ] && [ "$(echo ${LATEST_TAG} | cut -d '.' -f 1,2,3)" = "${VERSION}" ]; then
+            if [ "$(echo ${LATEST_TAG} | awk -F '.' '{print NF}')" -ge 4 ]; then
+              VERSION="$(echo ${LATEST_TAG} | awk -F '.' '{$4=$4+1}1' OFS='.')"
             else
-              LATEST_TAG="$(curl -skLH "Authorization: token ${{ secrets.AiNas }}" "https://api.github.com/repos/myp015/syno-modules/releases" | jq -r ".[0].tag_name" 2>/dev/null)"
-              if [ -n "${LATEST_TAG}" ] && [ "$(echo ${LATEST_TAG} | cut -d '.' -f 1,2)" = "$(date +'%y.%-m')" ]; then  # format %y.%-m.$i
-                VERSION="$(echo ${LATEST_TAG} | awk -F '.' '{$3=$3+1}1' OFS='.')"
-              else
-                VERSION="$(date +'%y.%-m').0"
-              fi
+              VERSION="${VERSION}.1"
             fi
           fi
 
@@ -451,6 +459,49 @@ jobs:
 
           echo "${VERSION}" > "output/VERSION"
           zip -9 modules-${VERSION}.zip -j output/*
+
+      - name: Extract to syno-modules/modules
+        if: success() && env.VERSION != ''
+        run: |
+          set -euo pipefail
+          VERSION="${{ env.VERSION }}"
+
+          # output/ 下是各平台 tgz（download-artifact merge 后），形如
+          # apollolake-7.0-4.4.180.tgz / broadwell-7.4-4.4.302.tgz 等
+          # 每个 tgz 解压到 syno-modules/modules/<platform>-<version>-<kver>/ 目录
+          mkdir -p syno-modules/modules
+          # 清空旧内容避免残留
+          find syno-modules/modules -mindepth 1 -delete 2>/dev/null || true
+
+          COUNT=0
+          for tgz in output/*.tgz; do
+            [ -e "${tgz}" ] || continue
+            name="$(basename "${tgz}" .tgz)"   # apollolake-7.0-4.4.180
+            mkdir -p "syno-modules/modules/${name}"
+            tar -zxf "${tgz}" -C "syno-modules/modules/${name}"
+            COUNT=$((COUNT+1))
+          done
+          echo "${VERSION}" > syno-modules/modules/VERSION
+
+          echo "=== 解压 ${COUNT} 个平台，modules/ 目录结构 ==="
+          ls syno-modules/modules/
+          echo "ko 总数: $(find syno-modules/modules -name '*.ko' | wc -l)"
+
+      - name: Commit and push modules
+        if: success() && env.VERSION != ''
+        run: |
+          set -euo pipefail
+          VERSION="${{ env.VERSION }}"
+          cd syno-modules
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git config user.name "github-actions[bot]"
+          git add modules/
+          if git diff --cached --quiet; then
+            echo "modules/ 无变化，跳过提交"
+          else
+            git commit -m "modules: update ${VERSION}" || echo "commit 无变化跳过"
+            git push origin main
+          fi
 
       - name: Upload to Artifacts
         if: success() && env.VERSION == ''
