@@ -282,7 +282,7 @@ jobs:
           for M in ${OM[@]}; do
             function _copydepends() {
               [ -f "${OFFICIAL_PATH}/${1}" ] && [ ! -f "${OFFICIAL_PATH/hda1/rd}/${1}" ] && cp -f "${OFFICIAL_PATH}/${1}" "${ROOT_PATH}/output"
-              depends=($(modinfo -F depends "${OFFICIAL_PATH}/${1}" 2>/dev/null | sed 's/,/ /g'))
+              depends=($(modinfo -F depends "${OFFICIAL_PATH}/${1}" 2>/dev/null | sed 's/,/ /g')) || true
               if [ ${#depends[*]} -gt 0 ]; then
                 for k in ${depends[@]}; do
                   _copydepends "${k}.ko"
