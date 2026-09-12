@@ -272,6 +272,18 @@ jobs:
           OFFICIAL_PATH="${ROOT_PATH}/syno-modules/official/hda1/${PLATFORM}-${VERSION}-${KVER}"
           PARTY3RD_PATH="${ROOT_PATH}/syno-modules/thirdparty/${PLATFORM}-${VERSION}-${KVER}"
 
+          # =====================================================================
+          # 双目录打包：
+          #   output/       = makemodules 编译产物（纯编译）-> 给 modules/
+          #   output_all/   = 编译 + 官方 + 第三方（合集）   -> 给 release/
+          # =====================================================================
+
+          # 纯编译产物 tgz（给 modules/）
+          tar -zcf ${ROOT_PATH}/${PLATFORM}-${VERSION}-${KVER}.tgz -C ${ROOT_PATH}/output .
+
+          # 建合集目录：先复制编译产物，再追加官方/第三方
+          mkdir -p ${ROOT_PATH}/output_all
+          cp -rf ${ROOT_PATH}/output/* ${ROOT_PATH}/output_all/
 
           echo "copy official modules"
           IU="apollolake braswell broadwell broadwellnk broadwellnkv2 broadwellntbap bromolow denverton geminilake grantley purley geminilakenk icelaked"
@@ -281,7 +293,7 @@ jobs:
           echo "${IU}" | grep -qw "${PLATFORM}" && OM+=(irqbypass.ko kvm.ko kvm-intel.ko) || OM+=(irqbypass.ko kvm.ko kvm-amd.ko)
           for M in ${OM[@]}; do
             function _copydepends() {
-              [ -f "${OFFICIAL_PATH}/${1}" ] && [ ! -f "${OFFICIAL_PATH/hda1/rd}/${1}" ] && cp -f "${OFFICIAL_PATH}/${1}" "${ROOT_PATH}/output"
+              [ -f "${OFFICIAL_PATH}/${1}" ] && [ ! -f "${OFFICIAL_PATH/hda1/rd}/${1}" ] && cp -f "${OFFICIAL_PATH}/${1}" "${ROOT_PATH}/output_all"
               depends=($(modinfo -F depends "${OFFICIAL_PATH}/${1}" 2>/dev/null | sed 's/,/ /g')) || true
               if [ ${#depends[*]} -gt 0 ]; then
                 for k in ${depends[@]}; do
@@ -293,27 +305,27 @@ jobs:
           done
 
           echo "copy 3rd modules"
-          [ -d "${PARTY3RD_PATH}" ] && cp -rf ${PARTY3RD_PATH}/* ${ROOT_PATH}/output/
+          [ -d "${PARTY3RD_PATH}" ] && cp -rf ${PARTY3RD_PATH}/* ${ROOT_PATH}/output_all/
 
           echo "check depends"
-          for M in $(ls ${ROOT_PATH}/output 2>/dev/null); do
+          for M in $(ls ${ROOT_PATH}/output_all 2>/dev/null); do
             function _copydepends() {
-              if [ ! -f "${ROOT_PATH}/output/${1}" ] && [ ! -f "${OFFICIAL_PATH/hda1/rd}/${1}" ]; then
+              if [ ! -f "${ROOT_PATH}/output_all/${1}" ] && [ ! -f "${OFFICIAL_PATH/hda1/rd}/${1}" ]; then
                 if [ -f "${OFFICIAL_PATH}/${1}" ]; then
-                  cp -f "${OFFICIAL_PATH}/${1}" "${ROOT_PATH}/output"
+                  cp -f "${OFFICIAL_PATH}/${1}" "${ROOT_PATH}/output_all"
                 else
                   echo "[E] '${PLATFORM}-${KVER}' - '${M}' depends '${1}' does not exist."
                 fi
               fi
               D=""
-              [ -z "${D}" ] && [ -f "${ROOT_PATH}/output/${1}" ] && D="${ROOT_PATH}/output/${1}"
+              [ -z "${D}" ] && [ -f "${ROOT_PATH}/output_all/${1}" ] && D="${ROOT_PATH}/output_all/${1}"
               [ -z "${D}" ] && [ -f "${OFFICIAL_PATH/hda1/rd}/${1}" ] && D="${OFFICIAL_PATH/hda1/rd}/${1}"
               if [ -n "${D}" ]; then
                 # modinfo "${D}" || true
                 depends=($(modinfo -F depends "${D}" 2>/dev/null | sed 's/,/ /g')) || true
                 if [ ${#depends[*]} -gt 0 ]; then
                   for k in ${depends[@]}; do
-                    [ -f "${ROOT_PATH}/output/${k}.ko" ] && continue # Recursively skip wext-priv and wext-core dependencies on each other.
+                    [ -f "${ROOT_PATH}/output_all/${k}.ko" ] && continue # Recursively skip wext-priv and wext-core dependencies on each other.
                     _copydepends "${k}.ko"
                   done
                 fi
@@ -322,7 +334,8 @@ jobs:
             _copydepends "${M}"
           done
 
-          tar -zcf ${ROOT_PATH}/${PLATFORM}-${VERSION}-${KVER}.tgz -C ${ROOT_PATH}/output .
+          # 合集 tgz（给 release/）
+          tar -zcf ${ROOT_PATH}/${PLATFORM}-${VERSION}-${KVER}-all.tgz -C ${ROOT_PATH}/output_all .
 
       - name: Upload to Artifacts
         uses: actions/upload-artifact@v7
@@ -476,6 +489,7 @@ jobs:
           COUNT=0
           for tgz in output/*.tgz; do
             [ -e "${tgz}" ] || continue
+            case "${tgz}" in *-all.tgz) continue ;; esac   # 跳过合集，只取纯编译
             name="$(basename "${tgz}" .tgz)"   # apollolake-7.0-4.4.180
             mkdir -p "syno-modules/modules/${name}"
             tar -zxf "${tgz}" -C "syno-modules/modules/${name}"
@@ -520,9 +534,9 @@ jobs:
           unzip -o "${ZIP}" -d "${TMP_DIR}" >/dev/null
 
           COUNT=0
-          for tgz in "${TMP_DIR}"/*.tgz; do
+          for tgz in "${TMP_DIR}"/*-all.tgz; do
             [ -e "${tgz}" ] || continue
-            name="$(basename "${tgz}" .tgz)"   # apollolake-7.0-4.4.180
+            name="$(basename "${tgz}" -all.tgz)"   # apollolake-7.0-4.4.180
             mkdir -p "syno-modules/release/${name}"
             tar -zxf "${tgz}" -C "syno-modules/release/${name}"
             COUNT=$((COUNT+1))
