@@ -48,16 +48,16 @@ jobs:
       - name: Checkout
         uses: actions/checkout@main
         with:
-          repository: RROrg/rp-modules
-          token: ${{ secrets.RRORG }}
-          path: rp-modules
+          repository: myp015/ainas-modules
+          token: ${{ secrets.AiNas }}
+          path: ainas-modules
 
       - name: Checkout
         uses: actions/checkout@main
         with:
-          repository: RROrg/rr-cks
-          token: ${{ secrets.RRORG }}
-          path: rr-cks
+          repository: myp015/ainas-cks
+          token: ${{ secrets.AiNas }}
+          path: ainas-cks
 
       - name: Init Env
         run: |
@@ -74,10 +74,10 @@ jobs:
           VERSION=${{ matrix.version }}
           PLATFORM=${{ matrix.platform }}
 
-          git clone -b ${PLATFORM}-${VERSION}-5.10.55 --depth=1 https://github.com/RROrg/dsm_linux.git
-          git clone --depth=1 https://github.com/RROrg/intel-gpu-i915-backports.git
+          git clone -b ${PLATFORM}-${VERSION}-5.10.55 --depth=1 https://github.com/myp015/dsm_linux.git
+          git clone --depth=1 https://github.com/myp015/intel-gpu-i915-backports.git
 
-          . ${ROOT_PATH}/rp-modules/compile-ck.sh
+          . ${ROOT_PATH}/ainas-modules/compile-ck.sh
 
           echo "makeEnvDeploy"
           makeEnvDeploy "${ROOT_PATH}" "${VERSION}" "${PLATFORM}"
@@ -87,8 +87,8 @@ jobs:
 
           echo "makemodules"
           KVER="$(getKver "${ROOT_PATH}" "${VERSION}" "${PLATFORM}" "${ROOT_PATH}/dsm_linux")"
-          cp -f "${ROOT_PATH}/rp-modules/src/${KVER}-ck/defines.${PLATFORM}" "${ROOT_PATH}/rp-modules/src/${KVER}-ck/defines"
-          makemodules "${ROOT_PATH}" "${VERSION}" "${PLATFORM}" "${ROOT_PATH}/dsm_linux" "${ROOT_PATH}/rp-modules/src/${KVER}-ck" "${ROOT_PATH}/modules"
+          cp -f "${ROOT_PATH}/ainas-modules/src/${KVER}-ck/defines.${PLATFORM}" "${ROOT_PATH}/ainas-modules/src/${KVER}-ck/defines"
+          makemodules "${ROOT_PATH}" "${VERSION}" "${PLATFORM}" "${ROOT_PATH}/dsm_linux" "${ROOT_PATH}/ainas-modules/src/${KVER}-ck" "${ROOT_PATH}/modules"
 
           # if ! echo "geminilakenk" | grep -wq "${PLATFORM}"; then
             echo "makei915"
@@ -104,10 +104,10 @@ jobs:
           VERSION=${{ matrix.version }}
           PLATFORM=${{ matrix.platform }}
 
-          . ${ROOT_PATH}/rp-modules/compile-ck.sh
+          . ${ROOT_PATH}/ainas-modules/compile-ck.sh
           KVER="$(getKver "${ROOT_PATH}" "${VERSION}" "${PLATFORM}" "${ROOT_PATH}/dsm_linux")"
 
-          PARTY3RD_PATH="${ROOT_PATH}/rr-cks/thirdparty/${PLATFORM}-${VERSION}-${KVER}"
+          PARTY3RD_PATH="${ROOT_PATH}/ainas-cks/thirdparty/${PLATFORM}-${VERSION}-${KVER}"
 
           echo "copy 3rd modules"
           [ -d "${PARTY3RD_PATH}" ] && cp -rf ${PARTY3RD_PATH}/* ${ROOT_PATH}/output/modules/
@@ -145,7 +145,7 @@ jobs:
       - name: Upload to Artifacts
         uses: actions/upload-artifact@v7
         with:
-          name: rr-cks${{ matrix.config }}-${{ matrix.version }}-${{ matrix.platform }}
+          name: ainas-cks${{ matrix.config }}-${{ matrix.version }}-${{ matrix.platform }}
           path: |
             *.tgz
             *.gz
@@ -160,9 +160,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@main
         with:
-          repository: RROrg/rr-cks
-          token: ${{ secrets.RRORG }}
-          path: rr-cks
+          repository: myp015/ainas-cks
+          token: ${{ secrets.AiNas }}
+          path: ainas-cks
 
       - name: Init Env
         run: |
@@ -174,7 +174,7 @@ jobs:
         uses: actions/download-artifact@v8
         with:
           path: output
-          pattern: rr-cks-*
+          pattern: ainas-cks-*
           merge-multiple: true
 
       - name: firmware
@@ -184,7 +184,7 @@ jobs:
           mkdir -p ${ROOT_PATH}/firmware
 
           echo "copy 3rd modules"
-          PARTY3RD_PATH="${ROOT_PATH}/rr-cks/thirdparty/firmware"
+          PARTY3RD_PATH="${ROOT_PATH}/ainas-cks/thirdparty/firmware"
           [ -d "${PARTY3RD_PATH}" ] && cp -rf ${PARTY3RD_PATH}/* ${ROOT_PATH}/firmware/
 
           echo "extract all modules"
@@ -213,7 +213,7 @@ jobs:
       - name: Upload to Artifacts
         uses: actions/upload-artifact@v7
         with:
-          name: rr-cks-firmware
+          name: ainas-cks-firmware
           path: |
             firmware.tgz
 
@@ -238,7 +238,7 @@ jobs:
             if [ "$(echo ${{ inputs.version }} | cut -d '.' -f 1,2)" = "$(date +'%y.%-m')" ]; then
               VERSION="${{ inputs.version }}"
             else
-              LATEST_TAG="$(curl -skLH "Authorization: token ${{ secrets.RRORG }}" "https://api.github.com/repos/RROrg/rr-cks/releases" | jq -r ".[0].tag_name" 2>/dev/null)"
+              LATEST_TAG="$(curl -skLH "Authorization: token ${{ secrets.AiNas }}" "https://api.github.com/repos/myp015/ainas-cks/releases" | jq -r ".[0].tag_name" 2>/dev/null)"
               if [ -n "${LATEST_TAG}" ] && [ "$(echo ${LATEST_TAG} | cut -d '.' -f 1,2)" = "$(date +'%y.%-m')" ]; then  # format %y.%-m.$i
                 VERSION="$(echo ${LATEST_TAG} | awk -F '.' '{$3=$3+1}1' OFS='.')"
               else
@@ -254,14 +254,14 @@ jobs:
         uses: actions/download-artifact@v8
         with:
           path: output
-          pattern: rr-cks-*
+          pattern: ainas-cks-*
           merge-multiple: true
 
       - name: delete-artifact
         uses: geekyeggo/delete-artifact@v6
         with:
           name: |
-            rr-cks-*
+            ainas-cks-*
 
       - name: Zip modules
         run: |
@@ -269,15 +269,15 @@ jobs:
           VERSION="${VERSION:-"test"}"
 
           echo "${VERSION}" > "output/VERSION"
-          zip -9 rr-cks-${VERSION}.zip -j output/*
+          zip -9 ainas-cks-${VERSION}.zip -j output/*
 
       - name: Upload to Artifacts
         if: success() && env.VERSION == ''
         uses: actions/upload-artifact@v7
         with:
-          name: rr-cks
+          name: ainas-cks
           path: |
-            rr-cks-*.zip
+            ainas-cks-*.zip
           retention-days: 5
 
       - name: Release
@@ -286,7 +286,7 @@ jobs:
         with:
           tag: ${{ env.VERSION }}
           prerelease: ${{ inputs.prerelease }}
-          artifacts: rr-cks*.zip
-          owner: RROrg
-          repo: rr-cks
-          token: ${{ secrets.RRORG }}
+          artifacts: ainas-cks*.zip
+          owner: myp015
+          repo: ainas-cks
+          token: ${{ secrets.AiNas }}
