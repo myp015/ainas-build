@@ -123,6 +123,7 @@ jobs:
 
           echo "check depends"
           for M in $(ls ${ROOT_PATH}/output/modules 2>/dev/null); do
+            [ -d "${ROOT_PATH}/output/modules/${M}" ] && continue # 跳过子目录（update/），避免把目录当模块名误报 [E] depends does not exist
             function _copydepends() {
               if [ ! -f "${ROOT_PATH}/output/modules/${1}" ] && [ ! -f "${OFFICIAL_PATH/hda1/rd}/${1}" ]; then
                 if [ -f "${OFFICIAL_PATH}/${1}" ]; then
