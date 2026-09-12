@@ -503,6 +503,34 @@ jobs:
             git push origin main
           fi
 
+      - name: Extract release to syno-modules/release and push
+        if: success() && env.VERSION != ''
+        run: |
+          set -euo pipefail
+          VERSION="${{ env.VERSION }}"
+          ZIP="modules-${VERSION}.zip"
+
+          # 解压 release 压缩包（各平台合集 tgz）到 syno-modules/release/
+          mkdir -p syno-modules/release
+          find syno-modules/release -mindepth 1 -delete 2>/dev/null || true
+          unzip -o "${ZIP}" -d syno-modules/release/
+          echo "${VERSION}" > syno-modules/release/VERSION
+
+          echo "=== release/ 内容预览 ==="
+          ls syno-modules/release/ | head -20
+
+          # 提交并推送 release/
+          cd syno-modules
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git config user.name "github-actions[bot]"
+          git add release/
+          if git diff --cached --quiet; then
+            echo "release/ 无变化，跳过提交"
+          else
+            git commit -m "release: update ${VERSION}" || echo "commit 无变化跳过"
+            git push origin main
+          fi
+
       - name: Upload to Artifacts
         if: success() && env.VERSION == ''
         uses: actions/upload-artifact@v7
