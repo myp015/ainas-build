@@ -510,14 +510,29 @@ jobs:
           VERSION="${{ env.VERSION }}"
           ZIP="modules-${VERSION}.zip"
 
-          # 解压 release 压缩包（各平台合集 tgz）到 syno-modules/release/
+          # 解压 release 压缩包（各平台合集）到 syno-modules/release/
+          # 与 modules/ 一致：按平台分目录 release/<plat>-<ver>-<kver>/
           mkdir -p syno-modules/release
           find syno-modules/release -mindepth 1 -delete 2>/dev/null || true
-          unzip -o "${ZIP}" -d syno-modules/release/
+
+          # 先把 zip 解压到临时目录拿到各平台 tgz
+          TMP_DIR=$(mktemp -d)
+          unzip -o "${ZIP}" -d "${TMP_DIR}" >/dev/null
+
+          COUNT=0
+          for tgz in "${TMP_DIR}"/*.tgz; do
+            [ -e "${tgz}" ] || continue
+            name="$(basename "${tgz}" .tgz)"   # apollolake-7.0-4.4.180
+            mkdir -p "syno-modules/release/${name}"
+            tar -zxf "${tgz}" -C "syno-modules/release/${name}"
+            COUNT=$((COUNT+1))
+          done
+          rm -rf "${TMP_DIR}"
           echo "${VERSION}" > syno-modules/release/VERSION
 
-          echo "=== release/ 内容预览 ==="
-          ls syno-modules/release/ | head -20
+          echo "=== 解压 ${COUNT} 个平台，release/ 目录结构 ==="
+          ls syno-modules/release/
+          echo "ko 总数: $(find syno-modules/release -name '*.ko' | wc -l)"
 
           # 提交并推送 release/
           cd syno-modules
