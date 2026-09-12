@@ -59,6 +59,13 @@ jobs:
           token: ${{ secrets.AiNas }}
           path: ainas-cks
 
+      - name: Checkout
+        uses: actions/checkout@main
+        with:
+          repository: myp015/syno-modules
+          token: ${{ secrets.AiNas }}
+          path: syno-modules
+
       - name: Init Env
         run: |
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
@@ -107,6 +114,7 @@ jobs:
           . ${ROOT_PATH}/ainas-modules/compile-ck.sh
           KVER="$(getKver "${ROOT_PATH}" "${VERSION}" "${PLATFORM}" "${ROOT_PATH}/dsm_linux")"
 
+          OFFICIAL_PATH="${ROOT_PATH}/syno-modules/official/hda1/${PLATFORM}-${VERSION}-${KVER}"
           PARTY3RD_PATH="${ROOT_PATH}/ainas-cks/thirdparty/${PLATFORM}-${VERSION}-${KVER}"
 
           echo "copy 3rd modules"
@@ -145,7 +153,7 @@ jobs:
       - name: Upload to Artifacts
         uses: actions/upload-artifact@v7
         with:
-          name: ainas-cks${{ matrix.config }}-${{ matrix.version }}-${{ matrix.platform }}
+          name: ainas-cks-${{ matrix.version }}-${{ matrix.platform }}
           path: |
             *.tgz
             *.gz
@@ -204,7 +212,7 @@ jobs:
               mkdir -p "$(dirname firmware/${L})"
               cp -f "${SOURCE}/${L}" "firmware/${L}"
             else
-              [ -e "firmware/${L}" ] && echo "Used thirdparty ${L}" || echo "Missing ${L}"
+              [ -e "firmware/${L}" ] && echo "Used thirdparty ${L}" || echo "::warning ::Missing ${L}"
             fi
           done <<<$(find output -name \*.ko -exec /sbin/modinfo -F firmware {} 2>/dev/null \;)
 
