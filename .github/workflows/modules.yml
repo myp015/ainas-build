@@ -348,7 +348,9 @@ jobs:
       - name: Upload all artifacts
         uses: actions/upload-artifact@v7
         with:
-          name: modules-all-${{ matrix.version }}-${{ matrix.platform }}
+          # 命名 all-*（不带 modules- 前缀）：与纯编译 modules-* 区分，
+          # 避免 download-artifact 的 modules-* glob 误匹配合集
+          name: all-${{ matrix.version }}-${{ matrix.platform }}
           path: |
             all/*.tgz
 
@@ -375,8 +377,9 @@ jobs:
       - name: download to artifacts
         uses: actions/download-artifact@v8
         with:
+          # 合集 all-* 含编译+官方+第三方全部 ko，firmware 提取需要全集
           path: output
-          pattern: modules-*
+          pattern: all-*
           merge-multiple: true
 
       - name: firmware
@@ -415,7 +418,8 @@ jobs:
       - name: Upload to Artifacts
         uses: actions/upload-artifact@v7
         with:
-          name: modules-firmware
+          # 去掉 modules- 前缀：避免与纯编译 modules-* 下载冲突
+          name: firmware
           path: |
             firmware.tgz
 
@@ -441,19 +445,22 @@ jobs:
 
       - name: Calculate version
         run: |
-          # 默认以当天日期为版本号（如 26.9.12），同日重复跑则自动递增补丁位
-          VERSION="$(date +'%y.%-m.%-d')"
-          # 显式传入 version 且格式匹配当前年月时，以传入为准
+          # 按月低增版本号（26.9.0 / 26.9.1 / 26.9.2 ...），同月重复发布第 3 段 +1
+          # 显式传入 version 且格式匹配当前年月时，以传入为准（切换新格式首发可显式传 26.9.1）
           if [ -n "${{ inputs.version }}" ] && [ "$(echo ${{ inputs.version }} | cut -d '.' -f 1,2)" = "$(date +'%y.%-m')" ]; then
             VERSION="${{ inputs.version }}"
-          fi
-          # 查 syno-modules 最新 tag：若前 3 段与当前版本相同（同日），则递增第 4 段
-          LATEST_TAG="$(curl -skLH "Authorization: token ${{ secrets.AiNas }}" "https://api.github.com/repos/myp015/syno-modules/releases" | jq -r '.[0].tag_name' 2>/dev/null)"
-          if [ -n "${LATEST_TAG}" ] && [ "$(echo ${LATEST_TAG} | cut -d '.' -f 1,2,3)" = "${VERSION}" ]; then
-            if [ "$(echo ${LATEST_TAG} | awk -F '.' '{print NF}')" -ge 4 ]; then
-              VERSION="$(echo ${LATEST_TAG} | awk -F '.' '{$4=$4+1}1' OFS='.')"
+          else
+            # 自动：查 syno-modules 最新 tag，同月则第 3 段 +1，跨月则 .0
+            LATEST_TAG="$(curl -skLH "Authorization: token ${{ secrets.AiNas }}" "https://api.github.com/repos/myp015/syno-modules/releases" | jq -r '.[0].tag_name' 2>/dev/null)"
+            if [ -n "${LATEST_TAG}" ] && [ "$(echo ${LATEST_TAG} | cut -d '.' -f 1,2)" = "$(date +'%y.%-m')" ]; then
+              if [ "$(echo ${LATEST_TAG} | awk -F '.' '{print NF}')" -ge 4 ]; then
+                # 旧格式 4 段 tag（如 26.9.13.1）不参与低增，回退到月份首版
+                VERSION="$(date +'%y.%-m').0"
+              else
+                VERSION="$(echo ${LATEST_TAG} | awk -F '.' '{$3=$3+1}1' OFS='.')"
+              fi
             else
-              VERSION="${VERSION}.1"
+              VERSION="$(date +'%y.%-m').0"
             fi
           fi
 
@@ -463,18 +470,17 @@ jobs:
       - name: download to artifacts (compile)
         uses: actions/download-artifact@v8
         with:
+          # 单行 pattern：download-artifact v8 不支持多行负 pattern（! 排除无效会导致 0 下载）。
+          # artifact 已按模块-前缀区分：modules-* 只匹配纯编译，合集是 all-*，firmware 是 firmware
           path: output
-          pattern: |
-            modules-*
-            !modules-all-*
-            !modules-firmware
+          pattern: modules-*
           merge-multiple: true
 
       - name: download to artifacts (all)
         uses: actions/download-artifact@v8
         with:
           path: output_all
-          pattern: modules-all-*
+          pattern: all-*
           merge-multiple: true
 
       - name: delete-artifact
@@ -482,6 +488,8 @@ jobs:
         with:
           name: |
             modules-*
+            all-*
+            firmware
 
       - name: Zip modules
         run: |
@@ -498,17 +506,16 @@ jobs:
           set -euo pipefail
           VERSION="${{ env.VERSION }}"
 
-          # output/ 下是各平台 tgz（download-artifact merge 后），形如
+          # output/ 下是各平台纯编译 tgz（download compile 产物），形如
           # apollolake-7.0-4.4.180.tgz / broadwell-7.4-4.4.302.tgz 等
           # 每个 tgz 解压到 syno-modules/modules/<platform>-<version>-<kver>/ 目录
           mkdir -p syno-modules/modules
-          # 清空旧内容避免残留
-          find syno-modules/modules -mindepth 1 -delete 2>/dev/null || true
+          # 先清空旧内容，避免版本混合残留（fail fast：find 失败直接中止）
+          find syno-modules/modules -mindepth 1 -delete
 
           COUNT=0
           for tgz in output/*.tgz; do
             [ -e "${tgz}" ] || continue
-            case "${tgz}" in *-all.tgz) continue ;; esac   # 跳过合集，只取纯编译
             name="$(basename "${tgz}" .tgz)"   # apollolake-7.0-4.4.180
             mkdir -p "syno-modules/modules/${name}"
             tar -zxf "${tgz}" -C "syno-modules/modules/${name}"
@@ -519,6 +526,12 @@ jobs:
           echo "=== 解压 ${COUNT} 个平台，modules/ 目录结构 ==="
           ls syno-modules/modules/
           echo "ko 总数: $(find syno-modules/modules -name '*.ko' | wc -l)"
+
+          # 断言：纯编译 tgz 未下载则 COUNT=0，直接失败而非提交空目录
+          if [ "${COUNT}" -eq 0 ]; then
+            echo "FATAL: 未解压任何平台（download compile 异常），中止提交"
+            exit 1
+          fi
 
       - name: Commit and push modules
         if: success() && env.VERSION != ''
@@ -542,10 +555,11 @@ jobs:
           set -euo pipefail
           VERSION="${{ env.VERSION }}"
 
-          # output_all/ 下是各平台合集 tgz（download-artifact modules-all-* 后），
+          # output_all/ 下是各平台合集 tgz（download all 产物，编译+官方+第三方），
           # 与 modules/ 一致：按平台分目录 release/<plat>-<ver>-<kver>/
           mkdir -p syno-modules/release
-          find syno-modules/release -mindepth 1 -delete 2>/dev/null || true
+          # 先清空旧内容，避免版本混合残留（fail fast：find 失败直接中止）
+          find syno-modules/release -mindepth 1 -delete
 
           COUNT=0
           for tgz in output_all/*.tgz; do
@@ -560,6 +574,12 @@ jobs:
           echo "=== 解压 ${COUNT} 个平台，release/ 目录结构 ==="
           ls syno-modules/release/
           echo "ko 总数: $(find syno-modules/release -name '*.ko' | wc -l)"
+
+          # 断言：合集 tgz 未下载则 COUNT=0，直接失败而非提交空目录
+          if [ "${COUNT}" -eq 0 ]; then
+            echo "FATAL: 未解压任何平台（download all 异常），中止提交"
+            exit 1
+          fi
 
           # 提交并推送 release/
           cd syno-modules
