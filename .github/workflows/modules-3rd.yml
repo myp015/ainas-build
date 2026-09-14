@@ -60,6 +60,13 @@ jobs:
           token: ${{ secrets.AiNas }}
           path: intel-gpu-i915-backports
 
+      - name: Checkout ainas-modules
+        uses: actions/checkout@main
+        with:
+          repository: myp015/ainas-modules
+          token: ${{ secrets.AiNas }}
+          path: ainas-modules
+
       - name: Init Env
         run: |
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
@@ -89,6 +96,8 @@ jobs:
           echo "building modules"
           export CROSS_COMPILE=${ROOT_PATH}/ds.${PLATFORM}-${VERSION}.env/usr/local/x86_64-pc-linux-gnu/bin/x86_64-pc-linux-gnu-
           export KLIB_BUILD=${ROOT_PATH}/ds.${PLATFORM}-${VERSION}.dev/usr/local/x86_64-pc-linux-gnu/x86_64-pc-linux-gnu/sys-root/usr/lib/modules/DSM-${VERSION}/build
+          # modinfo 标识：自编 i915 模块 description 追加 "(Compiled by ainas for DSM)"
+          export KCFLAGS="-include ${ROOT_PATH}/ainas-modules/scripts/module-mark.h"
           (
             cd "${ROOT_PATH}/intel-gpu-i915-backports"
             make defconfig-drm
