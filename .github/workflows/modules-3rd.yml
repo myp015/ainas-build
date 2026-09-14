@@ -96,8 +96,13 @@ jobs:
           echo "building modules"
           export CROSS_COMPILE=${ROOT_PATH}/ds.${PLATFORM}-${VERSION}.env/usr/local/x86_64-pc-linux-gnu/bin/x86_64-pc-linux-gnu-
           export KLIB_BUILD=${ROOT_PATH}/ds.${PLATFORM}-${VERSION}.dev/usr/local/x86_64-pc-linux-gnu/x86_64-pc-linux-gnu/sys-root/usr/lib/modules/DSM-${VERSION}/build
-          # modinfo 标识：自编 i915 模块 description 追加 "(Compiled by ainas for DSM)"
-          export KCFLAGS="-include ${ROOT_PATH}/ainas-modules/scripts/module-mark.h"
+          # modinfo 标识：sed KLIB_BUILD module.h 的 MODULE_DESCRIPTION 宏追加
+          # "(Compiled by ainas for DSM)"（不用 -include 注入：-include 抢先包含
+          # module.h 破坏 kcompat.h「先于内核头」约束/提前定义 pr_fmt，epyc7003ntb
+          # -Werror 实测编译失败）。改 KSRC 宏对用该 KSRC 编译的模块生效。
+          if [ -f "${KLIB_BUILD}/include/linux/module.h" ] && ! grep -q 'MODULE_INFO(description, _description " (Compiled by ainas' "${KLIB_BUILD}/include/linux/module.h"; then
+            sed -i 's/#define MODULE_DESCRIPTION(_description) MODULE_INFO(description, _description)/#define MODULE_DESCRIPTION(_description) MODULE_INFO(description, _description " (Compiled by ainas for DSM)")/' "${KLIB_BUILD}/include/linux/module.h"
+          fi
           (
             cd "${ROOT_PATH}/intel-gpu-i915-backports"
             make defconfig-drm
