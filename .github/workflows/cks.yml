@@ -127,6 +127,7 @@ jobs:
             function _copydepends() {
               if [ ! -f "${ROOT_PATH}/output/modules/${1}" ] && [ ! -f "${OFFICIAL_PATH/hda1/rd}/${1}" ]; then
                 if [ -f "${OFFICIAL_PATH}/${1}" ]; then
+                  echo "[W] '${PLATFORM}-${KVER}' - '${M}' depends '${1}' copied from official hda1"
                   cp -f "${OFFICIAL_PATH}/${1}" "${ROOT_PATH}/output/modules"
                 else
                   echo "[E] '${PLATFORM}-${KVER}' - '${M}' depends '${1}' does not exist."
