@@ -115,7 +115,9 @@ jobs:
           . ${ROOT_PATH}/ainas-modules/compile-ck.sh
           KVER="$(getKver "${ROOT_PATH}" "${VERSION}" "${PLATFORM}" "${ROOT_PATH}/dsm_linux")"
 
-          OFFICIAL_PATH="${ROOT_PATH}/syno-modules/official/hda1/${PLATFORM}-${VERSION}-${KVER}"
+          # OFFICIAL_PATH 留空（对齐 RR）：check depends 纯缺口检测，产物 depends 缺口一律报 [E]，绝不从官方 hda1 拷贝
+          # OFFICIAL_PATH="${ROOT_PATH}/syno-modules/official/hda1/${PLATFORM}-${VERSION}-${KVER}"
+          OFFICIAL_PATH=""
           PARTY3RD_PATH="${ROOT_PATH}/ainas-cks/thirdparty/${PLATFORM}-${VERSION}-${KVER}"
 
           echo "copy 3rd modules"
