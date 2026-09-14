@@ -51,16 +51,9 @@ jobs:
           echo "makeEnvDeploy"
           for i in $(seq 1 3); do makeEnvDeploy "${ROOT_PATH}" "${VERSION}" "${PLATFORM}" && break || { echo "Retry makeEnvDeploy ${i}/3"; sleep 5; }; done
 
-          echo "makemodules (vxlan chain only)"
+          echo "makemodules"
           KVER="$(getKver "${ROOT_PATH}" "${VERSION}" "${PLATFORM}")"
-          # 只编译 vxlan 链：临时把 defines 全部 =m 改为 =n（=n 作 make 参数不编任何
-          # 模块），仅保留 vxlan/udp_tunnel 为 =m → 只编 vxlan.ko/udp_tunnel.ko/
-          # ip6_udp_tunnel.ko，验证自编译（M 树 obj-y 仍会编，属 make 行为）。
-          DEF="${ROOT_PATH}/ainas-modules/src/${KVER}/defines.${PLATFORM}"
-          sed -i 's/=m$/=n/' "${DEF}"
-          sed -i 's/^CONFIG_NET_UDP_TUNNEL=n$/CONFIG_NET_UDP_TUNNEL=m/' "${DEF}"
-          grep -q '^CONFIG_VXLAN=m' "${DEF}" || printf 'CONFIG_VXLAN=m\n' >> "${DEF}"
-          cp -f "${DEF}" "${ROOT_PATH}/ainas-modules/src/${KVER}/defines"
+          cp -f "${ROOT_PATH}/ainas-modules/src/${KVER}/defines.${PLATFORM}" "${ROOT_PATH}/ainas-modules/src/${KVER}/defines"
           makemodules "${ROOT_PATH}" "${VERSION}" "${PLATFORM}" "${ROOT_PATH}/ainas-modules/src/${KVER}" "${ROOT_PATH}/output"
 
       - name: Tar to Artifacts
