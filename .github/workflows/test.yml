@@ -19,8 +19,6 @@ jobs:
         include:
           - version: "7.4"
             platform: apollolake
-          - version: "7.4"
-            platform: epyc7002
 
     runs-on: ubuntu-latest
     steps:
