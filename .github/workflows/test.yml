@@ -17,10 +17,10 @@ jobs:
     strategy:
       matrix:
         include:
-          - version: "7.4"
+          - version: "7.0"
             platform: apollolake
           - version: "7.4"
-            platform: epyc7002
+            platform: apollolake
 
     runs-on: ubuntu-latest
     steps:
