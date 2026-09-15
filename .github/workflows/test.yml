@@ -17,11 +17,9 @@ jobs:
     strategy:
       matrix:
         include:
-          # #135 验证：apollolake-7.4 = 用户测试平台（4.x）；epyc7002-7.1 = 5.10 回归
-          - version: "7.4"
-            platform: apollolake
+          # 隔离验证：denverton-7.1（本次 main CI 唯一失败 job）— 查 QED=n 是否回归
           - version: "7.1"
-            platform: epyc7002
+            platform: denverton
 
     runs-on: ubuntu-latest
     steps:
