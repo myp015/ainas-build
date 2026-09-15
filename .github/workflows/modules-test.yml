@@ -16,10 +16,6 @@ jobs:
         include:
           - version: "7.4"
             platform: apollolake
-          - version: "7.4"
-            platform: r1000nk
-          - version: "7.4"
-            platform: geminilakenk
 
     runs-on: ubuntu-latest
     steps:
