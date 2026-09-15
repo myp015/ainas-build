@@ -18,6 +18,22 @@ jobs:
             platform: apollolake
           - version: "7.4"
             platform: geminilake
+          - version: "7.4"
+            platform: broadwell
+          - version: "7.4"
+            platform: broadwellnk
+          - version: "7.4"
+            platform: broadwellnkv2
+          - version: "7.4"
+            platform: broadwellntbap
+          - version: "7.4"
+            platform: denverton
+          - version: "7.4"
+            platform: purley
+          - version: "7.4"
+            platform: r1000
+          - version: "7.4"
+            platform: v1000
 
     runs-on: ubuntu-latest
     steps:
