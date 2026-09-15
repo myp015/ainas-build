@@ -102,6 +102,10 @@ jobs:
             makei915 "${ROOT_PATH}" "${VERSION}" "${PLATFORM}" "${ROOT_PATH}/dsm_linux" "${ROOT_PATH}/intel-gpu-i915-backports" "${ROOT_PATH}/modules/update"
           # fi
 
+          # 对齐 RR cks 布局：update/ 已含 RR 规范的 drm/i915/gpu 核心栈，
+          # 删除根目录同名副本（RR 仅把这些模块放 update/，根目录不留）。
+          relocateDupUpdate "${ROOT_PATH}/modules"
+
           mkdir -p "${ROOT_PATH}/output/modules"
           cp -rf "${ROOT_PATH}/modules/"* "${ROOT_PATH}/output/modules/"
 
