@@ -1,0 +1,117 @@
+#
+# Test build 5.x modules — 5.10.55 编译模块测试（聚焦验证）
+# 结构同 test.yml（纯编译核心：makeEnvDeploy + makemodules + tar），
+# 但矩阵固定为 5.x（KVER=5.10.55）平台×版本，便于验证 5.x 专属改动：
+#   - 5.10 KCFLAGS_EXTRA / defines 改动是否编译绿
+#   - 某 5.x 模块是否产出（如 ide 系列）
+# test.yml 归 task#146 4.4.180/302 双树验证在用；5.x 一律走本文件，避免互相覆盖。
+# 用法：workflow_dispatch 手动触发；矩阵按需增删 5.x 平台
+#
+
+name: Test build 5.x modules
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # ============ 5.10.55 树（7.1-7.4，SND composite 暂缓 → 仅 IDE 宏注入） ============
+          - version: "7.1"
+            platform: epyc7002
+          - version: "7.2"
+            platform: epyc7002
+          - version: "7.2"
+            platform: geminilakenk
+          - version: "7.2"
+            platform: r1000nk
+          - version: "7.2"
+            platform: v1000nk
+          - version: "7.3"
+            platform: epyc7002
+          - version: "7.3"
+            platform: geminilakenk
+          - version: "7.3"
+            platform: r1000nk
+          - version: "7.3"
+            platform: v1000nk
+          - version: "7.4"
+            platform: epyc7002
+          - version: "7.4"
+            platform: epyc7003
+          - version: "7.4"
+            platform: epyc7003ntb
+          - version: "7.4"
+            platform: geminilakenk
+          - version: "7.4"
+            platform: icelaked
+          - version: "7.4"
+            platform: r1000nk
+          - version: "7.4"
+            platform: v1000nk
+
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@main
+
+      - name: Checkout ainas-modules
+        uses: actions/checkout@main
+        with:
+          repository: myp015/ainas-modules
+          token: ${{ secrets.AiNas }}
+          path: ainas-modules
+
+      - name: Init Env
+        run: |
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git config --global user.name "github-actions[bot]"
+          sudo timedatectl set-timezone "Asia/Shanghai"
+
+      - name: Make modules
+        run: |
+          ROOT_PATH=${{ github.workspace }}
+          VERSION=${{ matrix.version }}
+          PLATFORM=${{ matrix.platform }}
+
+          . ${ROOT_PATH}/ainas-modules/compile.sh
+
+          echo "makeEnvDeploy"
+          for i in $(seq 1 3); do makeEnvDeploy "${ROOT_PATH}" "${VERSION}" "${PLATFORM}" && break || { echo "Retry makeEnvDeploy ${i}/3"; sleep 5; }; done
+
+          echo "makemodules"
+          KVER="$(getKver "${ROOT_PATH}" "${VERSION}" "${PLATFORM}")"
+          cp -f "${ROOT_PATH}/ainas-modules/src/${KVER}/defines.${PLATFORM}" "${ROOT_PATH}/ainas-modules/src/${KVER}/defines"
+          makemodules "${ROOT_PATH}" "${VERSION}" "${PLATFORM}" "${ROOT_PATH}/ainas-modules/src/${KVER}" "${ROOT_PATH}/output"
+
+      - name: Tar to Artifacts
+        run: |
+          ROOT_PATH=${{ github.workspace }}
+          VERSION=${{ matrix.version }}
+          PLATFORM=${{ matrix.platform }}
+
+          . ${ROOT_PATH}/ainas-modules/compile.sh
+          KVER="$(getKver "${ROOT_PATH}" "${VERSION}" "${PLATFORM}")"
+
+          # 生成 modules.dep（验证 #135 逻辑，与 modules.yml 合并流一致）：
+          # 格式对齐官方 'xxx.ko: dep1.ko dep2.ko'，依赖名补 .ko 后缀
+          rm -f "${ROOT_PATH}/output/modules.dep"
+          for M in $(ls "${ROOT_PATH}/output"/*.ko 2>/dev/null); do
+            DEPS=""
+            for d in $(modinfo -F depends "${M}" 2>/dev/null | sed 's/,/ /g'); do
+              DEPS="${DEPS} ${d}.ko"
+            done
+            printf '%s:%s\n' "$(basename "${M}")" "${DEPS}" >> "${ROOT_PATH}/output/modules.dep"
+          done
+
+          tar -zcf ${ROOT_PATH}/${PLATFORM}-${VERSION}-${KVER}.tgz -C ${ROOT_PATH}/output .
+
+      - name: Upload to Artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: modules5-${{ matrix.version }}-${{ matrix.platform }}
+          path: |
+            *.tgz
