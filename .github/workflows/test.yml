@@ -15,6 +15,7 @@ on:
 jobs:
   build:
     strategy:
+      fail-fast: false
       matrix:
         include:
           # 隔离验证：task146 4.4.180/4.4.302 双独立源码树编译（apollolake）
