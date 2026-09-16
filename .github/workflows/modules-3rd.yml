@@ -138,22 +138,10 @@ jobs:
     strategy:
       matrix:
         include:
+          # 阶段1 迭代先只跑代表型号 broadwell-7.4（8 平台同属 4.4.302 KSRC，
+          # backport 冲突一致），stage-4 全量前恢复完整 8 平台矩阵。
           - version: 7.4
             platform: broadwell
-          - version: 7.4
-            platform: broadwellnk
-          - version: 7.4
-            platform: broadwellnkv2
-          - version: 7.4
-            platform: broadwellntbap
-          - version: 7.4
-            platform: denverton
-          - version: 7.4
-            platform: purley
-          - version: 7.4
-            platform: r1000
-          - version: 7.4
-            platform: v1000
 
     runs-on: ubuntu-latest
     steps:
