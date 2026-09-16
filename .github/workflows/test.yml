@@ -18,18 +18,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # ===== apollolake 全版本符号对齐（task#139 批量推广验证）=====
-          # 7.0/7.1 → 4.4.180 树；7.2/7.3/7.4 → 4.4.302 树
-          - version: "7.0"
-            platform: apollolake
-          - version: "7.1"
-            platform: apollolake
-          - version: "7.2"
-            platform: apollolake
-          - version: "7.3"
-            platform: apollolake
+          # ===== purley-7.4 代表平台验证（task#139 类B OFED/类A 推广）=====
           - version: "7.4"
-            platform: apollolake
+            platform: purley
 
     runs-on: ubuntu-latest
     steps:
