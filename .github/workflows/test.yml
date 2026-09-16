@@ -17,9 +17,11 @@ jobs:
     strategy:
       matrix:
         include:
-          # 隔离验证：denverton-7.1（本次 main CI 唯一失败 job）— 查 QED=n 是否回归
+          # 隔离验证：task146 4.4.180 树 block/scsi core 注释修复（apollolake-7.0/7.1）
+          - version: "7.0"
+            platform: apollolake
           - version: "7.1"
-            platform: denverton
+            platform: apollolake
 
     runs-on: ubuntu-latest
     steps:
