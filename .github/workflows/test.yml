@@ -17,10 +17,14 @@ jobs:
     strategy:
       matrix:
         include:
-          # 隔离验证：task146 4.4.180 树 block/scsi core 注释修复（apollolake-7.0/7.1）
+          # 隔离验证：task146 4.4.180/4.4.302 双独立源码树编译（apollolake）
+          #   - 7.0/7.1：4.4.180 树（无线/SND/netfilter 关闭、kvm/mmc 回退）
+          #   - 7.2：4.4.302 树（无线/IOSF_MBI 宏、kvm/mmc backport 保留）
           - version: "7.0"
             platform: apollolake
           - version: "7.1"
+            platform: apollolake
+          - version: "7.2"
             platform: apollolake
 
     runs-on: ubuntu-latest
