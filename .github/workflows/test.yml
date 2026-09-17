@@ -18,104 +18,15 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # ============ 4.4.180 树（7.0/7.1：无线/SND/netfilter 关闭、kvm/mmc 回退） ============
-          # apollolake / broadwell / broadwellnk / denverton / geminilake / purley / v1000：双版本
+          # ===== 临时试点（task#145 mlx 栈补齐验证）：仅 3 平台 =====
+          # broadwell-7.0(4.4.180 树) / broadwell-7.4(4.4.302 树) / purley-7.4(302 另一平台)
+          # 验证 mlx4_core/en/dcb、mlx5_core/en、mlx4/5_ib、mlx_compat =m 能自编产出
           - version: "7.0"
-            platform: apollolake
-          - version: "7.1"
-            platform: apollolake
-          - version: "7.0"
-            platform: broadwell
-          - version: "7.1"
-            platform: broadwell
-          - version: "7.0"
-            platform: broadwellnk
-          - version: "7.1"
-            platform: broadwellnk
-          - version: "7.0"
-            platform: denverton
-          - version: "7.1"
-            platform: denverton
-          - version: "7.0"
-            platform: geminilake
-          - version: "7.1"
-            platform: geminilake
-          - version: "7.0"
-            platform: purley
-          - version: "7.1"
-            platform: purley
-          - version: "7.0"
-            platform: v1000
-          - version: "7.1"
-            platform: v1000
-          # broadwellnkv2 / broadwellntbap / r1000：仅 7.1
-          - version: "7.1"
-            platform: broadwellnkv2
-          - version: "7.1"
-            platform: broadwellntbap
-          - version: "7.1"
-            platform: r1000
-          # ============ 4.4.302 树（7.2/7.3/7.4：无线/IOSF_MBI 宏、kvm/mmc backport 保留） ============
-          - version: "7.2"
-            platform: apollolake
-          - version: "7.3"
-            platform: apollolake
-          - version: "7.4"
-            platform: apollolake
-          - version: "7.2"
-            platform: broadwell
-          - version: "7.3"
             platform: broadwell
           - version: "7.4"
             platform: broadwell
-          - version: "7.2"
-            platform: broadwellnk
-          - version: "7.3"
-            platform: broadwellnk
-          - version: "7.4"
-            platform: broadwellnk
-          - version: "7.2"
-            platform: broadwellnkv2
-          - version: "7.3"
-            platform: broadwellnkv2
-          - version: "7.4"
-            platform: broadwellnkv2
-          - version: "7.2"
-            platform: broadwellntbap
-          - version: "7.3"
-            platform: broadwellntbap
-          - version: "7.4"
-            platform: broadwellntbap
-          - version: "7.2"
-            platform: denverton
-          - version: "7.3"
-            platform: denverton
-          - version: "7.4"
-            platform: denverton
-          - version: "7.2"
-            platform: geminilake
-          - version: "7.3"
-            platform: geminilake
-          - version: "7.4"
-            platform: geminilake
-          - version: "7.2"
-            platform: purley
-          - version: "7.3"
-            platform: purley
           - version: "7.4"
             platform: purley
-          - version: "7.2"
-            platform: r1000
-          - version: "7.3"
-            platform: r1000
-          - version: "7.4"
-            platform: r1000
-          - version: "7.2"
-            platform: v1000
-          - version: "7.3"
-            platform: v1000
-          - version: "7.4"
-            platform: v1000
 
     runs-on: ubuntu-latest
     steps:
