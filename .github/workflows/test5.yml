@@ -19,10 +19,39 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # ============ 临时试点（Task#148 B类：iwlwifi dev_ucode trace 补齐单平台验证） ============
-          # 验证后需还原为全量矩阵（见 tmp/test5.full.bak）
+          # ============ 5.10.55 树（7.1-7.4，5.10 SND composite 自编已闭环（Task#147，icelaked 验证 snd 75/75）） ============
+          - version: "7.1"
+            platform: epyc7002
+          - version: "7.2"
+            platform: epyc7002
+          - version: "7.2"
+            platform: geminilakenk
+          - version: "7.2"
+            platform: r1000nk
+          - version: "7.2"
+            platform: v1000nk
+          - version: "7.3"
+            platform: epyc7002
+          - version: "7.3"
+            platform: geminilakenk
+          - version: "7.3"
+            platform: r1000nk
+          - version: "7.3"
+            platform: v1000nk
+          - version: "7.4"
+            platform: epyc7002
+          - version: "7.4"
+            platform: epyc7003
+          - version: "7.4"
+            platform: epyc7003ntb
+          - version: "7.4"
+            platform: geminilakenk
           - version: "7.4"
             platform: icelaked
+          - version: "7.4"
+            platform: r1000nk
+          - version: "7.4"
+            platform: v1000nk
 
     runs-on: ubuntu-latest
     steps:
