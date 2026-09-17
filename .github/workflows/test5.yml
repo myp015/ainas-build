@@ -96,17 +96,6 @@ jobs:
           . ${ROOT_PATH}/ainas-modules/compile.sh
           KVER="$(getKver "${ROOT_PATH}" "${VERSION}" "${PLATFORM}")"
 
-          # 生成 modules.dep（验证 #135 逻辑，与 modules.yml 合并流一致）：
-          # 格式对齐官方 'xxx.ko: dep1.ko dep2.ko'，依赖名补 .ko 后缀
-          rm -f "${ROOT_PATH}/output/modules.dep"
-          for M in $(ls "${ROOT_PATH}/output"/*.ko 2>/dev/null); do
-            DEPS=""
-            for d in $(modinfo -F depends "${M}" 2>/dev/null | sed 's/,/ /g'); do
-              DEPS="${DEPS} ${d}.ko"
-            done
-            printf '%s:%s\n' "$(basename "${M}")" "${DEPS}" >> "${ROOT_PATH}/output/modules.dep"
-          done
-
           tar -zcf ${ROOT_PATH}/${PLATFORM}-${VERSION}-${KVER}.tgz -C ${ROOT_PATH}/output .
 
       - name: Upload to Artifacts

@@ -343,24 +343,6 @@ jobs:
             _copydepends "${M}"
           done
 
-          # 生成 modules.dep（busybox modprobe 依赖解析）：缺此文件时 modprobe
-          # 不前置加载依赖模块 → cpufreq_ondemand gov_queue_work / i40e
-          # intel_auxiliary / i40e vxlan_get_rx_port 等 Unknown symbol（RR 同款
-          # 报错）。官方 hda1 modules.dep 仅覆盖官方裁剪集（不含我们/RR 补充
-          # 模块），须对合集全集重新生成。格式对齐官方：'xxx.ko: dep1.ko dep2.ko'
-          # （depends 用空格分隔，无依赖也列出 '<name>.ko:'）。
-          for D in ${ROOT_PATH}/output ${ROOT_PATH}/output_all; do
-            [ -d "${D}" ] || continue
-            rm -f "${D}/modules.dep"
-            for M in $(ls "${D}"/*.ko 2>/dev/null); do
-              DEPS=""
-              for d in $(modinfo -F depends "${M}" 2>/dev/null | sed 's/,/ /g'); do
-                DEPS="${DEPS} ${d}.ko"   # modinfo 依赖名无 .ko，官方格式带 .ko
-              done
-              printf '%s:%s\n' "$(basename "${M}")" "${DEPS}" >> "${D}/modules.dep"
-            done
-          done
-
           # 合集 tgz（给 release/）：文件名不带 -all，放 all/ 子目录区分纯编译
           mkdir -p ${ROOT_PATH}/all
           tar -zcf ${ROOT_PATH}/all/${PLATFORM}-${VERSION}-${KVER}.tgz -C ${ROOT_PATH}/output_all .

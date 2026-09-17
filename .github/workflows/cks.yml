@@ -159,18 +159,6 @@ jobs:
             _copydepends "${M}"
           done
 
-          # 生成 modules.dep（busybox modprobe 依赖解析）：缺此文件时 modprobe
-          # 不前置加载依赖模块 → cpufreq_ondemand/i40e 等 Unknown symbol（RR 同款
-          # 报错）。格式对齐官方：'xxx.ko: dep1.ko dep2.ko'。
-          rm -f "${ROOT_PATH}/output/modules/modules.dep"
-          for M in $(ls "${ROOT_PATH}/output/modules"/*.ko 2>/dev/null); do
-            DEPS=""
-            for d in $(modinfo -F depends "${M}" 2>/dev/null | sed 's/,/ /g'); do
-              DEPS="${DEPS} ${d}.ko"   # modinfo 依赖名无 .ko，官方格式带 .ko
-            done
-            printf '%s:%s\n' "$(basename "${M}")" "${DEPS}" >> "${ROOT_PATH}/output/modules/modules.dep"
-          done
-
           tar -zcf ${ROOT_PATH}/modules-${PLATFORM}-${VERSION}-${KVER}.tgz -C ${ROOT_PATH}/output/modules .
           gzip -c ${ROOT_PATH}/output/bzImage >${ROOT_PATH}/bzImage-${PLATFORM}-${VERSION}-${KVER}.gz
 
