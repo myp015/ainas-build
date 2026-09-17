@@ -343,6 +343,18 @@ jobs:
             _copydepends "${M}"
           done
 
+          # A 类（Task#148）：geminilakenk 的 dmabuf 布局对齐 RR——RR root 无 dmabuf
+          # （update/ backport 独占）。root 主线 dmabuf.ko 是冗余 over-provision：
+          #   - root 栈（i915/drm/ttm）引裸 dma_buf_*/dma_fence_* 由内核 built-in 提供
+          #     （modpost 未给它们加 dmabuf 模块依赖）→ 无需 root dmabuf.ko；
+          #   - update backport 栈需要 dmabufbkpt_* → 由 update/dmabuf.ko（backport）提供，
+          #     双份存在时 generic "dmabuf" 依赖可能解析到 root 主线版（0 bkpt）致断链。
+          # 删 root 主线版：消除 ~47 裸 dma extra（对齐 RR∪amd），并消除 update 栈解析歧义。
+          if [[ "${PLATFORM}" == "geminilakenk" ]] && [ -f "${ROOT_PATH}/output_all/dmabuf.ko" ] && [ -f "${ROOT_PATH}/output_all/update/dmabuf.ko" ]; then
+            rm -f "${ROOT_PATH}/output_all/dmabuf.ko"
+            echo "[A-class] geminilakenk: 移除 root 主线 dmabuf（保留 update/ backport 版，对齐 RR）"
+          fi
+
           # 合集 tgz（给 release/）：文件名不带 -all，放 all/ 子目录区分纯编译
           mkdir -p ${ROOT_PATH}/all
           tar -zcf ${ROOT_PATH}/all/${PLATFORM}-${VERSION}-${KVER}.tgz -C ${ROOT_PATH}/output_all .
