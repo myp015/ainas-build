@@ -24,8 +24,9 @@ jobs:
     strategy:
       matrix:
         include:
-          - version: 7.4
-            platform: geminilakenk
+          # DBG(Task#157 ATALK 按版本注入，临时)：7.4 已验 0x2e0，本批验 7.2 epyc7002 注入后 0x2e8 + appletalk，跑完恢复
+          - version: 7.2
+            platform: epyc7002
 
     runs-on: ubuntu-latest
     steps:

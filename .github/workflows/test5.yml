@@ -20,8 +20,10 @@ jobs:
       matrix:
         include:
           # ============ 5.10.55 树（7.1-7.4，5.10 SND composite 自编已闭环（Task#147，icelaked 验证 snd 75/75）） ============
-          # DBG(Task#157 ATALK 移除，临时)：matrix 缩至 geminilakenk-7.4 验证 virtio_net.ko dev_addr=0x2e0，跑完恢复
-          - version: "7.4"
+          # DBG(Task#157 ATALK 按版本注入，临时)：7.4 已验 0x2e0，本批验 7.1/7.2 注入后 0x2e8，跑完恢复
+          - version: "7.1"
+            platform: epyc7002
+          - version: "7.2"
             platform: geminilakenk
 
     runs-on: ubuntu-latest
