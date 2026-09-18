@@ -81,6 +81,12 @@ jobs:
             "${DOCKER_IMAGE}" \
             -c "
               set -e
+              # modules_prepare 触发 tools/bpf/resolve_btfids（CONFIG_DEBUG_INFO_BTF=y）
+              # 生成 bpf_helper_defs.h 需 python3（缺则 Error 127）；幂等安装
+              if ! command -v python3 >/dev/null 2>&1; then
+                apt-get update >/dev/null
+                apt-get install -y --no-install-recommends python3 >/dev/null
+              fi
               export ARCH=x86_64
               export CROSS_COMPILE=/opt/${PLATFORM}/bin/x86_64-pc-linux-gnu-
               export PATH=/opt/${PLATFORM}/bin:\$PATH
