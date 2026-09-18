@@ -21,10 +21,10 @@ on:
 jobs:
   build:
     strategy:
+      # 同 cks.yml：参考面 = RR cks 5 平台，无 7.1（dsm_linux 无 7.1 分支）
+      fail-fast: false
       matrix:
         include:
-          - version: 7.1
-            platform: epyc7002
           - version: 7.2
             platform: epyc7002
           - version: 7.3

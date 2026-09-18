@@ -22,10 +22,11 @@ on:
 jobs:
   build:
     strategy:
+      # cks 参考面 = RR cks 5 平台（epyc7002-7.2/7.3/7.4 + geminilakenk-7.3/7.4），无 7.1。
+      # dsm_linux 无 *-7.1-5.10.55 分支 → clone 必失败（run 35370803828），7.1 永不编译。
+      fail-fast: false
       matrix:
         include:
-          - version: 7.1
-            platform: epyc7002
           - version: 7.2
             platform: epyc7002
           - version: 7.3
