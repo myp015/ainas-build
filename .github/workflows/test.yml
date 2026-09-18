@@ -18,14 +18,22 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # ============ 临时试点：180 树 3 缺口模块（gpio-beeper/i2c-asm2824/libfc） ============
-          # geminilake/purley/v1000 × 7.1，验证 80967820 defines 打开后三模块产出
+          # ============ KCFLAGS 宏精简验证（Task#156）：覆盖三种主流程树 ============
+          # 7.1 老平台 × 3 → 4.4.180 树（新建 src/4.4.180/kconfig-flags）
           - version: "7.1"
             platform: geminilake
           - version: "7.1"
             platform: purley
           - version: "7.1"
             platform: v1000
+          # 7.4 apollolake → 4.4.302 树（kconfig-flags 前段公共宏 + 删 apollolake
+          #   分支重复 REGDB 后，无线驱动仍需正常编译）
+          - version: "7.4"
+            platform: apollolake
+          # 7.4 icelaked → 5.10.55 树（新建 src/5.10.55/kconfig-flags，含 iwlwifi/
+          #   snd LED/FB_MODE_HELPERS 公共宏读取验证）
+          - version: "7.4"
+            platform: icelaked
 
     runs-on: ubuntu-latest
     steps:
