@@ -1,0 +1,159 @@
+#
+# cks-test.yml - 临时测试工作流（复制自 cks.yml，精简加速）
+# 目的：virtio_net.ko 0x2e8 宏来源定位（CKS_DEBUG_MPLS 抓 .virtio_net.o.cmd）
+# 删减项（相对 cks.yml）：
+#   - intel-gpu-i915-backports clone / makei915 / relocateDupUpdate（与 virtio_net 无关）
+#   - firmware / release job（不发布）
+#   - syno-modules checkout（OFFICIAL_PATH 空，不用）
+#   - makekernel 轻量化：只 olddefconfig + modules_prepare（makemodules 外模块编译只需
+#     autoconf.h + include/generated + modpost 工具；跳过 vmlinux/modules/bzImage 完整编译）
+#
+
+name: Build cks test
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "format %y.%-m.$i or auto"
+        required: false
+        type: string
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - version: 7.4
+            platform: geminilakenk
+
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@main
+
+      - name: Checkout
+        uses: actions/checkout@main
+        with:
+          repository: myp015/ainas-modules
+          token: ${{ secrets.AiNas }}
+          path: ainas-modules
+
+      - name: Checkout
+        uses: actions/checkout@main
+        with:
+          repository: myp015/ainas-cks
+          token: ${{ secrets.AiNas }}
+          path: ainas-cks
+
+      - name: Init Env
+        run: |
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git config --global user.name "github-actions[bot]"
+          sudo timedatectl set-timezone "Asia/Shanghai"
+
+          sudo apt update
+          sudo apt install -y curl build-essential bison flex dwarves ruby libncurses-dev libssl-dev libelf-dev
+
+      - name: Make modules (light)
+        run: |
+          ROOT_PATH=${{ github.workspace }}
+          VERSION=${{ matrix.version }}
+          PLATFORM=${{ matrix.platform }}
+
+          git clone -b ${PLATFORM}-${VERSION}-5.10.55 --depth=1 https://github.com/myp015/dsm_linux.git
+
+          . ${ROOT_PATH}/ainas-modules/compile-ck.sh
+
+          echo "makeEnvDeploy"
+          makeEnvDeploy "${ROOT_PATH}" "${VERSION}" "${PLATFORM}"
+
+          echo "makekernel-light (prepare only)"
+          # cks-test 轻量化：makemodules 外模块编译只需 autoconf.h + include/generated
+          # + modpost 工具，modules_prepare 即够。跳过 vmlinux/modules/bzImage 完整编译
+          #（virtio_net.ko 的 dev_addr 偏移是编译期 netdevice.h 布局问题，与 vmlinux
+          #   是否编译无关；autoconf.h 同为 synoconfig + olddefconfig 生成）。
+          DOCKER_IMAGE="$(awk -v p="${PLATFORM}" -v v="${VERSION}" '$1==p && $3==v && $1 !~ /^#/ {print $4}' "${ROOT_PATH}/ainas-modules/src/PLATFORMS")"
+          docker run --rm -t --user root \
+            -v "${ROOT_PATH}/dsm_linux":/input \
+            -w /input \
+            --entrypoint /bin/bash \
+            "${DOCKER_IMAGE}" \
+            -c "
+              set -e
+              export ARCH=x86_64
+              export CROSS_COMPILE=/opt/${PLATFORM}/bin/x86_64-pc-linux-gnu-
+              export PATH=/opt/${PLATFORM}/bin:\$PATH
+              export LOCALVERSION=\"+\"
+              cp -f /input/synology/synoconfigs/${PLATFORM} /input/.config
+              cd /input
+              make olddefconfig >/dev/null
+              make modules_prepare -j\$(nproc)
+            " 2>&1
+
+          echo "makemodules"
+          export CKS_DEBUG_MPLS=1   # 抓 .virtio_net.o.cmd 真实 gcc 命令行（MPLS_ROUTING 宏来源）
+          KVER="$(getKver "${ROOT_PATH}" "${VERSION}" "${PLATFORM}" "${ROOT_PATH}/dsm_linux")"
+          cp -f "${ROOT_PATH}/ainas-modules/src/${KVER}-ck/defines.${PLATFORM}" "${ROOT_PATH}/ainas-modules/src/${KVER}-ck/defines"
+          makemodules "${ROOT_PATH}" "${VERSION}" "${PLATFORM}" "${ROOT_PATH}/dsm_linux" "${ROOT_PATH}/ainas-modules/src/${KVER}-ck" "${ROOT_PATH}/modules"
+
+          mkdir -p "${ROOT_PATH}/output/modules"
+          cp -rf "${ROOT_PATH}/modules/"* "${ROOT_PATH}/output/modules/"
+
+      - name: Tar to Artifacts
+        run: |
+          ROOT_PATH=${{ github.workspace }}
+          VERSION=${{ matrix.version }}
+          PLATFORM=${{ matrix.platform }}
+
+          . ${ROOT_PATH}/ainas-modules/compile-ck.sh
+          KVER="$(getKver "${ROOT_PATH}" "${VERSION}" "${PLATFORM}" "${ROOT_PATH}/dsm_linux")"
+
+          OFFICIAL_PATH=""
+          PARTY3RD_PATH="${ROOT_PATH}/ainas-cks/thirdparty/${PLATFORM}-${VERSION}-${KVER}"
+
+          echo "copy 3rd modules"
+          [ -d "${PARTY3RD_PATH}" ] && cp -rf ${PARTY3RD_PATH}/* ${ROOT_PATH}/output/modules/
+
+          echo "check depends"
+          for M in $(ls ${ROOT_PATH}/output/modules 2>/dev/null); do
+            [ -d "${ROOT_PATH}/output/modules/${M}" ] && continue # 跳过子目录（update/）
+            function _copydepends() {
+              if [ ! -f "${ROOT_PATH}/output/modules/${1}" ] && [ ! -f "${ROOT_PATH}/output/modules/update/${1}" ] && [ ! -f "${OFFICIAL_PATH/hda1/rd}/${1}" ]; then
+                if [ -f "${OFFICIAL_PATH}/${1}" ]; then
+                  echo "[W] '${PLATFORM}-${KVER}' - '${M}' depends '${1}' copied from official hda1"
+                  cp -f "${OFFICIAL_PATH}/${1}" "${ROOT_PATH}/output/modules"
+                else
+                  echo "[E] '${PLATFORM}-${KVER}' - '${M}' depends '${1}' does not exist."
+                fi
+              fi
+              D=""
+              [ -z "${D}" ] && [ -f "${ROOT_PATH}/output/modules/${1}" ] && D="${ROOT_PATH}/output/modules/${1}"
+              [ -z "${D}" ] && [ -f "${ROOT_PATH}/output/modules/update/${1}" ] && D="${ROOT_PATH}/output/modules/update/${1}"
+              [ -z "${D}" ] && [ -f "${OFFICIAL_PATH/hda1/rd}/${1}" ] && D="${OFFICIAL_PATH/hda1/rd}/${1}"
+              if [ -n "${D}" ]; then
+                depends=($(modinfo -F depends "${D}" 2>/dev/null | sed 's/,/ /g')) || true
+                if [ ${#depends[*]} -gt 0 ]; then
+                  for k in ${depends[@]}; do
+                    { [ -f "${ROOT_PATH}/output/modules/${k}.ko" ] || [ -f "${ROOT_PATH}/output/modules/update/${k}.ko" ]; } && continue # Recursively skip
+                    _copydepends "${k}.ko"
+                  done
+                fi
+              fi
+            }
+            _copydepends "${M}"
+          done
+
+          tar -zcf ${ROOT_PATH}/modules-${PLATFORM}-${VERSION}-${KVER}.tgz -C ${ROOT_PATH}/output/modules .
+          # 轻量 makekernel 不产 bzImage，gzip 失败可忽略
+          if [ -f "${ROOT_PATH}/output/bzImage" ]; then
+            gzip -c ${ROOT_PATH}/output/bzImage >${ROOT_PATH}/bzImage-${PLATFORM}-${VERSION}-${KVER}.gz
+          fi
+
+      - name: Upload to Artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: ainas-cks-test-${{ matrix.version }}-${{ matrix.platform }}
+          path: |
+            *.tgz
+            *.gz
