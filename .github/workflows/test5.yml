@@ -20,11 +20,38 @@ jobs:
       matrix:
         include:
           # ============ 5.10.55 树（7.1-7.4，5.10 SND composite 自编已闭环（Task#147，icelaked 验证 snd 75/75）） ============
-          # DBG(Task#157 ATALK 按版本注入，临时)：7.4 已验 0x2e0，本批验 7.1/7.2 注入后 0x2e8，跑完恢复
           - version: "7.1"
             platform: epyc7002
           - version: "7.2"
+            platform: epyc7002
+          - version: "7.2"
             platform: geminilakenk
+          - version: "7.2"
+            platform: r1000nk
+          - version: "7.2"
+            platform: v1000nk
+          - version: "7.3"
+            platform: epyc7002
+          - version: "7.3"
+            platform: geminilakenk
+          - version: "7.3"
+            platform: r1000nk
+          - version: "7.3"
+            platform: v1000nk
+          - version: "7.4"
+            platform: epyc7002
+          - version: "7.4"
+            platform: epyc7003
+          - version: "7.4"
+            platform: epyc7003ntb
+          - version: "7.4"
+            platform: geminilakenk
+          - version: "7.4"
+            platform: icelaked
+          - version: "7.4"
+            platform: r1000nk
+          - version: "7.4"
+            platform: v1000nk
 
     runs-on: ubuntu-latest
     steps:

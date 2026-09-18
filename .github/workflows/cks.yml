@@ -24,17 +24,16 @@ jobs:
     strategy:
       matrix:
         include:
-          # DBG(virtio_net MPLS_ROUTING 根因定位，临时)：matrix 缩至 geminilakenk-7.4，跑完恢复
-          #- version: 7.1
-          #  platform: epyc7002
-          #- version: 7.2
-          #  platform: epyc7002
-          #- version: 7.3
-          #  platform: epyc7002
-          #- version: 7.3
-          #  platform: geminilakenk
-          #- version: 7.4
-          #  platform: epyc7002
+          - version: 7.1
+            platform: epyc7002
+          - version: 7.2
+            platform: epyc7002
+          - version: 7.3
+            platform: epyc7002
+          - version: 7.3
+            platform: geminilakenk
+          - version: 7.4
+            platform: epyc7002
           - version: 7.4
             platform: geminilakenk
 
@@ -91,7 +90,6 @@ jobs:
           makekernel "${ROOT_PATH}" "${VERSION}" "${PLATFORM}" "${ROOT_PATH}/dsm_linux" "${ROOT_PATH}/output"
 
           echo "makemodules"
-          export CKS_DEBUG_MPLS=1   # DBG(virtio_net MPLS_ROUTING 根因定位，临时)：makemodules 容器内 dump MPLS 宏来源，跑完恢复
           KVER="$(getKver "${ROOT_PATH}" "${VERSION}" "${PLATFORM}" "${ROOT_PATH}/dsm_linux")"
           cp -f "${ROOT_PATH}/ainas-modules/src/${KVER}-ck/defines.${PLATFORM}" "${ROOT_PATH}/ainas-modules/src/${KVER}-ck/defines"
           makemodules "${ROOT_PATH}" "${VERSION}" "${PLATFORM}" "${ROOT_PATH}/dsm_linux" "${ROOT_PATH}/ainas-modules/src/${KVER}-ck" "${ROOT_PATH}/modules"

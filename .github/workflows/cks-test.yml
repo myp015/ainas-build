@@ -1,6 +1,5 @@
 #
 # cks-test.yml - 临时测试工作流（复制自 cks.yml，精简加速）
-# 目的：virtio_net.ko 0x2e8 宏来源定位（CKS_DEBUG_MPLS 抓 .virtio_net.o.cmd）
 # 删减项（相对 cks.yml）：
 #   - intel-gpu-i915-backports clone / makei915 / relocateDupUpdate（与 virtio_net 无关）
 #   - firmware / release job（不发布）
@@ -24,9 +23,18 @@ jobs:
     strategy:
       matrix:
         include:
-          # DBG(Task#157 ATALK 按版本注入，临时)：7.4 已验 0x2e0，本批验 7.2 epyc7002 注入后 0x2e8 + appletalk，跑完恢复
+          - version: 7.1
+            platform: epyc7002
           - version: 7.2
             platform: epyc7002
+          - version: 7.3
+            platform: epyc7002
+          - version: 7.3
+            platform: geminilakenk
+          - version: 7.4
+            platform: epyc7002
+          - version: 7.4
+            platform: geminilakenk
 
     runs-on: ubuntu-latest
     steps:
@@ -99,7 +107,6 @@ jobs:
             " 2>&1
 
           echo "makemodules"
-          export CKS_DEBUG_MPLS=1   # 抓 .virtio_net.o.cmd 真实 gcc 命令行（MPLS_ROUTING 宏来源）
           KVER="$(getKver "${ROOT_PATH}" "${VERSION}" "${PLATFORM}" "${ROOT_PATH}/dsm_linux")"
           cp -f "${ROOT_PATH}/ainas-modules/src/${KVER}-ck/defines.${PLATFORM}" "${ROOT_PATH}/ainas-modules/src/${KVER}-ck/defines"
           makemodules "${ROOT_PATH}" "${VERSION}" "${PLATFORM}" "${ROOT_PATH}/dsm_linux" "${ROOT_PATH}/ainas-modules/src/${KVER}-ck" "${ROOT_PATH}/modules"
