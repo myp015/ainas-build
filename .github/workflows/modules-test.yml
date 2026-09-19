@@ -14,25 +14,14 @@ jobs:
     strategy:
       matrix:
         include:
-          - version: "7.4"
-            platform: apollolake
-          - version: "7.4"
+          # 临时验证 Task#159/#160 版本级 defines 覆盖（4.4.180）
+          - version: "7.0"
             platform: geminilake
-          - version: "7.4"
-            platform: broadwell
-          - version: "7.4"
-            platform: broadwellnk
-          - version: "7.4"
-            platform: broadwellnkv2
-          - version: "7.4"
-            platform: broadwellntbap
-          - version: "7.4"
-            platform: denverton
-          - version: "7.4"
+          - version: "7.1"
+            platform: geminilake
+          - version: "7.0"
             platform: purley
-          - version: "7.4"
-            platform: r1000
-          - version: "7.4"
+          - version: "7.0"
             platform: v1000
 
     runs-on: ubuntu-latest
