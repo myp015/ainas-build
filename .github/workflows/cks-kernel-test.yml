@@ -1,0 +1,94 @@
+#
+# cks-kernel-test.yml — 内核编译专用测试（复制自 cks.yml，Task#161 blcheck 验证）
+#
+# 删除项（相对 cks.yml）：全部模块链路，只留"编译内核"：
+#   - makemodules / makei915 / relocateDupUpdate / depends 检查
+#   - firmware / release job
+#   - ainas-cks / syno-modules checkout（仅模块/打包阶段用到，不用）
+#
+# 用途：快速验证 blcheck 注入 + UTS_VERSION 对齐（blcheck 注入发生在 makekernel
+# 内，验证对象就是 bzImage 本身）：
+#   1) 日志出现 CC drivers/rrorg/blcheck.o → AR drivers/rrorg/built-in.a
+#   2) 产物 bzImage-*.gz → extract-vmlinux 后 strings 对比 blcheck 字符串区 /
+#      Linux version 5.10.55+ (RR@RROrg) ... 各平台时间戳
+
+name: Build cks kernel test
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "format %y.%-m.$i or auto"
+        required: false
+        type: string
+
+jobs:
+  build:
+    strategy:
+      # 同 cks.yml：参考面 = RR cks 5 平台，无 7.1（dsm_linux 无 7.1 分支）
+      fail-fast: false
+      matrix:
+        include:
+          - version: 7.2
+            platform: epyc7002
+          - version: 7.3
+            platform: epyc7002
+          - version: 7.3
+            platform: geminilakenk
+          - version: 7.4
+            platform: epyc7002
+          - version: 7.4
+            platform: geminilakenk
+
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@main
+
+      - name: Checkout
+        uses: actions/checkout@main
+        with:
+          repository: myp015/ainas-modules
+          token: ${{ secrets.AiNas }}
+          path: ainas-modules
+
+      - name: Init Env
+        run: |
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git config --global user.name "github-actions[bot]"
+          sudo timedatectl set-timezone "Asia/Shanghai"
+
+          sudo apt update
+          sudo apt install -y curl build-essential bison flex dwarves ruby libncurses-dev libssl-dev libelf-dev
+
+      - name: Make kernel
+        run: |
+          ROOT_PATH=${{ github.workspace }}
+          VERSION=${{ matrix.version }}
+          PLATFORM=${{ matrix.platform }}
+
+          git clone -b ${PLATFORM}-${VERSION}-5.10.55 --depth=1 https://github.com/myp015/dsm_linux.git
+
+          . ${ROOT_PATH}/ainas-modules/compile-ck.sh
+
+          echo "makeEnvDeploy"
+          makeEnvDeploy "${ROOT_PATH}" "${VERSION}" "${PLATFORM}"
+
+          echo "makekernel"
+          makekernel "${ROOT_PATH}" "${VERSION}" "${PLATFORM}" "${ROOT_PATH}/dsm_linux" "${ROOT_PATH}/output"
+
+      - name: Tar to Artifacts
+        run: |
+          ROOT_PATH=${{ github.workspace }}
+          VERSION=${{ matrix.version }}
+          PLATFORM=${{ matrix.platform }}
+          KVER="5.10.55"
+
+          gzip -c ${ROOT_PATH}/output/bzImage >${ROOT_PATH}/bzImage-${PLATFORM}-${VERSION}-${KVER}.gz
+
+      - name: Upload to Artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: ainas-cks-kernel-test-${{ matrix.version }}-${{ matrix.platform }}
+          path: |
+            *.gz
