@@ -18,10 +18,29 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # ============ 临时：Task#5 binder/ashmem 移植验证（仅 apollolake-7.4，4.4.302 树） ============
-          # 验证后恢复 Task#156 五平台矩阵
+          # ============ 临时：Task#5 阶段5 binder/ashmem 全 302 平台推广验证 ============
+          # 10 个 4.4.302 平台 7.4，验证 defines 补 CONFIG_ANDROID_BINDERFS=y 后
+          # binderfs 全平台编入。验证通过后恢复 Task#156 五平台矩阵
           - version: "7.4"
             platform: apollolake
+          - version: "7.4"
+            platform: broadwell
+          - version: "7.4"
+            platform: broadwellnk
+          - version: "7.4"
+            platform: broadwellnkv2
+          - version: "7.4"
+            platform: broadwellntbap
+          - version: "7.4"
+            platform: denverton
+          - version: "7.4"
+            platform: geminilake
+          - version: "7.4"
+            platform: purley
+          - version: "7.4"
+            platform: r1000
+          - version: "7.4"
+            platform: v1000
 
     runs-on: ubuntu-latest
     steps:
