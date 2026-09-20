@@ -243,6 +243,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@main
 
+      - name: Checkout ainas-cks
+        uses: actions/checkout@main
+        with:
+          repository: myp015/ainas-cks
+          token: ${{ secrets.AiNas }}
+          path: ainas-cks
+
       - name: Init Env
         run: |
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
@@ -298,6 +305,65 @@ jobs:
           path: |
             ainas-cks-*.zip
           retention-days: 5
+
+      - name: Extract release to ainas-cks/release and push
+        if: success() && env.VERSION != ''
+        run: |
+          set -euo pipefail
+          VERSION="${{ env.VERSION }}"
+
+          # 各平台模块 tgz / bzImage.gz / firmware.tgz 全部解压到
+          # ainas-cks/release/<plat>-<ver>-<kver>/（目录形式，不保留压缩包，
+          # 同 modules.yml 主流程 release 布局）。与 zip/Release 并存。
+          mkdir -p ainas-cks/release
+          # 先清空旧内容，避免版本混合残留（fail fast：find 失败直接中止）
+          find ainas-cks/release -mindepth 1 -delete
+
+          COUNT=0
+          for tgz in output/modules-*.tgz; do
+            [ -e "${tgz}" ] || continue
+            name="$(basename "${tgz}" .tgz | sed 's/^modules-//')"   # epyc7002-7.4-5.10.55
+            mkdir -p "ainas-cks/release/${name}"
+            tar -zxf "${tgz}" -C "ainas-cks/release/${name}"
+            COUNT=$((COUNT+1))
+          done
+
+          # bzImage.gz 解压为 bzImage，放各平台目录
+          for gz in output/bzImage-*.gz; do
+            [ -e "${gz}" ] || continue
+            name="$(basename "${gz}" .gz | sed 's/^bzImage-//')"
+            gzip -dc "${gz}" > "ainas-cks/release/${name}/bzImage"
+          done
+
+          # firmware.tgz 解压进 release/firmware/
+          if [ -f output/firmware.tgz ]; then
+            mkdir -p ainas-cks/release/firmware
+            tar -zxf output/firmware.tgz -C ainas-cks/release/firmware
+          fi
+
+          echo "${VERSION}" > ainas-cks/release/VERSION
+
+          echo "=== 解压 ${COUNT} 个平台，release/ 目录结构 ==="
+          ls ainas-cks/release/
+          echo "ko 总数: $(find ainas-cks/release -name '*.ko' | wc -l)"
+
+          # 断言：模块 tgz 未下载则 COUNT=0，直接失败而非提交空目录
+          if [ "${COUNT}" -eq 0 ]; then
+            echo "FATAL: 未解压任何平台（download all 异常），中止提交"
+            exit 1
+          fi
+
+          # 提交并推送 release/
+          cd ainas-cks
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git config user.name "github-actions[bot]"
+          git add release/
+          if git diff --cached --quiet; then
+            echo "release/ 无变化，跳过提交"
+          else
+            git commit -m "release: update ${VERSION}" || echo "commit 无变化跳过"
+            git push origin main
+          fi
 
       - name: Release
         if: success() && env.VERSION != ''
