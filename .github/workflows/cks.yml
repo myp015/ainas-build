@@ -22,7 +22,7 @@ on:
 jobs:
   build:
     strategy:
-      # cks 参考面 = RR cks 7 平台（epyc7002-7.2/7.3/7.4 + geminilakenk-7.3/7.4 + r1000nk-7.3/7.4），无 7.1。
+      # cks 参考面 = 9 平台（epyc7002-7.2/7.3/7.4 + geminilakenk-7.3/7.4 + r1000nk-7.3/7.4 + v1000nk-7.3/7.4），无 7.1。
       # dsm_linux 无 *-7.1-5.10.55 分支 → clone 必失败（run 35370803828），7.1 永不编译。
       fail-fast: false
       matrix:
@@ -35,12 +35,16 @@ jobs:
             platform: geminilakenk
           - version: 7.3
             platform: r1000nk
+          - version: 7.3
+            platform: v1000nk
           - version: 7.4
             platform: epyc7002
           - version: 7.4
             platform: geminilakenk
           - version: 7.4
             platform: r1000nk
+          - version: 7.4
+            platform: v1000nk
 
     runs-on: ubuntu-latest
     steps:
