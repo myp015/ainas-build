@@ -485,26 +485,42 @@ jobs:
             fi
           fi
 
+          # 防残留 tag 冲突：Calculate version 只查 releases[0]，历史失败 run 可能
+          # 留下 git tag 但无 release 对象（如 26.9.12）→ release-action 422
+          # already_exists。循环 +1 直到对应 git tag 不存在（最多 20 次防死循环）。
+          for i in $(seq 1 20); do
+            if curl -skLH "Authorization: token ${{ secrets.AiNas }}" \
+                 "https://api.github.com/repos/myp015/syno-modules/git/refs/tags/${VERSION}" 2>/dev/null \
+                 | grep -q '"ref"'; then
+              VERSION="$(echo ${VERSION} | awk -F '.' '{$3=$3+1}1' OFS='.')"
+            else
+              break
+            fi
+          done
+
           echo "VERSION: ${VERSION}"
           echo "VERSION=${VERSION}" >> $GITHUB_ENV
 
       - name: download to artifacts (compile)
-        uses: actions/download-artifact@v8
+        # v8 批量下载大 artifact 偶发 digest-mismatch（127 个 modules-* 全量下载）→
+        # 降 v4（无 digest 校验，成熟稳定）。pattern 单行：v4 也不支持多行负 pattern。
+        uses: actions/download-artifact@v4
         with:
-          # 单行 pattern：download-artifact v8 不支持多行负 pattern（! 排除无效会导致 0 下载）。
-          # artifact 已按模块-前缀区分：modules-* 只匹配纯编译，合集是 all-*，firmware 是 firmware
           path: output
           pattern: modules-*
           merge-multiple: true
 
       - name: download to artifacts (all)
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@v4
         with:
           path: output_all
           pattern: all-*
           merge-multiple: true
 
       - name: delete-artifact
+        # 仅 download 成功才删（if: success()）：download 失败时保留 artifacts，
+        # 否则编译产物被无条件删除后无法重跑 Extract/手动下载验证。
+        if: success()
         uses: geekyeggo/delete-artifact@v6
         with:
           name: |
