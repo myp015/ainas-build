@@ -18,29 +18,20 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # ============ 临时：Task#5 阶段5 binder/ashmem 全 302 平台推广验证 ============
-          # 10 个 4.4.302 平台 7.4，验证 defines 补 CONFIG_ANDROID_BINDERFS=y 后
-          # binderfs 全平台编入。验证通过后恢复 Task#156 五平台矩阵
+          # ============ 常规五平台矩阵（Task#156，已恢复）：覆盖三种主流程树 ============
+          # 7.1 老平台 × 3 → 4.4.180 树（binder 内建，无模块）
+          - version: "7.1"
+            platform: geminilake
+          - version: "7.1"
+            platform: purley
+          - version: "7.1"
+            platform: v1000
+          # 7.4 apollolake → 4.4.302 树（binder/ashmem 移植验证基准平台）
           - version: "7.4"
             platform: apollolake
+          # 7.4 icelaked → 5.10.55 树
           - version: "7.4"
-            platform: broadwell
-          - version: "7.4"
-            platform: broadwellnk
-          - version: "7.4"
-            platform: broadwellnkv2
-          - version: "7.4"
-            platform: broadwellntbap
-          - version: "7.4"
-            platform: denverton
-          - version: "7.4"
-            platform: geminilake
-          - version: "7.4"
-            platform: purley
-          - version: "7.4"
-            platform: r1000
-          - version: "7.4"
-            platform: v1000
+            platform: icelaked
 
     runs-on: ubuntu-latest
     steps:
