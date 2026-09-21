@@ -1,7 +1,7 @@
 #
 # cks-test.yml - 临时测试工作流（复制自 cks.yml 完整流程，缩减型号）
 # 相对 cks.yml 的改动：
-#   - 矩阵只留 geminilakenk 7.3/7.4（Task#170 验证目标平台）
+#   - 矩阵 = Task#170 的 geminilakenk 7.3/7.4 + Task#171 的 v1000nk/r1000nk 7.3/7.4
 #   - 去掉 firmware / release job（测试验证流不发布 release）
 #   - 去掉 syno-modules checkout（OFFICIAL_PATH 留空不用）
 #   - artifact 名前缀 ainas-cks-test-* 防与 cks.yml 产物混淆
@@ -22,9 +22,11 @@ on:
 jobs:
   build:
     strategy:
-      # Task#170 验证：仅 geminilakenk 7.3/7.4（dsm_linux 有 *-7.3/7.4-5.10.55 分支）。
-      # 完整参考面 = RR cks 9 平台（epyc7002-7.2/7.3/7.4 + geminilakenk-7.3/7.4
-      # + r1000nk/v1000nk-7.3/7.4），无 7.1（dsm_linux 无 7.1 分支）。
+      # Task#170 验证 geminilakenk 7.3/7.4（drm_vram_helper shim）；
+      # Task#171 验证 v1000nk/r1000nk 7.3/7.4（MY_DEF 注入收窄对齐 arc，
+      # 仅 v1000nk-7.4 导出 asmedia）。完整参考面 = RR cks 9 平台
+      # （epyc7002-7.2/7.3/7.4 + geminilakenk-7.3/7.4 + r1000nk/v1000nk-7.3/7.4），
+      # 无 7.1（dsm_linux 无 7.1 分支）。
       fail-fast: false
       matrix:
         include:
@@ -32,6 +34,14 @@ jobs:
             platform: geminilakenk
           - version: 7.4
             platform: geminilakenk
+          - version: 7.3
+            platform: v1000nk
+          - version: 7.4
+            platform: v1000nk
+          - version: 7.3
+            platform: r1000nk
+          - version: 7.4
+            platform: r1000nk
 
     runs-on: ubuntu-latest
     steps:
