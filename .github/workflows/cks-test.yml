@@ -112,16 +112,6 @@ jobs:
               cp -f /input/synology/synoconfigs/${PLATFORM} /input/.config
               cd /input
               make olddefconfig >/dev/null
-              # light 验证只编模块，不需要 objtool/resolve_btfids 两个 host 工具
-              # （CONFIG_STACK_VALIDATION / CONFIG_DEBUG_INFO_BTF 才会触发其编译）。
-              # r1000nk/v1000nk 分支 subcmd-util.h 的 xrealloc 重试逻辑会被 GCC13+
-              # 的 -Werror=use-after-free 误报拦截（tools/lib/subcmd），禁用后跳过。
-              # 注意：UNWINDER_ORC=y 会 select STACK_VALIDATION，olddefconfig 会拉回，
-              # 必须三者一起禁用（ORC 禁用后 olddefconfig 自动回退 FRAME_POINTER）。
-              scripts/config --disable DEBUG_INFO_BTF
-              scripts/config --disable STACK_VALIDATION
-              scripts/config --disable UNWINDER_ORC
-              make olddefconfig >/dev/null
               make modules_prepare -j\$(nproc)
             " 2>&1
 
