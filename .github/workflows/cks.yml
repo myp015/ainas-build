@@ -108,13 +108,9 @@ jobs:
             makei915 "${ROOT_PATH}" "${VERSION}" "${PLATFORM}" "${ROOT_PATH}/dsm_linux" "${ROOT_PATH}/intel-gpu-i915-backports" "${ROOT_PATH}/modules/update"
           # fi
 
-          # 对齐 RR cks 布局（按平台）：
-          #   RR 把 drm/drm_kms_helper/i2c-algo-bit/ttm 同时放根目录与 update/
-          #   （gemini 还根目录保留 i915、drm_panel_orientation_quirks）；
-          #   仅 dmabuf/drm_buddy/drm_display_helper/drm_mipi_dsi/intel-gtt 等
-          #   是 RR 的 update/-only 模块 → relocateDupUpdate 按平台删除这些根目录副本。
-          relocateDupUpdate "${ROOT_PATH}/modules" "${PLATFORM}"
-
+          # 对齐 RR 官方 cks.yml 流程（RR 无 relocateDupUpdate）：根目录布局由 defines
+          # 天然决定（update/-only 模块 =n，makemodules 不产根目录副本），makei915
+          # 无条件输出 update/ 栈，下方 cp -rf 保留根目录 + update/ 双套，与 RR 官方一致。
           mkdir -p "${ROOT_PATH}/output/modules"
           cp -rf "${ROOT_PATH}/modules/"* "${ROOT_PATH}/output/modules/"
 
