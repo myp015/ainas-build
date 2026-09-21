@@ -22,12 +22,21 @@ on:
 jobs:
   build:
     strategy:
-      # 临时缩减矩阵（Task#40 验证 r1000nk/v1000nk bzImage hyperv/ASM116X 修复）：
-      # 仅 r1000nk/v1000nk × 7.3/7.4 4 平台。验证后还原 9 平台全矩阵。
-      # 全矩阵 = epyc7002-7.2/7.3/7.4 + geminilakenk-7.3/7.4 + r1000nk-7.3/7.4 + v1000nk-7.3/7.4。
+      # 9 平台全矩阵（Task#40 验证完成后还原）：
+      # epyc7002-7.2/7.3/7.4 + geminilakenk-7.3/7.4 + r1000nk-7.3/7.4 + v1000nk-7.3/7.4
       fail-fast: false
       matrix:
         include:
+          - version: 7.2
+            platform: epyc7002
+          - version: 7.3
+            platform: epyc7002
+          - version: 7.4
+            platform: epyc7002
+          - version: 7.3
+            platform: geminilakenk
+          - version: 7.4
+            platform: geminilakenk
           - version: 7.3
             platform: r1000nk
           - version: 7.3
