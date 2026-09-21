@@ -10,7 +10,7 @@
 # 内，验证对象就是 bzImage 本身）：
 #   1) 日志出现 CC drivers/rrorg/blcheck.o → AR drivers/rrorg/built-in.a
 #   2) 产物 bzImage-*.gz → extract-vmlinux 后 strings 对比 blcheck 字符串区 /
-#      Linux version 5.10.55+ (RR@RROrg) ... 各平台时间戳
+#      Linux version 5.10.55+ (ainas@ainas) ... 各平台时间戳（UTS 已改 ainas）
 
 name: Build cks kernel test
 
@@ -25,7 +25,9 @@ on:
 jobs:
   build:
     strategy:
-      # 同 cks.yml：参考面 = RR cks 5 平台，无 7.1（dsm_linux 无 7.1 分支）
+      # 全 9 平台（同 cks.yml 矩阵）：epyc7002 7.2/7.3/7.4 + geminilakenk 7.3/7.4
+      # + r1000nk 7.3/7.4 + v1000nk 7.3/7.4。RR cks 参考面仍是 5 平台
+      # （r1000nk/v1000nk 无 RR 参考，RR 仅编译 5 平台）；无 7.1（dsm_linux 无 7.1 分支）
       fail-fast: false
       matrix:
         include:
@@ -39,6 +41,14 @@ jobs:
             platform: epyc7002
           - version: 7.4
             platform: geminilakenk
+          - version: 7.3
+            platform: r1000nk
+          - version: 7.4
+            platform: r1000nk
+          - version: 7.3
+            platform: v1000nk
+          - version: 7.4
+            platform: v1000nk
 
     runs-on: ubuntu-latest
     steps:
