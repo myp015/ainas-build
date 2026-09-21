@@ -1,11 +1,12 @@
 #
-# cks-test.yml - 临时测试工作流（复制自 cks.yml，精简加速）
-# 删减项（相对 cks.yml）：
-#   - intel-gpu-i915-backports clone / makei915 / relocateDupUpdate（与 virtio_net 无关）
-#   - firmware / release job（不发布）
-#   - syno-modules checkout（OFFICIAL_PATH 空，不用）
-#   - makekernel 轻量化：只 olddefconfig + modules_prepare（makemodules 外模块编译只需
-#     autoconf.h + include/generated + modpost 工具；跳过 vmlinux/modules/bzImage 完整编译）
+# cks-test.yml - 临时测试工作流（复制自 cks.yml 完整流程，缩减型号）
+# 相对 cks.yml 的改动：
+#   - 矩阵只留 geminilakenk 7.3/7.4（Task#170 验证目标平台）
+#   - 去掉 firmware / release job（测试验证流不发布 release）
+#   - 去掉 syno-modules checkout（OFFICIAL_PATH 留空不用）
+#   - artifact 名前缀 ainas-cks-test-* 防与 cks.yml 产物混淆
+# 保留 cks.yml 完整 build 流程：makeEnvDeploy + makekernel + makemodules
+# + makei915（intel-gpu-i915-backports 第三方驱动编译，产出 update/ 栈）
 #
 
 name: Build cks test
@@ -21,29 +22,16 @@ on:
 jobs:
   build:
     strategy:
-      # 同 cks.yml：参考面 = RR cks 9 平台（epyc7002-7.2/7.3/7.4 + geminilakenk-7.3/7.4
-      # + r1000nk/v1000nk-7.3/7.4），无 7.1（dsm_linux 无 7.1 分支）
+      # Task#170 验证：仅 geminilakenk 7.3/7.4（dsm_linux 有 *-7.3/7.4-5.10.55 分支）。
+      # 完整参考面 = RR cks 9 平台（epyc7002-7.2/7.3/7.4 + geminilakenk-7.3/7.4
+      # + r1000nk/v1000nk-7.3/7.4），无 7.1（dsm_linux 无 7.1 分支）。
       fail-fast: false
       matrix:
         include:
-          - version: 7.2
-            platform: epyc7002
-          - version: 7.3
-            platform: epyc7002
           - version: 7.3
             platform: geminilakenk
-          - version: 7.3
-            platform: r1000nk
-          - version: 7.3
-            platform: v1000nk
-          - version: 7.4
-            platform: epyc7002
           - version: 7.4
             platform: geminilakenk
-          - version: 7.4
-            platform: r1000nk
-          - version: 7.4
-            platform: v1000nk
 
     runs-on: ubuntu-latest
     steps:
@@ -73,55 +61,37 @@ jobs:
           sudo apt update
           sudo apt install -y curl build-essential bison flex dwarves ruby libncurses-dev libssl-dev libelf-dev
 
-      - name: Make modules (light)
+      - name: Make modules
         run: |
           ROOT_PATH=${{ github.workspace }}
           VERSION=${{ matrix.version }}
           PLATFORM=${{ matrix.platform }}
 
           git clone -b ${PLATFORM}-${VERSION}-5.10.55 --depth=1 https://github.com/myp015/dsm_linux.git
+          git clone --depth=1 https://github.com/myp015/intel-gpu-i915-backports.git
 
           . ${ROOT_PATH}/ainas-modules/compile-ck.sh
 
           echo "makeEnvDeploy"
           makeEnvDeploy "${ROOT_PATH}" "${VERSION}" "${PLATFORM}"
 
-          echo "makekernel-light (prepare only)"
-          # cks-test 轻量化：makemodules 外模块编译只需 autoconf.h + include/generated
-          # + modpost 工具，modules_prepare 即够。跳过 vmlinux/modules/bzImage 完整编译
-          #（virtio_net.ko 的 dev_addr 偏移是编译期 netdevice.h 布局问题，与 vmlinux
-          #   是否编译无关；autoconf.h 同为 synoconfig + olddefconfig 生成）。
-          DOCKER_IMAGE="$(awk -v p="${PLATFORM}" -v v="${VERSION}" '$1==p && $3==v && $1 !~ /^#/ {print $4}' "${ROOT_PATH}/ainas-modules/src/PLATFORMS")"
-          docker run --rm -t --user root \
-            -v "${ROOT_PATH}/dsm_linux":/input \
-            -w /input \
-            --entrypoint /bin/bash \
-            "${DOCKER_IMAGE}" \
-            -c "
-              set -e
-              # modules_prepare 触发 tools/bpf/resolve_btfids（CONFIG_DEBUG_INFO_BTF=y）
-              # 生成 bpf_helper_defs.h 需 python3（缺则 Error 127）；幂等安装
-              if ! command -v python3 >/dev/null 2>&1; then
-                apt-get update >/dev/null
-                apt-get install -y --no-install-recommends python3 >/dev/null
-              fi
-              export ARCH=x86_64
-              export CROSS_COMPILE=/opt/${PLATFORM}/bin/x86_64-pc-linux-gnu-
-              export PATH=/opt/${PLATFORM}/bin:\$PATH
-              export LOCALVERSION=\"+\"
-              cp -f /input/synology/synoconfigs/${PLATFORM} /input/.config
-              cd /input
-              make olddefconfig >/dev/null
-              make modules_prepare -j\$(nproc)
-            " 2>&1
+          echo "makekernel"
+          makekernel "${ROOT_PATH}" "${VERSION}" "${PLATFORM}" "${ROOT_PATH}/dsm_linux" "${ROOT_PATH}/output"
 
           echo "makemodules"
           KVER="$(getKver "${ROOT_PATH}" "${VERSION}" "${PLATFORM}" "${ROOT_PATH}/dsm_linux")"
           cp -f "${ROOT_PATH}/ainas-modules/src/${KVER}-ck/defines.${PLATFORM}" "${ROOT_PATH}/ainas-modules/src/${KVER}-ck/defines"
           makemodules "${ROOT_PATH}" "${VERSION}" "${PLATFORM}" "${ROOT_PATH}/dsm_linux" "${ROOT_PATH}/ainas-modules/src/${KVER}-ck" "${ROOT_PATH}/modules"
 
+          echo "makei915"
+          makei915 "${ROOT_PATH}" "${VERSION}" "${PLATFORM}" "${ROOT_PATH}/dsm_linux" "${ROOT_PATH}/intel-gpu-i915-backports" "${ROOT_PATH}/modules/update"
+
+          # 对齐 RR 官方 cks.yml 流程（RR 无 relocateDupUpdate）：根目录布局由 defines
+          # 天然决定（update/-only 模块 =n，makemodules 不产根目录副本），makei915
+          # 无条件输出 update/ 栈，下方 cp -rf 保留根目录 + update/ 双套，与 RR 官方一致。
           mkdir -p "${ROOT_PATH}/output/modules"
           cp -rf "${ROOT_PATH}/modules/"* "${ROOT_PATH}/output/modules/"
+
 
       - name: Tar to Artifacts
         run: |
@@ -132,6 +102,8 @@ jobs:
           . ${ROOT_PATH}/ainas-modules/compile-ck.sh
           KVER="$(getKver "${ROOT_PATH}" "${VERSION}" "${PLATFORM}" "${ROOT_PATH}/dsm_linux")"
 
+          # OFFICIAL_PATH 留空（对齐 RR）：check depends 纯缺口检测，产物 depends 缺口一律报 [E]，绝不从官方 hda1 拷贝
+          # OFFICIAL_PATH="${ROOT_PATH}/syno-modules/official/hda1/${PLATFORM}-${VERSION}-${KVER}"
           OFFICIAL_PATH=""
           PARTY3RD_PATH="${ROOT_PATH}/ainas-cks/thirdparty/${PLATFORM}-${VERSION}-${KVER}"
 
@@ -140,7 +112,7 @@ jobs:
 
           echo "check depends"
           for M in $(ls ${ROOT_PATH}/output/modules 2>/dev/null); do
-            [ -d "${ROOT_PATH}/output/modules/${M}" ] && continue # 跳过子目录（update/）
+            [ -d "${ROOT_PATH}/output/modules/${M}" ] && continue # 跳过子目录（update/），避免把目录当模块名误报 [E] depends does not exist
             function _copydepends() {
               if [ ! -f "${ROOT_PATH}/output/modules/${1}" ] && [ ! -f "${ROOT_PATH}/output/modules/update/${1}" ] && [ ! -f "${OFFICIAL_PATH/hda1/rd}/${1}" ]; then
                 if [ -f "${OFFICIAL_PATH}/${1}" ]; then
@@ -158,7 +130,7 @@ jobs:
                 depends=($(modinfo -F depends "${D}" 2>/dev/null | sed 's/,/ /g')) || true
                 if [ ${#depends[*]} -gt 0 ]; then
                   for k in ${depends[@]}; do
-                    { [ -f "${ROOT_PATH}/output/modules/${k}.ko" ] || [ -f "${ROOT_PATH}/output/modules/update/${k}.ko" ]; } && continue # Recursively skip
+                    { [ -f "${ROOT_PATH}/output/modules/${k}.ko" ] || [ -f "${ROOT_PATH}/output/modules/update/${k}.ko" ]; } && continue # Recursively skip wext-priv and wext-core dependencies on each other.
                     _copydepends "${k}.ko"
                   done
                 fi
@@ -168,10 +140,7 @@ jobs:
           done
 
           tar -zcf ${ROOT_PATH}/modules-${PLATFORM}-${VERSION}-${KVER}.tgz -C ${ROOT_PATH}/output/modules .
-          # 轻量 makekernel 不产 bzImage，gzip 失败可忽略
-          if [ -f "${ROOT_PATH}/output/bzImage" ]; then
-            gzip -c ${ROOT_PATH}/output/bzImage >${ROOT_PATH}/bzImage-${PLATFORM}-${VERSION}-${KVER}.gz
-          fi
+          gzip -c ${ROOT_PATH}/output/bzImage >${ROOT_PATH}/bzImage-${PLATFORM}-${VERSION}-${KVER}.gz
 
       - name: Upload to Artifacts
         uses: actions/upload-artifact@v7
