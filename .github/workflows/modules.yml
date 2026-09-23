@@ -22,6 +22,9 @@ on:
 jobs:
   build:
     strategy:
+      # 单个平台失败（如 toolchain 下载瞬时网络错误）不取消其余 job，
+      # 避免一次网络抖动让全量验收整体取消（2026-09-23 epyc7003-7.4 教训）
+      fail-fast: false
       matrix:
         include:
           #- version: 6.2
