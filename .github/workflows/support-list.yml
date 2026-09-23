@@ -1,0 +1,98 @@
+name: Update Support List
+
+# 手动运行：更新每平台支持列表 支持列表.xlsx（网卡/阵列卡/SATA转接/AMD/ATI显卡）
+# 数据源 = myp015/syno-modules/release（最新编译产物）
+# 输出写入并 push 到 myp015/ainas-modules 仓库 main（支持列表归属地，用户原指令）
+# 本 workflow 归属 ainas-build（与其它编译 workflow 同仓，可利用 secrets.AiNas 访问私有 ainas-modules）
+# 用法：ainas-build → Actions → Update Support List → Run workflow
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_repo:
+        description: '数据源仓库（含 release 目录）'
+        required: false
+        default: 'myp015/syno-modules'
+      source_path:
+        description: '数据源目录（仓库内相对路径）'
+        required: false
+        default: 'release'
+      out_file:
+        description: '输出 xlsx 文件名（写入 ainas-modules 根目录）'
+        required: false
+        default: '支持列表.xlsx'
+      platforms:
+        description: '平台过滤（逗号分隔，留空=全部）'
+        required: false
+        default: ''
+
+concurrency:
+  group: support-list
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout ainas-modules (脚本 + 输出目标)
+        # 私有仓库须 AiNas；脚本与 支持列表.xlsx 都在 ainas-modules
+        uses: actions/checkout@main
+        with:
+          repository: myp015/ainas-modules
+          token: ${{ secrets.AiNas }}
+          path: ainas-modules
+
+      - name: Checkout syno-modules (release 数据源, 稀疏)
+        # 数据源 public 仓库，GITHUB_TOKEN 可读
+        uses: actions/checkout@main
+        with:
+          repository: ${{ github.event.inputs.source_repo }}
+          path: syno-modules
+          fetch-depth: 1
+          filter: blob:none
+          sparse-checkout: ${{ github.event.inputs.source_path }}
+          sparse-checkout-cone-mode: true
+
+      - name: Install deps
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq kmod pciutils hwdata python3-venv
+          python3 -m venv /tmp/venv
+          # 锁版本：openpyxl 升级会改变 xlsx 字节 → "内容无变化跳过提交"失效
+          /tmp/venv/bin/pip install -q openpyxl==3.1.5
+
+      - name: Generate xlsx
+        run: |
+          cd "${{ github.workspace }}/ainas-modules"
+          ARGS="--release ${{ github.workspace }}/syno-modules/${{ github.event.inputs.source_path }} --out ${{ github.event.inputs.out_file }} --parallel 8"
+          if [ -n "${{ github.event.inputs.platforms }}" ]; then
+            ARGS="$ARGS --platforms ${{ github.event.inputs.platforms }}"
+          fi
+          /tmp/venv/bin/python scripts/gen_support_list.py $ARGS
+          ls -la "${{ github.event.inputs.out_file }}"
+
+      - name: Upload artifact (下载兜底)
+        uses: actions/upload-artifact@v4
+        with:
+          name: support-list
+          path: "${{ github.workspace }}/ainas-modules/${{ github.event.inputs.out_file }}"
+          if-no-files-found: error
+
+      - name: Commit and push (到 ainas-modules)
+        # checkout 时 AiNas 已注入 git extraheader，push 自动带权限
+        run: |
+          cd "${{ github.workspace }}/ainas-modules"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git pull --rebase --autostash || true
+          git add "${{ github.event.inputs.out_file }}"
+          if git diff --cached --quiet; then
+            echo "内容无变化，跳过提交"
+          else
+            git commit -m "chore: 更新支持列表（syno-modules 最新 release）"
+            git push origin HEAD:main
+            echo "已 push 更新后的支持列表"
+          fi
