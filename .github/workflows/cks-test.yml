@@ -24,20 +24,27 @@ jobs:
     strategy:
       # Task#170 验证 geminilakenk 7.3/7.4（drm_vram_helper shim）；
       # Task#171 验证 v1000nk/r1000nk 7.3/7.4（MY_DEF 注入收窄对齐 arc，
-      # 仅 v1000nk-7.4 导出 asmedia）。完整参考面 = RR cks 9 平台
-      # （epyc7002-7.2/7.3/7.4 + geminilakenk-7.3/7.4 + r1000nk/v1000nk-7.3/7.4），
+      # 仅 v1000nk-7.4 导出 asmedia）。Task#183 全平台补 7.2（官方 7.2 模块集
+      # == 7.3 模块集，7.2 分支=7.3 复制，对齐基准=official/rd 7.2 模块集）。
+      # 完整参考面 = RR cks 9 平台 + 三平台 7.2（共 12 组合），
       # 无 7.1（dsm_linux 无 7.1 分支）。
       fail-fast: false
       matrix:
         include:
+          - version: 7.2
+            platform: geminilakenk
           - version: 7.3
             platform: geminilakenk
           - version: 7.4
             platform: geminilakenk
+          - version: 7.2
+            platform: v1000nk
           - version: 7.3
             platform: v1000nk
           - version: 7.4
             platform: v1000nk
+          - version: 7.2
+            platform: r1000nk
           - version: 7.3
             platform: r1000nk
           - version: 7.4

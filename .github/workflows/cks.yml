@@ -22,8 +22,8 @@ on:
 jobs:
   build:
     strategy:
-      # 9 平台全矩阵（Task#40 验证完成后还原）：
-      # epyc7002-7.2/7.3/7.4 + geminilakenk-7.3/7.4 + r1000nk-7.3/7.4 + v1000nk-7.3/7.4
+      # 12 平台全矩阵（Task#40 验证完成后还原 + Task#183 全平台补 7.2）：
+      # epyc7002-7.2/7.3/7.4 + geminilakenk-7.2/7.3/7.4 + r1000nk-7.2/7.3/7.4 + v1000nk-7.2/7.3/7.4
       fail-fast: false
       matrix:
         include:
@@ -33,16 +33,22 @@ jobs:
             platform: epyc7002
           - version: 7.4
             platform: epyc7002
+          - version: 7.2
+            platform: geminilakenk
           - version: 7.3
             platform: geminilakenk
           - version: 7.4
             platform: geminilakenk
+          - version: 7.2
+            platform: r1000nk
           - version: 7.3
             platform: r1000nk
+          - version: 7.4
+            platform: r1000nk
+          - version: 7.2
+            platform: v1000nk
           - version: 7.3
             platform: v1000nk
-          - version: 7.4
-            platform: r1000nk
           - version: 7.4
             platform: v1000nk
 
