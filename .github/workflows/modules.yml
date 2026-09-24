@@ -300,12 +300,17 @@ jobs:
           # 依赖由 depends 链（vxlan→udp_tunnel,ip6_udp_tunnel）自动补齐，cks 流同样
           # 不再依赖官方拷贝。
           [ "$(echo "${KVER:-4}" | cut -d'.' -f1)" -lt 5 ] && OM+=(i915.ko mlx_compat.ko mlx4_core.ko mlx4_en.ko mlx4_ib.ko mlx5_core.ko mlx5_ib.ko ib_core.ko qed.ko qede.ko qedr.ko)
-          echo "${IU}" | grep -qw "${PLATFORM}" && OM+=(irqbypass.ko kvm.ko kvm-intel.ko) || OM+=(irqbypass.ko kvm.ko kvm-amd.ko)
+          # 所有平台全部添加 kvm_intel + kvm_amd（对齐 RR 全平台 kvm 三件套）：
+          # 官方有则强制覆盖（Intel 平台 kvm-intel / AMD 平台 kvm-amd），官方没有的
+          # （AMD 平台 kvm-intel / Intel 平台 kvm-amd）保留自编译产物补齐
+          OM+=(irqbypass.ko kvm.ko kvm-intel.ko kvm-amd.ko)
           for M in ${OM[@]}; do
             function _copydepends() {
-              # TEMP（测试自编译模块用）：官方模块不覆盖自编译产物——
-              # output_all 已存在同名文件（来自 output/ 编译产物）则跳过官方拷贝
-              [ -f "${OFFICIAL_PATH}/${1}" ] && [ ! -f "${OFFICIAL_PATH/hda1/rd}/${1}" ] && [ ! -f "${ROOT_PATH}/output_all/${1}" ] && cp -f "${OFFICIAL_PATH}/${1}" "${ROOT_PATH}/output_all"
+              # 官方模块强制覆盖自编译产物（4.x/5.x 全平台）：官方有的同名模块一律用
+              # 官方版（符号集匹配官方内核最可靠，如 i40e/auxiliary/processor/exfat/kvm
+              # 等；官方 i40e 自包含版修复 v1000nk 上机 i40e FAILED）。官方没有的保留
+              # 自编译产物。rd 目录（官方只读版）存在则不重复拷贝官方普通版。
+              [ -f "${OFFICIAL_PATH}/${1}" ] && [ ! -f "${OFFICIAL_PATH/hda1/rd}/${1}" ] && cp -f "${OFFICIAL_PATH}/${1}" "${ROOT_PATH}/output_all"
               depends=($(modinfo -F depends "${OFFICIAL_PATH}/${1}" 2>/dev/null | sed 's/,/ /g')) || true
               if [ ${#depends[*]} -gt 0 ]; then
                 for k in ${depends[@]}; do
