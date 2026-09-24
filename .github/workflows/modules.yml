@@ -309,8 +309,10 @@ jobs:
               # 官方模块强制覆盖自编译产物（4.x/5.x 全平台）：官方有的同名模块一律用
               # 官方版（符号集匹配官方内核最可靠，如 i40e/auxiliary/processor/exfat/kvm
               # 等；官方 i40e 自包含版修复 v1000nk 上机 i40e FAILED）。官方没有的保留
-              # 自编译产物。rd 目录（官方只读版）存在则不重复拷贝官方普通版。
-              [ -f "${OFFICIAL_PATH}/${1}" ] && [ ! -f "${OFFICIAL_PATH/hda1/rd}/${1}" ] && cp -f "${OFFICIAL_PATH}/${1}" "${ROOT_PATH}/output_all"
+              # 自编译产物。rd 目录（官方只读版）是 hda1 的子集（重叠文件内容一致，
+              # 另有 pgdrv.ko 独有），hda1 优先、rd 兜底，避免 rd 存在时误跳过覆盖。
+              [ -f "${OFFICIAL_PATH}/${1}" ] && cp -f "${OFFICIAL_PATH}/${1}" "${ROOT_PATH}/output_all"
+              [ -f "${OFFICIAL_PATH/hda1/rd}/${1}" ] && cp -f "${OFFICIAL_PATH/hda1/rd}/${1}" "${ROOT_PATH}/output_all"
               depends=($(modinfo -F depends "${OFFICIAL_PATH}/${1}" 2>/dev/null | sed 's/,/ /g')) || true
               if [ ${#depends[*]} -gt 0 ]; then
                 for k in ${depends[@]}; do
