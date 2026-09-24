@@ -115,11 +115,13 @@ jobs:
           KVER="${KVERSION}.${PATCHLEVEL}.${SUBLEVEL}"
 
           MODULES_INTERMEDIATES="${ROOT_PATH}/intel-gpu-i915-backports/intermediates"
-          if [ ${PLATFORM} = "geminilakenk" ]; then
-            OUT_MODULES="${ROOT_PATH}/output/update"
-          else
-            OUT_MODULES="${ROOT_PATH}/output"
-          fi
+          # 全平台统一 update/ 布局（对齐 geminilakenk 双套）：
+          # Task#188 后 5.x 主流程 root 是自编主线 DRM 栈（drm/ttm/dmabuf/drm_kms_helper
+          # + radeon/amdgpu/gpu-sched）。i915 backport 栈若扁平输出 root，modules.yml
+          # copy 3rd modules 会 cp -rf 覆盖主线栈 → 混合栈 ABI 断裂（v1000nk-7.2 上机
+          # radeon/gpu-sched Unknown symbol ttm_*/drm_*/dma_fence_* 实测）。
+          # update/ 子目录让 backport 栈与 root 主线栈共存（geminilakenk 已验证闭环）。
+          OUT_MODULES="${ROOT_PATH}/output/update"
           mkdir -p "${OUT_MODULES}"
           find "${MODULES_INTERMEDIATES}" -type f -name '*.ko' -exec mv {} "${OUT_MODULES}" \;
 
