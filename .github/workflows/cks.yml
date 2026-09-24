@@ -200,7 +200,9 @@ jobs:
           sudo timedatectl set-timezone "Asia/Shanghai"
 
       - name: download to artifacts
-        uses: actions/download-artifact@v8
+        # v8 批量下载大 artifact 偶发 digest-mismatch（Build cks #79 release job 实测）→
+        # 降 v4（无 digest 校验，成熟稳定），与 modules.yml 主流程一致
+        uses: actions/download-artifact@v4
         with:
           path: output
           pattern: ainas-cks-*
@@ -268,32 +270,56 @@ jobs:
 
       - name: Calculate version
         run: |
-          # Calculate version
-          VERSION=""
-          if [ -n "${{ inputs.version }}" ]; then
-            if [ "$(echo ${{ inputs.version }} | cut -d '.' -f 1,2)" = "$(date +'%y.%-m')" ]; then
-              VERSION="${{ inputs.version }}"
-            else
-              LATEST_TAG="$(curl -skLH "Authorization: token ${{ secrets.AiNas }}" "https://api.github.com/repos/myp015/ainas-cks/releases" | jq -r ".[0].tag_name" 2>/dev/null)"
-              if [ -n "${LATEST_TAG}" ] && [ "$(echo ${LATEST_TAG} | cut -d '.' -f 1,2)" = "$(date +'%y.%-m')" ]; then  # format %y.%-m.$i
-                VERSION="$(echo ${LATEST_TAG} | awk -F '.' '{$3=$3+1}1' OFS='.')"
-              else
+          # 按月低增版本号（26.9.0 / 26.9.1 ...），同月重复发布第 3 段 +1
+          # 显式传入 version 且格式匹配当前年月时，以传入为准；否则自动计算
+          # （原逻辑空输入时 VERSION 保持空 → 只出 test zip 不发布，对齐
+          # modules.yml 主流程修复：空输入走自动计算）
+          if [ -n "${{ inputs.version }}" ] && [ "$(echo ${{ inputs.version }} | cut -d '.' -f 1,2)" = "$(date +'%y.%-m')" ]; then
+            VERSION="${{ inputs.version }}"
+          else
+            # 自动：查 ainas-cks 最新 tag，同月则第 3 段 +1，跨月则 .0
+            LATEST_TAG="$(curl -skLH "Authorization: token ${{ secrets.AiNas }}" "https://api.github.com/repos/myp015/ainas-cks/releases" | jq -r '.[0].tag_name' 2>/dev/null)"
+            if [ -n "${LATEST_TAG}" ] && [ "$(echo ${LATEST_TAG} | cut -d '.' -f 1,2)" = "$(date +'%y.%-m')" ]; then
+              if [ "$(echo ${LATEST_TAG} | awk -F '.' '{print NF}')" -ge 4 ]; then
+                # 旧格式 4 段 tag（如 26.9.13.1）不参与低增，回退到月份首版
                 VERSION="$(date +'%y.%-m').0"
+              else
+                VERSION="$(echo ${LATEST_TAG} | awk -F '.' '{$3=$3+1}1' OFS='.')"
               fi
+            else
+              VERSION="$(date +'%y.%-m').0"
             fi
           fi
+
+          # 防残留 tag 冲突：Calculate version 只查 releases[0]，历史失败 run 可能
+          # 留下 git tag 但无 release 对象 → release-action 422 already_exists。
+          # 循环 +1 直到对应 git tag 不存在（最多 20 次防死循环）。
+          for i in $(seq 1 20); do
+            if curl -skLH "Authorization: token ${{ secrets.AiNas }}" \
+                 "https://api.github.com/repos/myp015/ainas-cks/git/refs/tags/${VERSION}" 2>/dev/null \
+                 | grep -q '"ref"'; then
+              VERSION="$(echo ${VERSION} | awk -F '.' '{$3=$3+1}1' OFS='.')"
+            else
+              break
+            fi
+          done
 
           echo "VERSION: ${VERSION}"
           echo "VERSION=${VERSION}" >> $GITHUB_ENV
 
       - name: download to artifacts
-        uses: actions/download-artifact@v8
+        # v8 批量下载大 artifact 偶发 digest-mismatch（Build cks #79 release job 实测）→
+        # 降 v4（无 digest 校验，成熟稳定），与 modules.yml 主流程一致
+        uses: actions/download-artifact@v4
         with:
           path: output
           pattern: ainas-cks-*
           merge-multiple: true
 
       - name: delete-artifact
+        # 仅 download 成功才删（if: success()）：download 失败时保留 artifacts，
+        # 否则编译产物被无条件删除后无法重跑 Extract/手动下载验证
+        if: success()
         uses: geekyeggo/delete-artifact@v6
         with:
           name: |
@@ -304,6 +330,9 @@ jobs:
           VERSION="${{ env.VERSION }}"
           VERSION="${VERSION:-"test"}"
 
+          # download 产物为空时 output/ 可能不存在，先建目录再写 VERSION
+          # （Build cks #79 实测：digest-mismatch 后 output/VERSION 写入失败）
+          mkdir -p output
           echo "${VERSION}" > "output/VERSION"
           zip -9 ainas-cks-${VERSION}.zip -j output/*
 
