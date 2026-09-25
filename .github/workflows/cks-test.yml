@@ -156,6 +156,36 @@ jobs:
             _copydepends "${M}"
           done
 
+          # 生成 modules.dep 供 DSM/BusyBox modprobe 解析硬依赖；当前 CKS 自编
+          # i40e 使用 intel_auxiliary 总线，必须先加载 intel_auxiliary.ko 再加载 i40e.ko。
+          # 依赖关系从最终 .ko 的 modinfo 读取，不混用官方 auxiliary ABI。
+          MODULES_DIR="${ROOT_PATH}/output/modules"
+          DEPFILE="${MODULES_DIR}/modules.dep"
+          rm -f "${DEPFILE}"
+          for M in "${MODULES_DIR}"/*.ko; do
+            [ -f "${M}" ] || continue
+            DEPS=""
+            for D in $(modinfo -F depends "${M}" 2>/dev/null | sed 's/,/ /g'); do
+              DEPS="${DEPS} ${D}.ko"
+            done
+            printf '%s:%s\n' "$(basename "${M}")" "${DEPS}" >>"${DEPFILE}"
+          done
+          if [ -f "${MODULES_DIR}/i40e.ko" ]; then
+            I40E_DEPS="$(modinfo -F depends "${MODULES_DIR}/i40e.ko" 2>/dev/null | sed 's/,/ /g')"
+            echo " ${I40E_DEPS} " | grep -q " intel_auxiliary " || {
+              echo "[E] i40e.ko does not depend on intel_auxiliary" >&2
+              exit 1
+            }
+            [ -f "${MODULES_DIR}/intel_auxiliary.ko" ] || {
+              echo "[E] i40e.ko depends on missing intel_auxiliary.ko" >&2
+              exit 1
+            }
+            grep -q '^i40e\\.ko:.*intel_auxiliary\\.ko' "${DEPFILE}" || {
+              echo "[E] modules.dep missing i40e -> intel_auxiliary" >&2
+              exit 1
+            }
+          fi
+
           tar -zcf ${ROOT_PATH}/modules-${PLATFORM}-${VERSION}-${KVER}.tgz -C ${ROOT_PATH}/output/modules .
           gzip -c ${ROOT_PATH}/output/bzImage >${ROOT_PATH}/bzImage-${PLATFORM}-${VERSION}-${KVER}.gz
 
