@@ -180,7 +180,7 @@ jobs:
               echo "[E] i40e.ko depends on missing intel_auxiliary.ko" >&2
               exit 1
             }
-            grep -q '^i40e\\.ko:.*intel_auxiliary\\.ko' "${DEPFILE}" || {
+            grep -q '^i40e\.ko:.*intel_auxiliary\.ko' "${DEPFILE}" || {
               echo "[E] modules.dep missing i40e -> intel_auxiliary" >&2
               exit 1
             }
