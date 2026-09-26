@@ -138,6 +138,21 @@ jobs:
           echo "copy 3rd modules"
           [ -d "${PARTY3RD_PATH}" ] && cp -rf ${PARTY3RD_PATH}/* ${ROOT_PATH}/output/modules/
 
+          if [ "${PLATFORM}" != "geminilakenk" ]; then
+            for K in CHECK_SIGNATURE I2C_SMBUS I2C_I801; do
+              grep -q "^CONFIG_${K}=y$" "${ROOT_PATH}/dsm_linux/include/config/auto.conf" || {
+                echo "[E] ${PLATFORM}-${VERSION}: CONFIG_${K} is not built in" >&2
+                exit 1
+              }
+            done
+            for M in check_signature.ko i2c-smbus.ko i2c-i801.ko; do
+              [ ! -e "${ROOT_PATH}/output/modules/${M}" ] && [ ! -e "${ROOT_PATH}/output/modules/update/${M}" ] || {
+                echo "[E] ${PLATFORM}-${VERSION}: built-in module ${M} was emitted" >&2
+                exit 1
+              }
+            done
+          fi
+
           echo "check depends"
           for M in $(ls ${ROOT_PATH}/output/modules 2>/dev/null); do
             [ -d "${ROOT_PATH}/output/modules/${M}" ] && continue # 跳过子目录（update/），避免把目录当模块名误报 [E] depends does not exist
