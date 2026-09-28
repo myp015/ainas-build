@@ -1,6 +1,7 @@
 name: Update Support List
 
-# 手动运行：更新每平台支持列表 支持列表.xlsx（网卡/阵列卡/SATA转接/AMD/ATI显卡）
+# 手动运行：更新每平台支持列表 支持列表.xlsx（网卡/串口/阵列卡/SATA转接/AMD/Intel 显卡）
+# SATA 区同时列出生成器核对的内建 ahci 控制器（不是独立 ahci.ko）
 # 数据源 = myp015/syno-modules/release（最新编译产物）
 # 输出写入并 push 到 myp015/ainas-modules 仓库 main（支持列表归属地，用户原指令）
 # 本 workflow 归属 ainas-build（与其它编译 workflow 同仓，可利用 secrets.AiNas 访问私有 ainas-modules）
@@ -45,6 +46,36 @@ jobs:
           token: ${{ secrets.AiNas }}
           path: ainas-modules
 
+      - name: Validate workflow inputs
+        env:
+          SOURCE_REPO: ${{ github.event.inputs.source_repo }}
+          SOURCE_PATH: ${{ github.event.inputs.source_path }}
+          OUT_FILE: ${{ github.event.inputs.out_file }}
+          PLATFORMS: ${{ github.event.inputs.platforms }}
+        run: |
+          set -eu
+          python3 - <<'PY'
+          import os
+          import re
+          import sys
+
+          source_repo = os.environ["SOURCE_REPO"]
+          source_path = os.environ["SOURCE_PATH"]
+          out_file = os.environ["OUT_FILE"]
+          platforms = os.environ["PLATFORMS"]
+          if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", source_repo):
+              sys.exit("source_repo 格式非法")
+          if not re.fullmatch(r"release(?:/[A-Za-z0-9_-]+)*", source_path):
+              sys.exit("source_path 只允许 release 目录及其子目录")
+          forbidden = set('/\\:*?[]<>|$`;')
+          if (not out_file.endswith(".xlsx") or not out_file or
+                  out_file.startswith("-") or
+                  any(ord(c) < 32 or c in forbidden for c in out_file)):
+              sys.exit("out_file 必须是仓库根目录下的普通 .xlsx 文件名")
+          if platforms and not re.fullmatch(r"[A-Za-z0-9_-]+(?:,[A-Za-z0-9_-]+)*", platforms):
+              sys.exit("platforms 格式非法")
+          PY
+
       - name: Checkout syno-modules (release 数据源, 稀疏)
         # 数据源 public 仓库，GITHUB_TOKEN 可读
         uses: actions/checkout@main
@@ -65,14 +96,20 @@ jobs:
           /tmp/venv/bin/pip install -q openpyxl==3.1.5
 
       - name: Generate xlsx
+        env:
+          SOURCE_PATH: ${{ github.event.inputs.source_path }}
+          OUT_FILE: ${{ github.event.inputs.out_file }}
+          PLATFORMS: ${{ github.event.inputs.platforms }}
         run: |
+          set -eu
           cd "${{ github.workspace }}/ainas-modules"
-          ARGS="--release ${{ github.workspace }}/syno-modules/${{ github.event.inputs.source_path }} --out ${{ github.event.inputs.out_file }} --parallel 8"
-          if [ -n "${{ github.event.inputs.platforms }}" ]; then
-            ARGS="$ARGS --platforms ${{ github.event.inputs.platforms }}"
+          args=(--release "${{ github.workspace }}/syno-modules/$SOURCE_PATH"
+                --out "$OUT_FILE" --parallel 8)
+          if [ -n "$PLATFORMS" ]; then
+            args+=(--platforms "$PLATFORMS")
           fi
-          /tmp/venv/bin/python scripts/gen_support_list.py $ARGS
-          ls -la "${{ github.event.inputs.out_file }}"
+          /tmp/venv/bin/python scripts/gen_support_list.py "${args[@]}"
+          ls -la -- "$OUT_FILE"
 
       - name: Upload artifact (下载兜底)
         uses: actions/upload-artifact@v4
@@ -82,13 +119,17 @@ jobs:
           if-no-files-found: error
 
       - name: Commit and push (到 ainas-modules)
+        if: ${{ github.event.inputs.platforms == '' }}
         # checkout 时 AiNas 已注入 git extraheader，push 自动带权限
+        env:
+          OUT_FILE: ${{ github.event.inputs.out_file }}
         run: |
+          set -eu
           cd "${{ github.workspace }}/ainas-modules"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git pull --rebase --autostash || true
-          git add "${{ github.event.inputs.out_file }}"
+          git pull --rebase --autostash
+          git add -- "$OUT_FILE"
           if git diff --cached --quiet; then
             echo "内容无变化，跳过提交"
           else
@@ -96,3 +137,7 @@ jobs:
             git push origin HEAD:main
             echo "已 push 更新后的支持列表"
           fi
+
+      - name: Skip commit for filtered platforms
+        if: ${{ github.event.inputs.platforms != '' }}
+        run: echo "已生成过滤平台 artifact，不覆盖或提交完整支持列表"
