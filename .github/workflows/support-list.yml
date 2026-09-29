@@ -1,6 +1,6 @@
 name: Update Support List
 
-# 手动运行：更新每平台支持列表 支持列表.xlsx（网卡/串口/阵列卡/SATA转接/AMD/Intel 显卡）
+# 手动运行：更新每平台支持列表 支持列表.xlsx（网卡/无线网卡/串口/阵列卡/SAS-HBA/SATA转接/AMD/Intel/其他显卡）
 # SATA 区同时列出生成器核对的内建 ahci 控制器（不是独立 ahci.ko）
 # 数据源 = myp015/syno-modules/release（最新编译产物）
 # 输出写入并 push 到 myp015/ainas-modules 仓库 main（支持列表归属地，用户原指令）
@@ -10,18 +10,6 @@ name: Update Support List
 on:
   workflow_dispatch:
     inputs:
-      source_repo:
-        description: '数据源仓库（含 release 目录）'
-        required: false
-        default: 'myp015/syno-modules'
-      source_path:
-        description: '数据源目录（仓库内相对路径）'
-        required: false
-        default: 'release'
-      out_file:
-        description: '输出 xlsx 文件名（写入 ainas-modules 根目录）'
-        required: false
-        default: '支持列表.xlsx'
       platforms:
         description: '平台过滤（逗号分隔，留空=全部）'
         required: false
@@ -31,8 +19,9 @@ concurrency:
   group: support-list
   cancel-in-progress: false
 
+# GITHUB_TOKEN 只用于读取公共 syno-modules；推送 ainas-modules 使用专用 AiNas token。
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   generate:
@@ -40,17 +29,15 @@ jobs:
     steps:
       - name: Checkout ainas-modules (脚本 + 输出目标)
         # 私有仓库须 AiNas；脚本与 支持列表.xlsx 都在 ainas-modules
-        uses: actions/checkout@main
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: myp015/ainas-modules
+          ref: main
           token: ${{ secrets.AiNas }}
           path: ainas-modules
 
       - name: Validate workflow inputs
         env:
-          SOURCE_REPO: ${{ github.event.inputs.source_repo }}
-          SOURCE_PATH: ${{ github.event.inputs.source_path }}
-          OUT_FILE: ${{ github.event.inputs.out_file }}
           PLATFORMS: ${{ github.event.inputs.platforms }}
         run: |
           set -eu
@@ -59,77 +46,62 @@ jobs:
           import re
           import sys
 
-          source_repo = os.environ["SOURCE_REPO"]
-          source_path = os.environ["SOURCE_PATH"]
-          out_file = os.environ["OUT_FILE"]
           platforms = os.environ["PLATFORMS"]
-          if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", source_repo):
-              sys.exit("source_repo 格式非法")
-          if not re.fullmatch(r"release(?:/[A-Za-z0-9_-]+)*", source_path):
-              sys.exit("source_path 只允许 release 目录及其子目录")
-          forbidden = set('/\\:*?[]<>|$`;')
-          if (not out_file.endswith(".xlsx") or not out_file or
-                  out_file.startswith("-") or
-                  any(ord(c) < 32 or c in forbidden for c in out_file)):
-              sys.exit("out_file 必须是仓库根目录下的普通 .xlsx 文件名")
           if platforms and not re.fullmatch(r"[A-Za-z0-9_-]+(?:,[A-Za-z0-9_-]+)*", platforms):
               sys.exit("platforms 格式非法")
           PY
 
       - name: Checkout syno-modules (release 数据源, 稀疏)
         # 数据源 public 仓库，GITHUB_TOKEN 可读
-        uses: actions/checkout@main
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
-          repository: ${{ github.event.inputs.source_repo }}
+          repository: myp015/syno-modules
+          ref: main
           path: syno-modules
           fetch-depth: 1
           filter: blob:none
-          sparse-checkout: ${{ github.event.inputs.source_path }}
+          sparse-checkout: release
           sparse-checkout-cone-mode: true
 
       - name: Install deps
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq kmod pciutils hwdata python3-venv
+          sudo apt-get install -y -qq kmod pciutils hwdata pci.ids usb.ids python3-venv
           python3 -m venv /tmp/venv
           # 锁版本：openpyxl 升级会改变 xlsx 字节 → "内容无变化跳过提交"失效
           /tmp/venv/bin/pip install -q openpyxl==3.1.5
 
       - name: Generate xlsx
         env:
-          SOURCE_PATH: ${{ github.event.inputs.source_path }}
-          OUT_FILE: ${{ github.event.inputs.out_file }}
           PLATFORMS: ${{ github.event.inputs.platforms }}
         run: |
           set -eu
           cd "${{ github.workspace }}/ainas-modules"
-          args=(--release "${{ github.workspace }}/syno-modules/$SOURCE_PATH"
-                --out "$OUT_FILE" --parallel 8)
+          args=(--release "${{ github.workspace }}/syno-modules/release"
+                --out "支持列表.xlsx" --parallel 8)
           if [ -n "$PLATFORMS" ]; then
             args+=(--platforms "$PLATFORMS")
           fi
           /tmp/venv/bin/python scripts/gen_support_list.py "${args[@]}"
-          ls -la -- "$OUT_FILE"
+          ls -la -- 支持列表.xlsx
 
       - name: Upload artifact (下载兜底)
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: support-list
-          path: "${{ github.workspace }}/ainas-modules/${{ github.event.inputs.out_file }}"
+          path: "${{ github.workspace }}/ainas-modules/支持列表.xlsx"
           if-no-files-found: error
 
       - name: Commit and push (到 ainas-modules)
         if: ${{ github.event.inputs.platforms == '' }}
         # checkout 时 AiNas 已注入 git extraheader，push 自动带权限
-        env:
-          OUT_FILE: ${{ github.event.inputs.out_file }}
         run: |
           set -eu
           cd "${{ github.workspace }}/ainas-modules"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git pull --rebase --autostash
-          git add -- "$OUT_FILE"
+          git add -- 支持列表.xlsx
           if git diff --cached --quiet; then
             echo "内容无变化，跳过提交"
           else
