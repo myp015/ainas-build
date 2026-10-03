@@ -183,9 +183,8 @@ jobs:
             _copydepends "${M}"
           done
 
-          # 生成 modules.dep 供 DSM/BusyBox modprobe 解析硬依赖；当前 CKS 自编
-          # i40e 使用 intel_auxiliary 总线，必须先加载 intel_auxiliary.ko 再加载 i40e.ko。
-          # 依赖关系从最终 .ko 的 modinfo 读取，不混用官方 auxiliary ABI。
+          # 生成 modules.dep 供 DSM/BusyBox modprobe 解析硬依赖；依赖关系从最终
+          # .ko 的 modinfo 读取，不混用官方 auxiliary ABI。
           MODULES_DIR="${ROOT_PATH}/output/modules"
           DEPFILE="${MODULES_DIR}/modules.dep"
           rm -f "${DEPFILE}"
@@ -197,20 +196,30 @@ jobs:
             done
             printf '%s:%s\n' "$(basename "${M}")" "${DEPS}" >>"${DEPFILE}"
           done
-          if [ -f "${MODULES_DIR}/i40e.ko" ]; then
-            I40E_DEPS="$(modinfo -F depends "${MODULES_DIR}/i40e.ko" 2>/dev/null | sed 's/,/ /g')"
-            echo " ${I40E_DEPS} " | grep -q " intel_auxiliary " || {
-              echo "[E] i40e.ko does not depend on intel_auxiliary" >&2
+          # CKS 自编 i40e/iavf 已把 auxiliary.o 折入 .ko 自含（Task#62）：boot 时
+          # RR ramdisk 早期阶段无 modules.dep（depmod 被注释），独立 companion
+          # intel_auxiliary.ko 永远不会先加载 → i40e/iavf 曾必然 Unknown symbol。
+          # 折叠后不变量：产物无 intel_auxiliary.ko，i40e/iavf 不再依赖它，且
+          # .ko 内含导出的 intel_auxiliary_device_init（nm 判据）。
+          if [ -f "${MODULES_DIR}/i40e.ko" ] || [ -f "${MODULES_DIR}/iavf.ko" ]; then
+            [ -f "${MODULES_DIR}/intel_auxiliary.ko" ] && {
+              echo "[E] intel_auxiliary.ko must not exist (folded into i40e/iavf)" >&2
               exit 1
             }
-            [ -f "${MODULES_DIR}/intel_auxiliary.ko" ] || {
-              echo "[E] i40e.ko depends on missing intel_auxiliary.ko" >&2
-              exit 1
-            }
-            grep -q '^i40e\.ko:.*intel_auxiliary\.ko' "${DEPFILE}" || {
-              echo "[E] modules.dep missing i40e -> intel_auxiliary" >&2
-              exit 1
-            }
+            for M in i40e iavf; do
+              [ -f "${MODULES_DIR}/${M}.ko" ] || continue
+              DEPS="$(modinfo -F depends "${MODULES_DIR}/${M}.ko" 2>/dev/null | sed 's/,/ /g')"
+              echo " ${DEPS} " | grep -q " intel_auxiliary " && {
+                echo "[E] ${M}.ko still depends on intel_auxiliary (should be self-contained)" >&2
+                exit 1
+              }
+              if command -v nm >/dev/null 2>&1; then
+                nm "${MODULES_DIR}/${M}.ko" | grep -qE " T intel_auxiliary_device_init$" || {
+                  echo "[E] ${M}.ko missing folded intel_auxiliary_device_init" >&2
+                  exit 1
+                }
+              fi
+            done
           fi
 
           tar -zcf ${ROOT_PATH}/modules-${PLATFORM}-${VERSION}-${KVER}.tgz -C ${ROOT_PATH}/output/modules .
