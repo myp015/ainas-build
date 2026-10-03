@@ -196,30 +196,52 @@ jobs:
             done
             printf '%s:%s\n' "$(basename "${M}")" "${DEPS}" >>"${DEPFILE}"
           done
-          # CKS 自编 i40e/iavf 已把 auxiliary.o 折入 .ko 自含（Task#62）：boot 时
-          # RR ramdisk 早期阶段无 modules.dep（depmod 被注释），独立 companion
-          # intel_auxiliary.ko 永远不会先加载 → i40e/iavf 曾必然 Unknown symbol。
-          # 折叠后不变量：产物无 intel_auxiliary.ko，i40e/iavf 不再依赖它，且
-          # .ko 内含导出的 intel_auxiliary_device_init（nm 判据）。
+          # CKS 自编 i40e/iavf 消除 companion intel_auxiliary.ko（Task#62）：
+          # boot 时 RR ramdisk 早期阶段无 modules.dep（depmod 被注释），独立
+          # companion 永远不会先加载 → i40e/iavf 曾必然 Unknown symbol。
+          # 修复后不变量：产物无 intel_auxiliary.ko；i40e.ko 折入 auxiliary.o
+          # 自含（内含导出的 T intel_auxiliary_device_init，nm 判据），且不
+          # 依赖 intel_auxiliary；iavf.ko 不折入（双折会注册重复 auxiliary bus
+          # 导致 EEXIST/bus->p 清空崩溃），其 intel_auxiliary_* 引用经 modpost
+          # 解析到 i40e.ko 的导出 → iavf.ko depends 须含 i40e。
           if [ -f "${MODULES_DIR}/i40e.ko" ] || [ -f "${MODULES_DIR}/iavf.ko" ]; then
             [ -f "${MODULES_DIR}/intel_auxiliary.ko" ] && {
-              echo "[E] intel_auxiliary.ko must not exist (folded into i40e/iavf)" >&2
+              echo "[E] intel_auxiliary.ko must not exist (auxiliary bus folded into i40e.ko)" >&2
               exit 1
             }
-            for M in i40e iavf; do
-              [ -f "${MODULES_DIR}/${M}.ko" ] || continue
-              DEPS="$(modinfo -F depends "${MODULES_DIR}/${M}.ko" 2>/dev/null | sed 's/,/ /g')"
+            # i40e.ko: self-contained (no intel_auxiliary dep, exports folded symbol)
+            if [ -f "${MODULES_DIR}/i40e.ko" ]; then
+              DEPS="$(modinfo -F depends "${MODULES_DIR}/i40e.ko" 2>/dev/null | sed 's/,/ /g')"
               echo " ${DEPS} " | grep -q " intel_auxiliary " && {
-                echo "[E] ${M}.ko still depends on intel_auxiliary (should be self-contained)" >&2
+                echo "[E] i40e.ko still depends on intel_auxiliary (should be self-contained)" >&2
                 exit 1
               }
               if command -v nm >/dev/null 2>&1; then
-                nm "${MODULES_DIR}/${M}.ko" | grep -qE " T intel_auxiliary_device_init$" || {
-                  echo "[E] ${M}.ko missing folded intel_auxiliary_device_init" >&2
+                nm "${MODULES_DIR}/i40e.ko" | grep -qE " T intel_auxiliary_device_init$" || {
+                  echo "[E] i40e.ko missing folded intel_auxiliary_device_init" >&2
                   exit 1
                 }
               fi
-            done
+            fi
+            # iavf.ko: must NOT fold auxiliary.o itself (no T intel_auxiliary_*)
+            # and must depend on i40e (its intel_auxiliary_* refs come from there)
+            if [ -f "${MODULES_DIR}/iavf.ko" ]; then
+              DEPS="$(modinfo -F depends "${MODULES_DIR}/iavf.ko" 2>/dev/null | sed 's/,/ /g')"
+              echo " ${DEPS} " | grep -q " intel_auxiliary " && {
+                echo "[E] iavf.ko depends on intel_auxiliary (bus owner is i40e)" >&2
+                exit 1
+              }
+              echo " ${DEPS} " | grep -q " i40e " || {
+                echo "[E] iavf.ko does not depend on i40e (needs its intel_auxiliary_* exports)" >&2
+                exit 1
+              }
+              if command -v nm >/dev/null 2>&1; then
+                nm "${MODULES_DIR}/iavf.ko" | grep -qE " T intel_auxiliary_device_init$" && {
+                  echo "[E] iavf.ko must not fold auxiliary.o (duplicate auxiliary bus)" >&2
+                  exit 1
+                }
+              fi
+            fi
           fi
 
           tar -zcf ${ROOT_PATH}/modules-${PLATFORM}-${VERSION}-${KVER}.tgz -C ${ROOT_PATH}/output/modules .
