@@ -325,7 +325,7 @@ jobs:
             elif [ -e "firmware/${L}" ]; then
               echo "Used thirdparty ${L}"
             elif awk -v L="${L}" '{if($1==L) f=1} END{exit !f}' "${WL}" 2>/dev/null; then
-              echo "::notice ::Known-missing ${L} (whitelist) - RR 同样缺，放行"
+              : # 白名单内：静默放行，不输出日志
             else
               echo "::warning ::Missing ${L}"
             fi
