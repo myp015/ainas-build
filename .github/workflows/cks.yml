@@ -269,6 +269,13 @@ jobs:
           token: ${{ secrets.AiNas }}
           path: ainas-cks
 
+      - name: Checkout
+        uses: actions/checkout@main
+        with:
+          repository: myp015/ainas-modules
+          token: ${{ secrets.AiNas }}
+          path: ainas-modules
+
       - name: Init Env
         run: |
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
@@ -294,6 +301,12 @@ jobs:
           PARTY3RD_PATH="${ROOT_PATH}/ainas-cks/thirdparty/firmware"
           [ -d "${PARTY3RD_PATH}" ] && cp -rf ${PARTY3RD_PATH}/* ${ROOT_PATH}/firmware/
 
+          echo "copy repo firmware (common + cks) - Task#188"
+          REPO_FW="${ROOT_PATH}/ainas-modules/firmware"
+          [ -d "${REPO_FW}/common" ] && cp -rf ${REPO_FW}/common/* ${ROOT_PATH}/firmware/
+          [ -d "${REPO_FW}/cks" ] && cp -rf ${REPO_FW}/cks/* ${ROOT_PATH}/firmware/
+          WL="${REPO_FW}/missing-whitelist-cks.txt"
+
           echo "extract all modules"
           for F in output/*.tgz; do
             echo "${F}"
@@ -310,8 +323,12 @@ jobs:
             if [ -e "${SOURCE}/${L}" ]; then
               mkdir -p "$(dirname firmware/${L})"
               cp -f "${SOURCE}/${L}" "firmware/${L}"
+            elif [ -e "firmware/${L}" ]; then
+              echo "Used thirdparty ${L}"
+            elif awk -v L="${L}" '{if($1==L) f=1} END{exit !f}' "${WL}" 2>/dev/null; then
+              echo "::notice ::Known-missing ${L} (whitelist) - RR 同样缺，放行"
             else
-              [ -e "firmware/${L}" ] && echo "Used thirdparty ${L}" || echo "::warning ::Missing ${L}"
+              echo "::warning ::Missing ${L}"
             fi
           done <<<$(find output -name \*.ko -exec /sbin/modinfo -F firmware {} 2>/dev/null \;)
 
