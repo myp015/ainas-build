@@ -549,6 +549,14 @@ jobs:
           pattern: all-*
           merge-multiple: true
 
+      - name: download to artifacts (firmware)
+        # Task#188+：固件也随 release 产物发布 → 下载 firmware.tgz
+        uses: actions/download-artifact@v4
+        with:
+          path: firmware_out
+          pattern: firmware
+          merge-multiple: true
+
       - name: delete-artifact
         # 仅 download 成功才删（if: success()）：download 失败时保留 artifacts，
         # 否则编译产物被无条件删除后无法重跑 Extract/手动下载验证。
@@ -568,6 +576,13 @@ jobs:
           # release 压缩包 = 合集（output_all/，含官方+编译+第三方）
           echo "${VERSION}" > "output_all/VERSION"
           zip -9 modules-${VERSION}.zip -j output_all/*
+
+          # Task#188+：固件也随 release 产物发布（firmware.tgz 一并入 zip）
+          if [ -f "firmware_out/firmware.tgz" ]; then
+            zip -9 modules-${VERSION}.zip -j firmware_out/firmware.tgz
+          else
+            echo "WARN: firmware.tgz 未下载，zip 不含固件"
+          fi
 
       - name: Extract to syno-modules/modules
         if: success() && env.VERSION != ''
@@ -639,6 +654,15 @@ jobs:
             COUNT=$((COUNT+1))
           done
           echo "${VERSION}" > syno-modules/release/VERSION
+
+          # Task#188+：固件也解压进 release/firmware/，随 release/ 一并提交推送
+          if [ -f "firmware_out/firmware.tgz" ]; then
+            mkdir -p syno-modules/release/firmware
+            tar -zxf "firmware_out/firmware.tgz" -C syno-modules/release/firmware
+            echo "固件文件数: $(find syno-modules/release/firmware -type f | wc -l)"
+          else
+            echo "WARN: firmware.tgz 未下载，release/ 不含固件"
+          fi
 
           echo "=== 解压 ${COUNT} 个平台，release/ 目录结构 ==="
           ls syno-modules/release/
