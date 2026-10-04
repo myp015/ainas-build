@@ -28,9 +28,17 @@ jobs:
       # == 7.3 模块集，7.2 分支=7.3 复制，对齐基准=official/rd 7.2 模块集）。
       # 完整参考面 = RR cks 9 平台 + 三平台 7.2（共 12 组合），
       # 无 7.1（dsm_linux 无 7.1 分支）。
+      # Task#188 license 修复验证：补 epyc7002 7.2/7.3/7.4 全 12 组合
+      # （epyc7002 是唯一有 RR cks 参考面的平台，11 族 license 修复须全覆盖）。
       fail-fast: false
       matrix:
         include:
+          - version: 7.2
+            platform: epyc7002
+          - version: 7.3
+            platform: epyc7002
+          - version: 7.4
+            platform: epyc7002
           - version: 7.2
             platform: geminilakenk
           - version: 7.3
