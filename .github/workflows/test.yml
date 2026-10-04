@@ -29,9 +29,9 @@ jobs:
           # 7.4 apollolake → 4.4.302 树（binder/ashmem 移植验证基准平台）
           - version: "7.4"
             platform: apollolake
-          # 7.4 icelaked → 5.10.55 树
+          # 7.4 geminilakenk → 5.10.55 树（devlink.c GPL license 修复验证平台，Task#188）
           - version: "7.4"
-            platform: icelaked
+            platform: geminilakenk
 
     runs-on: ubuntu-latest
     steps:
