@@ -430,13 +430,12 @@ jobs:
           PARTY3RD_PATH="${ROOT_PATH}/syno-modules/thirdparty/firmware"
           [ -d "${PARTY3RD_PATH}" ] && cp -rf ${PARTY3RD_PATH}/* ${ROOT_PATH}/firmware/
 
-          echo "copy repo firmware (common + main5x + main4x) - Task#188"
+          echo "copy repo firmware (4.x + 5.x) - Task#188"
           REPO_FW="${ROOT_PATH}/ainas-modules/firmware"
-          [ -d "${REPO_FW}/common" ] && cp -rf ${REPO_FW}/common/* ${ROOT_PATH}/firmware/
-          [ -d "${REPO_FW}/main5x" ] && cp -rf ${REPO_FW}/main5x/* ${ROOT_PATH}/firmware/
-          [ -d "${REPO_FW}/main4x" ] && cp -rf ${REPO_FW}/main4x/* ${ROOT_PATH}/firmware/
-          WL5="${REPO_FW}/missing-whitelist-main5x.txt"
-          WL4="${REPO_FW}/missing-whitelist-main4x.txt"
+          [ -d "${REPO_FW}/4.x" ] && cp -rf ${REPO_FW}/4.x/* ${ROOT_PATH}/firmware/
+          [ -d "${REPO_FW}/5.x" ] && cp -rf ${REPO_FW}/5.x/* ${ROOT_PATH}/firmware/
+          WL5="${REPO_FW}/missing-whitelist-5x.txt"
+          WL4="${REPO_FW}/missing-whitelist-4x.txt"
 
           echo "extract all modules"
           for F in output/*.tgz; do

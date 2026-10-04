@@ -301,9 +301,8 @@ jobs:
           PARTY3RD_PATH="${ROOT_PATH}/ainas-cks/thirdparty/firmware"
           [ -d "${PARTY3RD_PATH}" ] && cp -rf ${PARTY3RD_PATH}/* ${ROOT_PATH}/firmware/
 
-          echo "copy repo firmware (common + cks) - Task#188"
+          echo "copy repo firmware (cks) - Task#188"
           REPO_FW="${ROOT_PATH}/ainas-modules/firmware"
-          [ -d "${REPO_FW}/common" ] && cp -rf ${REPO_FW}/common/* ${ROOT_PATH}/firmware/
           [ -d "${REPO_FW}/cks" ] && cp -rf ${REPO_FW}/cks/* ${ROOT_PATH}/firmware/
           WL="${REPO_FW}/missing-whitelist-cks.txt"
 
