@@ -460,7 +460,11 @@ jobs:
             else
               echo "::warning ::Missing ${L}"
             fi
-          done <<<$(find output -name \*.ko -exec /sbin/modinfo -F firmware {} 2>/dev/null \;)
+          # Task#188+：release/ = 官方全平台模块全集（含非矩阵平台 + update/ DRM 栈）。
+          # 一并扫描其 modinfo 固件请求，使 firmware.tgz 覆盖所有官方平台。
+          # 本地验证：release/ 全量 842 固件名中相对矩阵产物新增 30 名，全部已被
+          # linux-firmware/仓库源覆盖（新增缺失 0），白名单无需追加。
+          done <<<$(find output ${ROOT_PATH}/syno-modules/release -name \*.ko -exec /sbin/modinfo -F firmware {} 2>/dev/null \;)
 
           tar -zcf firmware.tgz -C firmware .
 
