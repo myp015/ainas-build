@@ -250,7 +250,18 @@ jobs:
           . ${ROOT_PATH}/ainas-lkm/compile.sh
 
           echo "makeEnvDeploy"
-          for i in $(seq 1 3); do makeEnvDeploy "${ROOT_PATH}" "${VERSION}" "${PLATFORM}" && break || { echo "Retry makeEnvDeploy ${i}/3"; sleep 5; }; done
+          for i in $(seq 1 3); do
+            if makeEnvDeploy "${ROOT_PATH}" "${VERSION}" "${PLATFORM}"; then
+              break
+            fi
+            if [ "${i}" -lt 3 ]; then
+              echo "Retry makeEnvDeploy ${i}/3"
+              sleep 30
+            else
+              echo "makeEnvDeploy failed after 3 tries"
+              exit 1
+            fi
+          done
 
           echo "makelkms"
           SRC_DIR="$(_lkm_src "${ROOT_PATH}" "${VERSION}" "${PLATFORM}")"
