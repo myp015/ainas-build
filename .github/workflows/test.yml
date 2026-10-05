@@ -33,7 +33,8 @@ jobs:
           - version: "7.4"
             platform: geminilakenk
           # 7.4 r1000nk → 5.10.55 树（补齐主流程 ixgbe 驱动验证平台，Task#188；
-          # devlink 官方内建=y 不动，ixgbe 靠内建解析，规避 devlink 模块化坑）
+          # 对齐 geminilakenk：官方内核无内建 devlink，发货 devlink/page_pool/dimlib
+          # 模块 + ixgbe depends=devlink，避免 devlink_* 缺符号 err -2）
           - version: "7.4"
             platform: r1000nk
 
