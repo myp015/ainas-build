@@ -223,12 +223,17 @@ jobs:
       - name: Checkout
         uses: actions/checkout@main
 
-      - name: Checkout
+      - name: Checkout ainas-lkm
         uses: actions/checkout@main
         with:
-          repository: RROrg/rr-lkms
-          token: ${{ secrets.RRORG }}
-          path: rr-lkms
+          repository: myp015/ainas-lkm
+          path: ainas-lkm
+
+      - name: Checkout redpill-lkm5
+        uses: actions/checkout@main
+        with:
+          repository: myp015/redpill-lkm5
+          path: redpill-lkm5
 
       - name: Init Env
         run: |
@@ -242,13 +247,14 @@ jobs:
           VERSION=${{ matrix.version }}
           PLATFORM=${{ matrix.platform }}
 
-          . ${ROOT_PATH}/rr-lkms/compile.sh
+          . ${ROOT_PATH}/ainas-lkm/compile.sh
 
           echo "makeEnvDeploy"
           for i in $(seq 1 3); do makeEnvDeploy "${ROOT_PATH}" "${VERSION}" "${PLATFORM}" && break || { echo "Retry makeEnvDeploy ${i}/3"; sleep 5; }; done
 
-          echo "makemodules"
-          makelkms "${ROOT_PATH}" "${VERSION}" "${PLATFORM}" "${ROOT_PATH}/rr-lkms" "${ROOT_PATH}/output"
+          echo "makelkms"
+          SRC_DIR="$(_lkm_src "${ROOT_PATH}" "${VERSION}" "${PLATFORM}")"
+          makelkms "${ROOT_PATH}" "${VERSION}" "${PLATFORM}" "${SRC_DIR}" "${ROOT_PATH}/output"
 
       - name: Upload to Artifacts
         uses: actions/upload-artifact@v7
@@ -278,7 +284,7 @@ jobs:
             if [ "$(echo ${{ inputs.version }} | cut -d '.' -f 1,2)" = "$(date +'%y.%-m')" ]; then
               VERSION="${{ inputs.version }}"
             else
-              LATEST_TAG="$(curl -skLH "Authorization: token ${{ secrets.RRORG }}" "https://api.github.com/repos/RROrg/rr-lkms/releases" | jq -r ".[0].tag_name" 2>/dev/null)"
+              LATEST_TAG="$(curl -skLH "Authorization: token ${{ secrets.AiNas }}" "https://api.github.com/repos/myp015/ainas-lkm/releases" | jq -r ".[0].tag_name" 2>/dev/null)"
               if [ -n "${LATEST_TAG}" ] && [ "$(echo ${LATEST_TAG} | cut -d '.' -f 1,2)" = "$(date +'%y.%-m')" ]; then  # format %y.%-m.$i
                 VERSION="$(echo ${LATEST_TAG} | awk -F '.' '{$3=$3+1}1' OFS='.')"
               else
@@ -327,6 +333,6 @@ jobs:
           tag: ${{ env.VERSION }}
           prerelease: ${{ inputs.prerelease }}
           artifacts: rp-lkms*.zip
-          owner: RROrg
-          repo: rr-lkms
-          token: ${{ secrets.RRORG }}
+          owner: myp015
+          repo: ainas-lkm
+          token: ${{ secrets.AiNas }}
