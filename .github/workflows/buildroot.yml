@@ -128,4 +128,6 @@ jobs:
             Kernel version: ${{ env.KERNEL_VERSION }}
           owner: myp015
           repo: buildroot
-          token: ${{ secrets.GITHUB_TOKEN }}
+          # GITHUB_TOKEN 仅限当前仓库（ainas-build），跨仓库发布 myp015/buildroot
+          # 需 PAT（secrets.AiNas 即用户 PAT，实测对 buildroot 有 release 写权限）
+          token: ${{ secrets.AiNas }}
