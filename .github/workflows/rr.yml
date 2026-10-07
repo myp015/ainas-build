@@ -4,6 +4,12 @@
 # This is free software, licensed under the MIT License.
 # See /LICENSE for more information.
 #
+# RR 原版结构（保持不动），仅仓库地址适配 myp015：
+#   checkout RROrg/rr      → myp015/rr（secrets.AiNas）
+#   func.sh get* 仓库适配   → myp015/{buildroot,ainas-cks,ainas-lkm,rr-addons,syno-modules}
+#   Release 发 RROrg/rr     → myp015/rr（secrets.AiNas）
+#   移除 rr-misc/docker     → myp015 无 rr-misc，myp015/rr 无 Dockerfile
+#
 
 name: Build RR
 
@@ -31,16 +37,22 @@ jobs:
       - name: Checkout
         uses: actions/checkout@main
         with:
-          repository: RROrg/rr
-          token: ${{ secrets.RRORG }}
+          repository: myp015/rr
+          token: ${{ secrets.AiNas }}
           path: rr
 
-      - name: Checkout
-        uses: actions/checkout@main
-        with:
-          repository: RROrg/rr-misc
-          token: ${{ secrets.RRORG }}
-          path: rr-misc
+      # Patch func.sh: RROrg → myp015（仓库地址适配）
+      - name: Patch func.sh to myp015
+        run: |
+          sed -i \
+            -e 's|https://api.github.com/repos/RROrg|https://api.github.com/repos/myp015|' \
+            -e 's|/rr-buildroot/|/buildroot/|g' \
+            -e 's|/rr-cks/|/ainas-cks/|g' \
+            -e 's|/rr-lkms/|/ainas-lkm/|g' \
+            -e 's|/rr-modules/|/syno-modules/|g' \
+            -e 's|rr-cks-\${TAG}.zip|ainas-cks-\${TAG}.zip|' \
+            -e 's|https://github.com/RROrg/rr|https://github.com/myp015/rr|' \
+            rr/scripts/func.sh
 
       # Install dependencies
       - name: Install dependencies
@@ -68,7 +80,7 @@ jobs:
             if [ "$(echo ${{ inputs.version }} | cut -d '.' -f 1,2)" = "$(date +'%y.%-m')" ]; then
               VERSION="${{ inputs.version }}"
             else
-              LATEST_TAG="$(curl -skLH "Authorization: token ${{ secrets.RRORG }}" "https://api.github.com/repos/RROrg/rr/releases" | jq -r ".[0].tag_name" 2>/dev/null)"
+              LATEST_TAG="$(curl -skLH "Authorization: token ${{ secrets.AiNas }}" "https://api.github.com/repos/myp015/rr/releases" | jq -r ".[0].tag_name" 2>/dev/null)"
               if [ -n "${LATEST_TAG}" ] && [ "$(echo ${LATEST_TAG} | cut -d '.' -f 1,2)" = "$(date +'%y.%-m')" ]; then  # format %y.%-m.$i
                 VERSION="$(echo ${LATEST_TAG} | awk -F '.' '{$3=$3+1}1' OFS='.')"
               else
@@ -109,7 +121,7 @@ jobs:
       # Convert po2mo, Get exts
       - name: Convert po2mo, Get extractor, LKMs, addons and Modules
         run: |
-          . rr/scripts/func.sh "${{ secrets.RRORG }}"
+          . rr/scripts/func.sh "${{ secrets.AiNas }}"
 
           echo "Get extractor"
           getCKs "rr/files/mnt/p3/cks" "true"
@@ -123,20 +135,11 @@ jobs:
           convertpo2mo "rr/files/initrd/opt/rr/lang"
           repackInitrd "rr/files/mnt/p3/initrd-rr" "rr/files/initrd"
 
-          echo "docker build and push"
-          if [ -n "${{ env.VERSION }}" ]; then
-            unpackInitrd "rr/files/mnt/p3/initrd-rr" "rr-misc/docker/rr/initrd"
-            echo "${{ secrets.DOCKERHUB_PASSWORD }}" | sudo docker login -u ${{ secrets.DOCKERHUB_USERNAME }} --password-stdin
-            sudo docker build -t ${{ secrets.DOCKERHUB_USERNAME }}/rr:${{ env.VERSION }} -t ${{ secrets.DOCKERHUB_USERNAME }}/rr:latest -f rr-misc/docker/rr/Dockerfile rr-misc/docker/rr/
-            sudo docker push ${{ secrets.DOCKERHUB_USERNAME }}/rr:${{ env.VERSION }}
-            sudo docker push ${{ secrets.DOCKERHUB_USERNAME }}/rr:latest
-          fi
-
       # Build incremental
       - name: Build image
         run: |
           cd rr
-          . scripts/func.sh "${{ secrets.RRORG }}"
+          . scripts/func.sh "${{ secrets.AiNas }}"
 
           echo "Create RR image"
           gzip -dc "files/initrd/opt/rr/grub.img.gz" >"grub.img"
@@ -270,6 +273,6 @@ jobs:
           body: |
             - Please do not upgrade this version now (In release testing...),
             - Please upgrade after updating the Changelog ...
-          owner: RROrg
+          owner: myp015
           repo: rr
-          token: ${{ secrets.RRORG }}
+          token: ${{ secrets.AiNas }}

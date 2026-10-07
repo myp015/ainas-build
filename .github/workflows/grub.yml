@@ -4,6 +4,10 @@
 # This is free software, licensed under the MIT License.
 # See /LICENSE for more information.
 #
+# RR 原版结构（保持不动），仅仓库地址适配 myp015：
+#   checkout RROrg/buildroot  → myp015/buildroot（secrets.AiNas）
+#   checkout RROrg/rr         → myp015/rr（secrets.AiNas，push grub.img.gz 回 rr）
+#
 
 name: Build grub
 
@@ -37,15 +41,15 @@ jobs:
       - name: Checkout
         uses: actions/checkout@main
         with:
-          repository: RROrg/buildroot
-          token: ${{ secrets.RRORG }}
+          repository: myp015/buildroot
+          token: ${{ secrets.AiNas }}
           path: buildroot
 
       - name: Checkout
         uses: actions/checkout@main
         with:
-          repository: RROrg/rr
-          token: ${{ secrets.RRORG }}
+          repository: myp015/rr
+          token: ${{ secrets.AiNas }}
           path: rr
 
       - name: Initialization environment

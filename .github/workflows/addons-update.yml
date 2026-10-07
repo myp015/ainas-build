@@ -4,6 +4,10 @@
 # This is free software, licensed under the MIT License.
 # See /LICENSE for more information.
 #
+# RR 原版结构（保持不动），仅仓库地址适配 myp015：
+#   checkout RROrg/rr-addons → myp015/rr-addons（secrets.AiNas）
+#   rr-misc 保持原样         → myp015 无 rr-misc 且上游已删（404），本 workflow 依赖它编译 SPK，仍不可用
+#
 
 name: Update addons update
 
@@ -29,8 +33,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@main
         with:
-          repository: RROrg/rr-addons
-          token: ${{ secrets.RRORG }}
+          repository: myp015/rr-addons
+          token: ${{ secrets.AiNas }}
           path: rr-addons
 
       - name: Checkout
