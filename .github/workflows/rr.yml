@@ -9,6 +9,7 @@
 #   func.sh get* 仓库适配   → myp015/{buildroot,ainas-cks,ainas-lkm,rr-addons,syno-modules}
 #   Release 发 RROrg/rr     → myp015/rr（secrets.AiNas）
 #   移除 rr-misc/docker     → myp015 无 rr-misc，myp015/rr 无 Dockerfile
+#   get* 过滤草稿           → select(.draft==false)，避免残留草稿 release 被 sort 误选为最新
 #
 
 name: Build RR
@@ -52,6 +53,7 @@ jobs:
             -e 's|/rr-modules/|/syno-modules/|g' \
             -e 's|rr-cks-\${TAG}.zip|ainas-cks-\${TAG}.zip|' \
             -e 's|https://github.com/RROrg/rr|https://github.com/myp015/rr|' \
+            -e 's#jq -r "\.\[\]\.tag_name"#jq -r '"'"'[.[] | select(.draft == false)] | .[].tag_name'"'"'#' \
             rr/scripts/func.sh
 
       # Install dependencies
