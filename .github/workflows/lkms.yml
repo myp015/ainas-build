@@ -222,16 +222,19 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@main
-
+        with:
+          token: ${{ secrets.AiNas }}
       - name: Checkout ainas-lkm
         uses: actions/checkout@main
         with:
+          token: ${{ secrets.AiNas }}
           repository: myp015/ainas-lkm
           path: ainas-lkm
 
       - name: Checkout ainas-lkm5
         uses: actions/checkout@main
         with:
+          token: ${{ secrets.AiNas }}
           repository: myp015/ainas-lkm5
           path: ainas-lkm5
 
@@ -280,7 +283,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@main
-
+        with:
+          token: ${{ secrets.AiNas }}
       - name: Init Env
         run: |
           git config --global user.email "github-actions[bot]@users.noreply.github.com"

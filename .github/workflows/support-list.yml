@@ -55,6 +55,7 @@ jobs:
         # 数据源 public 仓库，GITHUB_TOKEN 可读
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
+          token: ${{ secrets.AiNas }}
           repository: myp015/syno-modules
           ref: main
           path: syno-modules

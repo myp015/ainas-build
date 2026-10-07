@@ -57,7 +57,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@main
-
+        with:
+          token: ${{ secrets.AiNas }}
       - name: Checkout ainas-modules
         uses: actions/checkout@main
         with:

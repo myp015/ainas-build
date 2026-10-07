@@ -19,7 +19,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
-
+        with:
+          token: ${{ secrets.AiNas }}
       - name: Checkout
         uses: actions/checkout@main
         with:

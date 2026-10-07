@@ -39,10 +39,12 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@main
-
+        with:
+          token: ${{ secrets.AiNas }}
       - name: Checkout
         uses: actions/checkout@main
         with:
+          token: ${{ secrets.AiNas }}
           repository: myp015/ainas-buildroot
           path: buildroot
 
