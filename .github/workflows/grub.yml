@@ -6,7 +6,7 @@
 #
 # RR 原版结构（保持不动），仅仓库地址适配 myp015：
 #   checkout RROrg/buildroot  → myp015/buildroot（secrets.AiNas）
-#   checkout RROrg/rr         → myp015/rr（secrets.AiNas，push grub.img.gz 回 rr）
+#   checkout RROrg/rr         → myp015/ainas-rr（secrets.AiNas，push grub.img.gz 回 ainas-rr）
 #
 
 name: Build grub
@@ -48,7 +48,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@main
         with:
-          repository: myp015/rr
+          repository: myp015/ainas-rr
           token: ${{ secrets.AiNas }}
           path: rr
 

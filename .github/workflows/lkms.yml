@@ -229,11 +229,11 @@ jobs:
           repository: myp015/ainas-lkm
           path: ainas-lkm
 
-      - name: Checkout redpill-lkm5
+      - name: Checkout ainas-lkm5
         uses: actions/checkout@main
         with:
-          repository: myp015/redpill-lkm5
-          path: redpill-lkm5
+          repository: myp015/ainas-lkm5
+          path: ainas-lkm5
 
       - name: Init Env
         run: |

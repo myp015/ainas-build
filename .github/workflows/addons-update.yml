@@ -5,7 +5,7 @@
 # See /LICENSE for more information.
 #
 # RR 原版结构（保持不动），仅仓库地址适配 myp015：
-#   checkout RROrg/rr-addons → myp015/rr-addons（secrets.AiNas）
+#   checkout RROrg/rr-addons → myp015/ainas-addons（secrets.AiNas）
 #   rr-misc 保持原样         → myp015 无 rr-misc 且上游已删（404），本 workflow 依赖它编译 SPK，仍不可用
 #
 
@@ -33,7 +33,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@main
         with:
-          repository: myp015/rr-addons
+          repository: myp015/ainas-addons
           token: ${{ secrets.AiNas }}
           path: rr-addons
 
