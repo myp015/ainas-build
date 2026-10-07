@@ -5,9 +5,9 @@
 # See /LICENSE for more information.
 #
 # RR 原版结构（保持不动），仅仓库地址适配 myp015：
-#   checkout RROrg/buildroot        → myp015/buildroot（公开，免 RRORG token）
-#   version 查 RROrg/rr-buildroot   → myp015/buildroot（公开 API 免 token）
-#   Release 发 RROrg/rr-buildroot   → myp015/buildroot（GITHUB_TOKEN）
+#   checkout RROrg/buildroot        → myp015/ainas-buildroot（公开，免 RRORG token）
+#   version 查 RROrg/rr-buildroot   → myp015/ainas-buildroot（公开 API 免 token）
+#   Release 发 RROrg/rr-buildroot   → myp015/ainas-buildroot（GITHUB_TOKEN）
 #
 
 name: Build buildroot
@@ -43,7 +43,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@main
         with:
-          repository: myp015/buildroot
+          repository: myp015/ainas-buildroot
           path: buildroot
 
       - name: Free Disk Space (Ubuntu)
@@ -75,7 +75,7 @@ jobs:
             if [ "$(echo ${{ inputs.version }} | cut -d '.' -f 1,2)" = "$(date +'%y.%-m')" ]; then
               VERSION="${{ inputs.version }}"
             else
-              LATEST_TAG="$(curl -skL "https://api.github.com/repos/myp015/buildroot/releases" | jq -r ".[0].tag_name" 2>/dev/null)"
+              LATEST_TAG="$(curl -skL "https://api.github.com/repos/myp015/ainas-buildroot/releases" | jq -r ".[0].tag_name" 2>/dev/null)"
               if [ -n "${LATEST_TAG}" ] && [ "$(echo ${LATEST_TAG} | cut -d '.' -f 1,2)" = "$(date +'%y.%-m')" ]; then  # format %y.%-m.$i
                 VERSION="$(echo ${LATEST_TAG} | awk -F '.' '{$3=$3+1}1' OFS='.')"
               else
@@ -128,6 +128,6 @@ jobs:
             Kernel version: ${{ env.KERNEL_VERSION }}
           owner: myp015
           repo: buildroot
-          # GITHUB_TOKEN 仅限当前仓库（ainas-build），跨仓库发布 myp015/buildroot
+          # GITHUB_TOKEN 仅限当前仓库（ainas-build），跨仓库发布 myp015/ainas-buildroot
           # 需 PAT（secrets.AiNas 即用户 PAT，实测对 buildroot 有 release 写权限）
           token: ${{ secrets.AiNas }}
