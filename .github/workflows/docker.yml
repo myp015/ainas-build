@@ -48,21 +48,25 @@ jobs:
 
       - name: Calculate version
         run: |
-          # Calculate version
-          VERSION=""
-          if [ -n "${{ inputs.version }}" ]; then
-            if [ "$(echo ${{ inputs.version }} | cut -d '.' -f 1,2)" = "$(date +'%y.%-m')" ]; then
-              VERSION="${{ inputs.version }}"
-            else
-              LATEST_TAG="$(curl -skLH "Authorization: token ${{ secrets.DOCKERHUB_PASSWORD }}" "https://hub.docker.com/v2/repositories/${{ secrets.DOCKERHUB_USERNAME }}/${{ matrix.app }}/tags" | jq -r ".results[].name" | grep -v latest | sort -V | tail -n 1 2>/dev/null)"
-              if [ -n "${LATEST_TAG}" ] && [ "$(echo ${LATEST_TAG} | cut -d '.' -f 1,2)" = "$(date +'%y.%-m')" ]; then  # format %y.%-m.$i
-                VERSION="$(echo ${LATEST_TAG} | awk -F '.' '{$3=$3+1}1' OFS='.')"
-              else
-                VERSION="$(date +'%y.%-m').0"
-              fi
-            fi
+          # 按月低增版本号（26.10.0 / 26.10.1 ...），同月重复发布第 3 段 +1
+          # 显式传入 version 且格式匹配当前年月时，以传入为准；否则自动计算
+          # （对齐 cks.yml：原逻辑空输入时用时间戳 %Y%m%d%H%M，改为空输入也走自动低增）
+          if [ -n "${{ inputs.version }}" ] && [ "$(echo ${{ inputs.version }} | cut -d '.' -f 1,2)" = "$(date +'%y.%-m')" ]; then
+            VERSION="${{ inputs.version }}"
           else
-            VERSION="$(date +'%Y%m%d%H%M')"
+            # 自动：查 Docker Hub 对应 app 最新 tag，同月则第 3 段 +1，跨月则 .0
+            # （Docker Hub 命名空间独立，tag 重复 push 会覆盖，无需 git refs 防冲突）
+            LATEST_TAG="$(curl -skLH "Authorization: token ${{ secrets.DOCKERHUB_PASSWORD }}" "https://hub.docker.com/v2/repositories/${{ secrets.DOCKERHUB_USERNAME }}/${{ matrix.app }}/tags" | jq -r ".results[].name" | grep -v latest | sort -V | tail -n 1 2>/dev/null)"
+            if [ -n "${LATEST_TAG}" ] && [ "$(echo ${LATEST_TAG} | cut -d '.' -f 1,2)" = "$(date +'%y.%-m')" ]; then  # format %y.%-m.$i
+              if [ "$(echo ${LATEST_TAG} | awk -F '.' '{print NF}')" -ge 4 ]; then
+                # 旧格式 4 段 tag（如 26.9.13.1）不参与低增，回退到月份首版
+                VERSION="$(date +'%y.%-m').0"
+              else
+                VERSION="$(echo ${LATEST_TAG} | awk -F '.' '{$3=$3+1}1' OFS='.')"
+              fi
+            else
+              VERSION="$(date +'%y.%-m').0"
+            fi
           fi
 
           echo "VERSION: ${VERSION}"
