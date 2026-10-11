@@ -18,6 +18,10 @@ on:
         description: "pre release"
         default: false
         type: boolean
+      lkm_ref:
+        description: "ainas-lkm and ainas-lkm5 ref"
+        default: main
+        type: string
 
 jobs:
   build:
@@ -41,6 +45,7 @@ jobs:
         with:
           token: ${{ secrets.AiNas }}
           repository: myp015/ainas-lkm
+          ref: ${{ inputs.lkm_ref }}
           path: ainas-lkm
 
       - name: Checkout ainas-lkm5
@@ -48,6 +53,7 @@ jobs:
         with:
           token: ${{ secrets.AiNas }}
           repository: myp015/ainas-lkm5
+          ref: ${{ inputs.lkm_ref }}
           path: ainas-lkm5
 
       - name: Init Env
