@@ -280,6 +280,9 @@ jobs:
         shell: bash
         env:
           MODEL: ${{ matrix.model }}
+          # token 只能从 env 传入：本 run 块超过 21000 字符，
+          # 一旦块内出现 ${{ }} 就会被 GitHub 按表达式模板校验并报错
+          AINAS_TOKEN: ${{ secrets.AiNas }}
         run: |
           set -euo pipefail
 
@@ -409,7 +412,7 @@ jobs:
           # 仓库地址已直接写在 scripts/func.sh 里，这里不再 sed 替换
           # 这几个函数直接 rm -rf + mkdir + unzip 到目标目录，先拿到挂载点的写权限
           sudo chown "$(id -u):$(id -g)" "$SYSTEM_MNT"
-          . "$WORKDIR/scripts/func.sh" "${{ secrets.AiNas }}"
+          . "$WORKDIR/scripts/func.sh" "${AINAS_TOKEN}"
 
           getCKs     "$SYSTEM_MNT/cks"     "true"
           getLKMs    "$SYSTEM_MNT/lkms"    "true"
