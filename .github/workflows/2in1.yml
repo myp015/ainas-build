@@ -409,15 +409,16 @@ jobs:
           fi
 
           # ── 取 CKs / LKMs / addons / modules ───────────────────────
-          # 仓库地址已直接写在 scripts/func.sh 里，这里不再 sed 替换
-          # 这几个函数直接 rm -rf + mkdir + unzip 到目标目录，先拿到挂载点的写权限
-          sudo chown "$(id -u):$(id -g)" "$SYSTEM_MNT"
-          . "$WORKDIR/scripts/func.sh" "${AINAS_TOKEN}"
-
-          getCKs     "$SYSTEM_MNT/cks"     "true"
-          getLKMs    "$SYSTEM_MNT/lkms"    "true"
-          getAddons  "$SYSTEM_MNT/addons"  "true"
-          getModules "$SYSTEM_MNT/modules" "true"
+          # 仓库地址已直接写在 scripts/func.sh 里，这里不再 sed 替换。
+          # 这些函数会 rm -rf 目标目录，而 p3 内文件属 root，必须以 root 执行；
+          # 顺带让新落盘的文件保持 root 属主，与镜像其余部分一致。
+          sudo env AINAS_TOKEN="${AINAS_TOKEN}" WORKDIR="${WORKDIR}" SYSTEM_MNT="${SYSTEM_MNT}" bash -c '
+            . "${WORKDIR}/scripts/func.sh" "${AINAS_TOKEN}"
+            getCKs     "${SYSTEM_MNT}/cks"     "true"
+            getLKMs    "${SYSTEM_MNT}/lkms"    "true"
+            getAddons  "${SYSTEM_MNT}/addons"  "true"
+            getModules "${SYSTEM_MNT}/modules" "true"
+          '
 
           # ── Addons 处理 ────────────────────────────────────────────
           sudo mkdir -p "$SYSTEM_MNT/addons"
