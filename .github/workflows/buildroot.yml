@@ -46,7 +46,7 @@ jobs:
         with:
           token: ${{ secrets.AiNas }}
           repository: myp015/ainas-buildroot
-          path: buildroot
+          path: ainas-buildroot
 
       - name: Free Disk Space (Ubuntu)
         uses: jlumbroso/free-disk-space@main
@@ -111,7 +111,7 @@ jobs:
 
       - name: Build buildroot
         run: |
-          cd buildroot
+          cd ainas-buildroot
           chmod +x ./build_rr.sh
           . ./build_rr.sh "${{ inputs.br2ver }}" "${{ inputs.kerver }}"
 
@@ -120,8 +120,8 @@ jobs:
 
       - name: Zip modules
         run: |
-          cp -f buildroot/.rr-buildroot/output/images/bzImage bzImage-rr || exit 1
-          cp -f buildroot/.rr-buildroot/output/images/rootfs.cpio.zst initrd-rr || exit 1
+          cp -f ainas-buildroot/.rr-buildroot/output/images/bzImage bzImage-rr || exit 1
+          cp -f ainas-buildroot/.rr-buildroot/output/images/rootfs.cpio.zst initrd-rr || exit 1
 
           VERSION="${{ env.VERSION }}"
           VERSION="${VERSION:-"test"}"
@@ -133,7 +133,7 @@ jobs:
         if: success() && env.VERSION == ''
         uses: actions/upload-artifact@v7
         with:
-          name: buildroot
+          name: ainas-buildroot
           path: |
             buildroot*.zip
           retention-days: 5
@@ -149,7 +149,7 @@ jobs:
             Buildroot version: ${{ env.BUILDROOT_VERSION }}
             Kernel version: ${{ env.KERNEL_VERSION }}
           owner: myp015
-          repo: buildroot
+          repo: ainas-buildroot
           # GITHUB_TOKEN 仅限当前仓库（ainas-build），跨仓库发布 myp015/ainas-buildroot
-          # 需 PAT（secrets.AiNas 即用户 PAT，实测对 buildroot 有 release 写权限）
+          # 需 PAT（secrets.AiNas 即用户 PAT，实测对 ainas-buildroot 有 release 写权限）
           token: ${{ secrets.AiNas }}
