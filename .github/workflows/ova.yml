@@ -1,0 +1,865 @@
+#
+# Copyright (C) 2022 Ing <https://github.com/wjz304>
+#
+# This is free software, licensed under the MIT License.
+# See /LICENSE for more information.
+#
+
+name: OVA Build
+on:
+  workflow_dispatch:
+    inputs:
+      all_models:
+        description: "编译模式"
+        type: choice
+        options:
+          - 自选
+          - 全选
+        default: 全选
+      model_ds918p:
+        description: "DS918+"
+        type: boolean
+        default: false
+      model_ds920p:
+        description: "DS920+"
+        type: boolean
+        default: false
+      model_ds923p:
+        description: "DS923+"
+        type: boolean
+        default: false
+      model_ds925p:
+        description: "DS925+"
+        type: boolean
+        default: false
+      model_ds3622xsp:
+        description: "DS3622xs+"
+        type: boolean
+        default: false
+      model_sa6400:
+        description: "SA6400"
+        type: boolean
+        default: false
+      model_ds425p:
+        description: "DS425+"
+        type: boolean
+        default: false
+      model_dva3221:
+        description: "DVA3221"
+        type: boolean
+        default: false
+      model_dva1622:
+        description: "DVA1622"
+        type: boolean
+        default: false
+      custom_models:
+        description: "自定义型号(工作流未列出的,多个用逗号分隔,如 DS1621+,RS4021xs+)"
+        type: string
+        default: ""      
+      rr_version:
+        description: "RR version (可选,留空=latest;示例:26.4.0 或 v26.4.0)"
+        type: string
+        default: ""
+      dsm_version:
+        description: "DSM 版本编号（从 pats.xlsx 获取，选择 >= 7.2.1 的所有版本）"
+        type: choice
+        options:
+          - "7.2.1"
+          - "7.2.2"
+          - "7.3.0"
+          - "7.3.1"
+          - "7.3.2"
+          - "7.4.1"
+        default: "7.4.1"
+
+jobs:
+  resolve-release:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.pick.outputs.tag }}
+      asset_url: ${{ steps.pick.outputs.asset_url }}
+    steps:
+      - id: pick
+        shell: bash
+        run: |
+          set -euo pipefail
+          REQ_RAW="${{ inputs.rr_version }}"
+          REQ_TAG="$(printf '%s' "$REQ_RAW" | tr -d '[:space:]')"
+          REQ_TAG="${REQ_TAG#rr-}"
+          REQ_TAG="${REQ_TAG%.img.zip}"
+          REQ_TAG="${REQ_TAG#v}"
+
+          fetch_latest() {
+            curl -fsSL --connect-timeout 10 "https://api.github.com/repos/RROrg/rr/releases/latest"
+          }
+          fetch_tag() {
+            local t="$1"
+            curl -fsSL --connect-timeout 10 "https://api.github.com/repos/RROrg/rr/releases/tags/${t}"
+          }
+
+          if [ -z "$REQ_TAG" ] || [ "$REQ_TAG" = "latest" ]; then
+            JSON="$(fetch_latest)"
+          else
+            if ! JSON="$(fetch_tag "$REQ_TAG" 2>/dev/null)"; then
+              echo "[INFO] 指定版本 rr_version=${REQ_RAW} 未找到，回退到最新版本"
+              JSON="$(fetch_latest)"
+            fi
+          fi
+
+          RR_TAG="$(printf '%s' "$JSON" | jq -r '.tag_name' | sed 's/^v//')"
+          ASSET_URL="$(printf '%s' "$JSON" | jq -r '.assets[]? | select(.name | test("^rr-.*[.]img[.]zip$")) | .browser_download_url' | head -n1)"
+          if [ -z "$RR_TAG" ] || [ "$RR_TAG" = "null" ] || [ -z "$ASSET_URL" ] || [ "$ASSET_URL" = "null" ]; then
+            echo "[E] 下载失败 (rr_version=${REQ_RAW:-latest})"
+            exit 1
+          fi
+
+          echo "tag=$RR_TAG" >> "$GITHUB_OUTPUT"
+          echo "asset_url=$ASSET_URL" >> "$GITHUB_OUTPUT"
+
+  # 单独串行创建并确认 Release，避免 OVA matrix 任务并发创建同一标签。
+  ensure-release:
+    needs: resolve-release
+    runs-on: ubuntu-latest
+    steps:
+      - name: 创建或确认 OVA Release
+        shell: bash
+        env:
+          ACTION_TOKEN: ${{ secrets.AiNas }}
+          RR_TAG: ${{ needs.resolve-release.outputs.tag }}
+        run: |
+          set -euo pipefail
+          : "${ACTION_TOKEN:?缺少 ACTION_TOKEN}"
+          : "${RR_TAG:?缺少 RR_TAG}"
+          export GH_TOKEN="$ACTION_TOKEN"
+          export GH_REPO="myp015/ainas2in1"
+          RELEASE_TAG="OVA_rr${RR_TAG}"
+          for attempt in $(seq 1 12); do
+            if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+              echo "[INFO] Release 已确认可见: $RELEASE_TAG"
+              exit 0
+            fi
+            echo "[INFO] 创建或确认 Release: $RELEASE_TAG (${attempt}/12)"
+            set +e
+            create_out=$(gh release create "$RELEASE_TAG" \
+              --title "$RELEASE_TAG" \
+              --notes "OVA build artifacts for ${RR_TAG}" \
+              --latest=false 2>&1)
+            create_rc=$?
+            set -e
+            if [ "$create_rc" -eq 0 ]; then
+              echo "[INFO] Release 创建成功，等待 API 可见"
+            else
+              echo "$create_out"
+              if ! echo "$create_out" | grep -qiE 'already exists|already_exists|Validation Failed|HTTP 429|HTTP 502|HTTP 503|HTTP 504|rate limit|secondary rate'; then
+                exit "$create_rc"
+              fi
+            fi
+            sleep $((attempt * 5))
+          done
+          echo "[E] Release ${RELEASE_TAG} 创建/查询连续失败" >&2
+          exit 1
+
+  select-models:
+    runs-on: ubuntu-latest
+    outputs:
+      models: ${{ steps.pick.outputs.models }}
+    steps:
+      - id: pick
+        shell: bash
+        run: |
+          set -euo pipefail
+          MODELS=()
+
+          if [ "${{ inputs.all_models }}" = "全选" ]; then
+            echo "[INFO] 已开启全选，将编译所有支持的型号"
+            MODELS+=("DS918+" "DS920+" "DS923+" "DS925+" "DS3622xs+" "SA6400" "DS425+" "DVA3221" "DVA1622")
+          else
+            [ "${{ inputs.model_ds918p }}"    = "true" ] && MODELS+=("DS918+")
+            [ "${{ inputs.model_ds920p }}"    = "true" ] && MODELS+=("DS920+")
+            [ "${{ inputs.model_ds923p }}"    = "true" ] && MODELS+=("DS923+")
+            [ "${{ inputs.model_ds925p }}"    = "true" ] && MODELS+=("DS925+")
+            [ "${{ inputs.model_ds3622xsp }}" = "true" ] && MODELS+=("DS3622xs+")
+            [ "${{ inputs.model_sa6400 }}"    = "true" ] && MODELS+=("SA6400")
+            [ "${{ inputs.model_ds425p }}"    = "true" ] && MODELS+=("DS425+")
+            [ "${{ inputs.model_dva3221 }}"   = "true" ] && MODELS+=("DVA3221")
+            [ "${{ inputs.model_dva1622 }}"   = "true" ] && MODELS+=("DVA1622")
+          fi
+          
+          # 追加自定义型号（工作流未列出的型号）
+          CUSTOM_RAW="${{ inputs.custom_models }}"
+          if [ -n "$(printf '%s' "$CUSTOM_RAW" | tr -d '[:space:]')" ]; then
+            echo "[INFO] 检测到自定义型号输入: ${CUSTOM_RAW}"
+            IFS=',' read -ra CUSTOM_ARR <<< "$CUSTOM_RAW"
+            for cm in "${CUSTOM_ARR[@]}"; do
+              cm="$(echo "$cm" | xargs)"
+              [ -n "$cm" ] && MODELS+=("$cm")
+            done
+          fi
+
+          # 去重
+          UNIQ_MODELS=()
+          for m in "${MODELS[@]}"; do
+            skip=0
+            for u in "${UNIQ_MODELS[@]}"; do
+              [ "$u" = "$m" ] && { skip=1; break; }
+            done
+            [ $skip -eq 0 ] && UNIQ_MODELS+=("$m")
+          done
+          MODELS=("${UNIQ_MODELS[@]}")
+
+          if [ ${#MODELS[@]} -eq 0 ]; then
+            echo "[E] 请至少勾选一个型号"
+            exit 1
+          fi
+
+          JSON_OUT="["
+          for m in "${MODELS[@]}"; do
+            JSON_OUT+="\"$m\","
+          done
+          JSON_OUT="${JSON_OUT%,}]"
+          echo "models=$JSON_OUT" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: ${{ format('build ({0})', matrix.model) }}
+    needs: [resolve-release, select-models, ensure-release]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      # max-parallel: 3
+      matrix:
+        model: ${{ fromJson(needs.select-models.outputs.models) }}
+    env:
+      FORMAT: vmdk
+      LANGUAGE: zh_CN
+      KERNEL: official
+      ADDONS: acpid,reboottoloader,addincards,cpuinfo,expands,diskcompat,lsiutil,nvmevolume,powersched,remotefs,storagepanel,smartctl,trivial,apppatch,vmtools
+      ACTION_TOKEN: ${{ secrets.AiNas }}
+      RR_ASSET_URL: ${{ needs.resolve-release.outputs.asset_url }}
+      RR_TAG: ${{ needs.resolve-release.outputs.tag }}
+      DSM_LINE: ${{ inputs.dsm_version }}
+    steps:
+      - uses: actions/checkout@main
+
+      - name: 初始化环境
+        run: |
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git config --global user.name "github-actions[bot]"
+          sudo timedatectl set-timezone "Asia/Shanghai"
+
+      - name: checkout ainas2in1
+        uses: actions/checkout@v4
+        with:
+          repository: myp015/ainas2in1
+          token: ${{ secrets.AiNas }}
+          path: .2in1
+
+      - name: checkout rr
+        shell: bash
+        run: |
+          set -euo pipefail
+          : "${RR_TAG:?缺少 RR_TAG}"
+          : "${RR_ASSET_URL:?缺少 RR_ASSET_URL}"
+          FILENAME="rr-${RR_TAG}.zip"
+          curl -fsSL --connect-timeout 10 "$RR_ASSET_URL" -o "$FILENAME"
+          echo "TAG=$RR_TAG"        >> "$GITHUB_ENV"
+          echo "FILENAME=$FILENAME" >> "$GITHUB_ENV"
+
+      - name: 编译镜像
+        shell: bash
+        env:
+          MODEL: ${{ matrix.model }}
+        run: |
+          set -euo pipefail
+
+          # ── 目录变量 ──────────────────────────────────────────────
+          WORKDIR="$PWD"
+          AINAS2IN1_DIR="${WORKDIR}/.2in1"
+          STAGE_HELPER="/tmp/2in1-helper"
+          PAT_XLSX_URL="https://raw.githubusercontent.com/RROrg/rr/main/docs/pats.xlsx"
+          PAT_XLSX="/tmp/pats.xlsx"
+          DSM_INSTALL_DIR="/tmp/dsm-install"
+          GRUB_MNT="/mnt/p1"
+          SYSTEM_MNT="/mnt/p3"
+
+          # ── 版本映射 ───────────────────────────────────────────────
+          pick_dsm_version() {
+            local line="$1"
+            case "$line" in
+              7.2.1) printf '7.2.1-69057-1'   ;;
+              7.2.2) printf '7.2.2-72806-0'   ;;
+              7.3.0) printf '7.3.0-81180-0'   ;;
+              7.3.1) printf '7.3.1-86003-0'   ;;
+              7.3.2) printf '7.3.2-86009-0'   ;;
+              7.4.1)
+                python3 -m pip -q install --user openpyxl
+                DSM_VERSION_74=$(MODEL="${MODEL}" python3 -c "import os,re,urllib.request,openpyxl;url='https://raw.githubusercontent.com/RROrg/rr/main/docs/pats.xlsx';path='/tmp/pats.xlsx';urllib.request.urlretrieve(url,path);wb=openpyxl.load_workbook(path,data_only=True);ws=wb[wb.sheetnames[0]];model=os.environ['MODEL'];line_req='7.4.1';rows=[(('' if r[0] is None else str(r[0]).strip()),('' if len(r)<2 or r[1] is None else str(r[1]).strip()),('' if len(r)<3 or r[2] is None else str(r[2]).strip())) for r in ws.iter_rows(min_row=1,values_only=True)];rows=[t for t in rows if t[0] and t[1] and t[2] and not (t[0].lower()=='model' and t[1].lower().startswith('version'))];cand=[(v,u) for m,v,u in rows if m==model and v.startswith(line_req+'-')];allm=[(v,u) for m,v,u in rows if m==model];sel=cand if cand else allm;sel or (_ for _ in ()).throw(SystemExit(f'no pat found for model={model}'));best=sorted(sel,key=lambda x:[int(t) for t in re.findall(r'\d+',x[0])],reverse=True)[0];print(best[0])")
+                printf '%s' "$DSM_VERSION_74"
+                ;;
+              *)
+                printf '[E] 不支持的 DSM 版本: %s' "$line"
+                return 1
+                ;;
+            esac
+          }
+
+          DSM_LINE_REQ="${DSM_LINE:-7.3.2}"
+          export DSM_LINE_REQ
+          if echo "${MODEL}" | grep -Eq '^(DS925\+|DS425\+)$' && [ "${DSM_LINE_REQ}" = "7.2.1" ]; then
+            echo "[INFO] ${MODEL} 不支持 DSM 7.2.1，自动切换到 7.2.2"
+            DSM_LINE_REQ="7.2.2"
+          fi
+
+          DSM_VERSION="$(pick_dsm_version "${DSM_LINE_REQ}")"
+          DSM_LINE_SHORT="${DSM_LINE_REQ%.*}"
+          export DSM_LINE_SHORT
+
+          VER_MAIN="${DSM_VERSION%%-*}"
+          VER_MAIN_NODOT="${VER_MAIN//./}"
+          VER_BUILD="${DSM_VERSION#*-}"
+          VER_BUILD="${VER_BUILD%%-*}"
+          ARTIFACT_VERSION="${VER_MAIN_NODOT}_${VER_BUILD}"
+          SAFE_TAG="${TAG//./_}"
+          echo "SAFE_TAG=${SAFE_TAG}" >> "$GITHUB_ENV"
+
+          ARTIFACT="${MODEL}_${ARTIFACT_VERSION}_${SAFE_TAG}"
+          echo "[INFO] 型号=${MODEL} 目标DSM版本=${DSM_VERSION} DSM系列=${DSM_LINE_REQ} 制品版本=${ARTIFACT_VERSION}"
+
+          # ── 系统依赖 ───────────────────────────────────────────────
+          sudo apt-get update
+          sudo apt-get install -y gettext cpio zstd dosfstools rsync qemu-utils
+          unzip "$FILENAME" -d rr rr.img
+          cp -f rr/rr.img rr/rr.base.img
+
+          # ── GRUB 修补 ──────────────────────────────────────────────
+          GRUB_LOOP=$(sudo losetup -f)
+          sudo mkdir -p /mnt/p1 /mnt/p2 /mnt/p3
+          sudo losetup -P "$GRUB_LOOP" rr/rr.img
+
+          sudo mount -o rw "${GRUB_LOOP}p1" "$GRUB_MNT"
+          echo "[INFO] 开始修补 grub.cfg"
+          sudo env MODEL_ENV="$MODEL" python3 "$AINAS2IN1_DIR/script/patch-grub-cfg.py" "$GRUB_MNT/boot/grub/grub.cfg"
+          echo "[INFO] grub.cfg 修补成功"
+          sudo umount "$GRUB_MNT" || true
+          sudo losetup --detach "$GRUB_LOOP" || true
+
+          # ── 挂载 p3 分区 ───────────────────────────────────────────
+          DISK_LOOP=$(sudo losetup -f)
+          sudo losetup -P "$DISK_LOOP" rr/rr.img
+          sudo rm -rf "$SYSTEM_MNT"
+          sudo mkdir -p "$SYSTEM_MNT"
+          sudo mount "${DISK_LOOP}p3" "$SYSTEM_MNT"
+
+          # ── cpuinfo 修补 ───────────────────────────────────────────
+          echo "[INFO] 开始修补 cpuinfo"
+          CPUINFO_TGZ="$SYSTEM_MNT/addons/cpuinfo/all.tgz"
+          CPUINFO_WORK="/tmp/cpuinfo_patch"
+          if [ -f "$CPUINFO_TGZ" ]; then
+            rm -rf "$CPUINFO_WORK"
+            mkdir -p "$CPUINFO_WORK/extract" "$CPUINFO_WORK/rootfs"
+            sudo tar -zxf "$CPUINFO_TGZ" -C "$CPUINFO_WORK/extract"
+
+            PATCH_TARGET=""
+            REPACK_MODE=""
+            if [ -f "$CPUINFO_WORK/extract/all.tar" ]; then
+              REPACK_MODE="inner-tar"
+              sudo tar -xf "$CPUINFO_WORK/extract/all.tar" -C "$CPUINFO_WORK/rootfs"
+              [ -f "$CPUINFO_WORK/rootfs/root/usr/bin/cpuinfo.sh" ] && \
+                PATCH_TARGET="$CPUINFO_WORK/rootfs/root/usr/bin/cpuinfo.sh"
+            elif [ -f "$CPUINFO_WORK/extract/root/usr/bin/cpuinfo.sh" ]; then
+              REPACK_MODE="direct"
+              PATCH_TARGET="$CPUINFO_WORK/extract/root/usr/bin/cpuinfo.sh"
+            fi
+
+            if [ -n "$PATCH_TARGET" ]; then
+              python3 "$AINAS2IN1_DIR/script/patch-cpuinfo.py" "$PATCH_TARGET"
+              if [ "$REPACK_MODE" = "inner-tar" ]; then
+                (cd "$CPUINFO_WORK/rootfs"  && sudo tar -cf "$CPUINFO_WORK/extract/all.tar" .)
+                (cd "$CPUINFO_WORK/extract" && sudo tar -czf "$CPUINFO_TGZ" .)
+              else
+                (cd "$CPUINFO_WORK/extract" && sudo tar -czf "$CPUINFO_TGZ" .)
+              fi
+              echo "[INFO] cpuinfo all.tgz 重新打包成功 (mode=$REPACK_MODE)"
+            else
+              echo "[INFO] cpuinfo.sh 未在已知 all.tgz 结构中找到，跳过 cpuinfo 修补"
+            fi
+          else
+            echo "[INFO] $CPUINFO_TGZ 不存在，跳过 cpuinfo 修补"
+          fi
+
+          # ── initrd 修补与重打包（改用 2in1func.sh 的解包/重打包函数）──
+          . "$AINAS2IN1_DIR/script/2in1func.sh"
+
+          INITRD_SRC="$SYSTEM_MNT/initrd-rr"
+          INITRD_WORK="/tmp/initrd_work"
+          INITRD_NEW="/tmp/initrd-rr.new"
+
+          echo "[INFO] 使用 unpackInitrd 解包 initrd-rr"
+          sudo rm -rf "$INITRD_WORK" "$INITRD_NEW"
+          sudo mkdir -p "$INITRD_WORK"
+          unpackInitrd "$INITRD_SRC" "$INITRD_WORK"
+
+          cd "$INITRD_WORK"
+          sudo bash "$AINAS2IN1_DIR/script/replace_ainas_po_notice.sh"
+          sudo AINAS2IN1_DIR="$AINAS2IN1_DIR" bash -c 'set -euo pipefail; . "${AINAS2IN1_DIR}/script/2in1func.sh"; convertpo2mo opt/rr/lang'
+          # RR 版 menu.sh patch：升级菜单改为订单验证模式（本地包直接更新；在线下载需订单号验证 kind=rr）
+          sudo bash "$AINAS2IN1_DIR/script/rr_menu_patch.sh"
+          cd "$WORKDIR"
+
+          echo "[INFO] 使用 repackInitrd 重新打包 initrd-rr"
+          repackInitrd "$INITRD_SRC" "$INITRD_WORK" "$INITRD_NEW"
+          sudo cp -f "$INITRD_NEW" "$INITRD_SRC"
+          sudo sync
+          sudo rm -rf "$INITRD_WORK" "$INITRD_NEW"
+
+
+          sudo umount "$SYSTEM_MNT" || true
+          sudo rm -rf "$SYSTEM_MNT"
+
+          # ── 使用 RR Docker 编译镜像 ───────────────────────────────
+          cat > build.sh <<'EOF2'
+          set -eo pipefail
+          . menu.sh
+          echo "[INFO] 型号=${MODEL} 目标DSM版本=${DSM_VERSION}"
+          menu.sh modelMenu "${MODEL}"
+
+          LOCALE_FILE="$(dirname "${USER_CONFIG_FILE}")/.locale"
+          echo "${LANGUAGE}.UTF-8" >"${LOCALE_FILE}"
+          echo "[INFO] locale 文件内容: $(cat "${LOCALE_FILE}" 2>/dev/null || echo 缺失)"
+
+          # ── 写入 addons（只需一次，与联网无关）────────────────────
+          writeConfigKey "addons" "{}" "${USER_CONFIG_FILE}"
+          FORCE_NVME_CACHE=0
+          ADDONS_SEED="${ADDONS}"
+          echo "[INFO] ADDONS插件=${ADDONS_SEED}"
+          IFS=',' read -ra ADDON_ARR <<< "${ADDONS_SEED}"
+          declare -A __SEEN_ADDON=()
+          for A in "${ADDON_ARR[@]}"; do
+            if echo "${A}" | grep -q ':'; then
+              KEY="$(echo "${A}" | cut -d':' -f1 | xargs)"
+              VAL="$(echo "${A}" | cut -d':' -f2- | xargs)"
+            else
+              KEY="$(echo "${A}" | xargs)"
+              VAL=""
+            fi
+            [ -z "${KEY}" ] && continue
+            [ -n "${__SEEN_ADDON[${KEY}]}" ] && continue
+            __SEEN_ADDON[${KEY}]=1
+            writeConfigKey "addons.${KEY}" "${VAL}" "${USER_CONFIG_FILE}"
+          done
+          if echo "${MODEL}" | grep -Eq '^(DS918\+|DS1019\+|DS1621xs\+|RS1619xs)$'; then
+            FORCE_NVME_CACHE=1
+            KEY="nvmecache"
+            VAL=""
+            writeConfigKey "addons.${KEY}" "${VAL}" "${USER_CONFIG_FILE}"
+          fi
+          readConfigMap "addons" "${USER_CONFIG_FILE}" >/dev/null 2>&1 || true
+
+          # ── 选择版本(联网拉 pat) + 编译，带重试 ───────────────────
+          MAX_RETRY="${MAX_RETRY:-5}"
+          RETRY_SLEEP="${RETRY_SLEEP:-20}"
+
+          fetch_and_make() {
+            # productversMenu 会联网拉取 pat 信息
+            menu.sh productversMenu "${DSM_VERSION}"
+
+            # 校验 paturl：user-config.yml 中为 paturl: ""，空即联网失败，返回 7 触发重试
+            PAT_URL="$(readConfigKey "paturl" "${USER_CONFIG_FILE}" 2>/dev/null || echo '')"
+            if [ -z "${PAT_URL}" ] || [ "${PAT_URL}" = "null" ] || [ "${PAT_URL}" = '""' ]; then
+              echo "[WARN] paturl 为空，判定为联网失败"
+              return 7
+            fi
+            echo "[INFO] 已获取 paturl: ${PAT_URL}"
+
+            set +e
+            # RR 会把部分 ramdisk/addon 错误只写到 dialog/log，退出码仍可能为 0。
+            # 必须保存并扫描 make 输出，否则会发布可构建但无法从 RR 切换至 DSM 的 OVA。
+            menu.sh make 2>&1 | tee /tmp/make.log
+            local rc=${PIPESTATUS[0]}
+            set -e
+
+            if grep -Eq 'ramdisk patch 失败|installAddon: .*addon not found|patch 失败|ERROR:' /tmp/make.log; then
+              echo "[E] 检测到编译错误（ramdisk/addon patch 失败），拒绝发布该镜像"
+              return 1
+            fi
+
+            return "${rc}"
+          }
+
+          RC=0
+          for i in $(seq 1 "${MAX_RETRY}"); do
+            echo "[INFO] 第 ${i}/${MAX_RETRY} 次尝试(选版本+编译)"
+            set +e
+            fetch_and_make
+            RC=$?
+            set -e
+            if [ "${RC}" -eq 0 ]; then
+              echo "[INFO] 编译成功"; break
+            fi
+            echo "[WARN] 第 ${i} 次失败 (rc=${RC})"
+            [ -f "${LOG_FILE}" ] && cat "${LOG_FILE}" || true
+            # 仅对联网类错误(7)重试；其它错误直接停止
+            if [ "${RC}" -ne 7 ]; then
+              echo "[E] 非联网错误，停止重试"; break
+            fi
+            menu.sh cleanCache || true
+            [ "${i}" -lt "${MAX_RETRY}" ] && { echo "[INFO] ${RETRY_SLEEP}s 后重试"; sleep "${RETRY_SLEEP}"; }
+          done
+
+          if [ "${RC}" -ne 0 ]; then
+            echo "[E] menu.sh make 最终失败 (rc=${RC})"
+            [ -f "${LOG_FILE}" ] && cat "${LOG_FILE}" || true
+            exit "${RC}"
+          fi
+
+          rm -rf /mnt/p3/ssh || true
+          menu.sh cleanCache
+          EOF2
+
+
+          # 向 heredoc 脚本注入运行时变量（外层 shell 展开）
+          sed -i \
+            -e "s|\${MODEL}|${MODEL}|g" \
+            -e "s|\${DSM_VERSION}|${DSM_VERSION}|g" \
+            -e "s|\${LANGUAGE}|${LANGUAGE}|g" \
+            -e "s|\${ADDONS}|${ADDONS}|g" \
+            build.sh
+          chmod +x build.sh
+
+          RR_IMAGE_TAG="$TAG"
+          if [ "$TAG" != "25.9.7" ] && [ "$(printf '%s\n' "$TAG" "25.9.7" | sort -V | head -n1)" = "$TAG" ]; then
+            RR_IMAGE_TAG="25.9.7"
+          fi
+          echo "[INFO] RR Docker 镜像标签=${RR_IMAGE_TAG}"
+          docker pull "wjz304/rr:${RR_IMAGE_TAG}"
+          docker run --rm --privileged \
+            -v "$PWD/build.sh:/opt/rr/build.sh" \
+            -v "$PWD:$PWD" -w "$PWD" \
+            "wjz304/rr:${RR_IMAGE_TAG}" bash /opt/rr/build.sh
+
+          # ── 清理 p3 临时文件 ──────────────────────────────────────
+          sudo mkdir -p "$SYSTEM_MNT"
+          sudo mount "${DISK_LOOP}p3" "$SYSTEM_MNT" || true
+          sudo rm -rf "$SYSTEM_MNT/dl" "$SYSTEM_MNT/auxfiles" "$SYSTEM_MNT/logs" || true
+          sudo umount "$SYSTEM_MNT" || true
+          sudo losetup --detach "$DISK_LOOP"
+
+          # ── Repack 2GB 镜像与引导 ─────────────────────────────────
+          . "$AINAS2IN1_DIR/script/2in1func.sh"
+
+          USER_CONFIG="user-config.yml"
+          USER_LOOP=$(sudo losetup -f)
+          sudo losetup -P "$USER_LOOP" rr/rr.img
+          sudo mkdir -p /mnt/p1
+          sudo mount "${USER_LOOP}p1" /mnt/p1
+          cp -f /mnt/p1/user-config.yml "$USER_CONFIG" 2>/dev/null || true
+          sudo umount /mnt/p1 || true
+          sudo losetup --detach "$USER_LOOP" || true
+
+          if [ "$(printf '%s\n' "${TAG}" "26.2.2" | sort -V | head -n1)" = "26.2.2" ]; then
+            GRUB_IMG="ainas/grub2.14.img.gz"
+          else
+            GRUB_IMG="ainas/grub2.12.img.gz"
+          fi
+          echo "[INFO] 已为当前 rr 标签选择引导镜像: ${GRUB_IMG}"
+
+          gzip -dc "$GRUB_IMG" > rr/rr_2GB.img
+          repack_rr_Img rr/rr.img rr/rr_2GB.img
+          rm -f rr/rr.img
+          mv -f rr/rr_2GB.img rr/rr.img
+          echo "[INFO] 最终打包完成的镜像大小: $(stat -c%s rr/rr.img) 字节"
+
+            # ── 解析 pats.xlsx 匹配 PAT 下载地址 ─────────────────────
+            echo "[INFO] 正在解析 pats.xlsx 并匹配 PAT 下载地址"
+            curl -fsSL --connect-timeout 15 "$PAT_XLSX_URL" -o "$PAT_XLSX"
+
+            python3 -m pip -q install --user openpyxl
+            PAT_LINE=$(python3 -c "import os,re,openpyxl;wb=openpyxl.load_workbook('/tmp/pats.xlsx',data_only=True);ws=wb[wb.sheetnames[0]];model=os.environ['MODEL'];line_req=os.environ.get('DSM_LINE_REQ','7.3.2');rows=[(('' if r[0] is None else str(r[0]).strip()),('' if len(r)<2 or r[1] is None else str(r[1]).strip()),('' if len(r)<3 or r[2] is None else str(r[2]).strip())) for r in ws.iter_rows(min_row=1,values_only=True)];rows=[t for t in rows if t[0] and t[1] and t[2] and not (t[0].lower()=='model' and t[1].lower().startswith('version'))];cand=[(v,u) for m,v,u in rows if m==model and v.startswith(line_req+'-')];allm=[(v,u) for m,v,u in rows if m==model];sel=cand if cand else allm;sel or (_ for _ in ()).throw(SystemExit(f'no pat found for model={model}'));best=sorted(sel,key=lambda x:[int(t) for t in re.findall(r'\\d+',x[0])],reverse=True)[0];print(best[0]+'\t'+best[1])")
+          PAT_VERSION="${PAT_LINE%%$'\t'*}"
+          PAT_URL="${PAT_LINE#*$'\t'}"
+          [ -n "$PAT_VERSION" ] && [ -n "$PAT_URL" ] || { echo "[E] PAT 解析失败"; exit 1; }
+          if [[ "$PAT_VERSION" != "${DSM_LINE_REQ}-"* ]]; then
+            echo "[E] PAT 版本不匹配: req=${DSM_LINE_REQ}, got=${PAT_VERSION}"
+            exit 1
+          fi
+          echo "[INFO] PAT_VERSION=$PAT_VERSION"
+          echo "[INFO] PAT_URL=$PAT_URL"
+          VER_MAIN="${PAT_VERSION%%-*}"
+          VER_MAIN_NODOT="${VER_MAIN//./}"
+          VER_BUILD="${PAT_VERSION#*-}"
+          VER_BUILD="${VER_BUILD%%-*}"
+          ARTIFACT_VERSION="${VER_MAIN_NODOT}_${VER_BUILD}"
+          ARTIFACT="${MODEL}_${ARTIFACT_VERSION}_${SAFE_TAG}"
+          echo "[INFO] 制品重命名为: $ARTIFACT"
+
+          mkdir -p "$DSM_INSTALL_DIR"
+          PAT_FILE="$DSM_INSTALL_DIR/$(basename "$PAT_URL")"
+          curl -fsSL --connect-timeout 20 "$PAT_URL" -o "$PAT_FILE"
+          ls -lh "$PAT_FILE"
+
+          # ── 启动 DSM 安装容器 ─────────────────────────────────────
+          echo "[INFO] 正在使用 ainas2in1 docker-compose 启动 DSM 安装容器"
+          cp -f "$AINAS2IN1_DIR/docker/vm-docker-compose.yaml" "$WORKDIR/rr/docker-compose.yaml"
+          sed -i 's/^\([[:space:]]*container_name:[[:space:]]*\).*/\1dsm/' "$WORKDIR/rr/docker-compose.yaml"
+          sed -i "s#file=/rr.img#file=/storage/alpine/rr.img#g" "$WORKDIR/rr/docker-compose.yaml"
+          cd "$WORKDIR/rr"
+          if [ ! -f "$WORKDIR/rr/rr.img" ]; then
+            echo "[E] rr.img 不存在于 $WORKDIR/rr/rr.img"
+            exit 1
+          fi
+          docker compose -f docker-compose.yaml down || true
+          docker rm -f dsm >/dev/null 2>&1 || true
+
+          # ── /dev/kvm 权限检查 ─────────────────────────────────────
+          if [ -e /dev/kvm ]; then
+            echo "[INFO] /dev/kvm 存在，开放权限以启用 QEMU 硬件加速"
+            echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules >/dev/null
+            sudo udevadm control --reload-rules || true
+            sudo udevadm trigger --name-match=kvm || true
+            sudo chmod 0666 /dev/kvm || true
+            ls -l /dev/kvm || true
+          else
+            echo "[INFO] /dev/kvm 不存在，QEMU 将使用软件模拟（速度较慢）"
+          fi
+
+          # ── 容器启动函数 ──────────────────────────────────────────
+          start_dsm_container() {
+            echo "[INFO] 正在（重新）启动 dsm 容器: down -v + up"
+            docker compose -f docker-compose.yaml down -v || true
+            docker rm -f dsm >/dev/null 2>&1 || true
+            docker compose -f docker-compose.yaml up -d
+            echo "[INFO] dsm 容器已启动，输出前 60s 启动日志"
+            docker ps --filter "name=^dsm$" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
+            timeout 60 docker logs -f dsm 2>&1 || true
+          }
+
+          # ── 端口就绪探活 ──────────────────────────────────────────
+          BOOT_READY_TIMEOUT="${BOOT_READY_TIMEOUT:-360}"
+          MAX_RESTART="${MAX_RESTART:-1}"
+          wait_port_ready() {
+            local deadline=$(( $(date +%s) + BOOT_READY_TIMEOUT ))
+            while (( $(date +%s) < deadline )); do
+              if ! docker ps --filter "name=^dsm$" --filter "status=running" -q | grep -q .; then
+                echo "[INFO] dsm 容器已退出"
+                return 1
+              fi
+              if timeout 3 bash -lc '</dev/tcp/127.0.0.1/5000' 2>/dev/null; then
+                if curl -s --max-time 5 "http://127.0.0.1:5000/webman/get_state.cgi" | grep -qiE '"success"|Synology|DiskStation|<html'; then
+                  return 0
+                fi
+              fi
+              sleep 5
+            done
+            return 1
+          }
+
+          # ── 重试循环 ──────────────────────────────────────────────
+          BOOT_OK=0
+          for ATTEMPT in $(seq 0 "$MAX_RESTART"); do
+            start_dsm_container
+            if wait_port_ready; then
+              echo "[INFO] 5000 端口已就绪 (attempt=${ATTEMPT})，继续安装流程"
+              BOOT_OK=1
+              break
+            fi
+            echo "[INFO] attempt=${ATTEMPT} 等待 ${BOOT_READY_TIMEOUT}s 后 5000 端口仍未就绪（loader 可能未引导进 DSM）"
+          done
+
+          if [ "$BOOT_OK" != "1" ]; then
+            echo "[E] 重试 ${MAX_RESTART} 次后 DSM 5000 端口仍未就绪（loader 引导失败），退出"
+            docker logs --tail 200 dsm 2>&1 || true
+            exit 7
+          fi
+
+          HOST_PORT=5000
+          echo "[INFO] 正在执行自动安装监控程序"
+          set +e
+          MAX_MINUTES=5 TARGET_PORT=${HOST_PORT} bash "$AINAS2IN1_DIR/script/dsm_auto_install.sh" 127.0.0.1 "$PAT_FILE"
+          FIRST_RC=$?
+          set -e
+          if [ "$FIRST_RC" -ne 0 ]; then
+            if [ "$FIRST_RC" -eq 6 ]; then
+              echo "[E] 检测到 error_version，直接退出"
+              exit 6
+            fi
+            echo "[E] 首次 5 分钟内未进入安装程序 (rc=${FIRST_RC})，直接退出"
+            exit "$FIRST_RC"
+          fi
+
+          echo "[INFO] 安装完成，正在抓取容器日志快照"
+          docker logs --tail 200 dsm 2>&1 || true
+
+          # ── 等待重启后 Web 就绪 ───────────────────────────────────
+          REBOOT_OK=0
+          for i in $(seq 1 60); do
+            if ! docker ps --filter "name=^dsm$" --filter "status=running" -q | grep -q .; then
+              echo "[E] dsm 容器已退出，启动失败"
+              break
+            fi
+            OUT=$(curl -sS --max-time 3 http://127.0.0.1:5000 2>/dev/null || true)
+            if [ -n "$OUT" ]; then
+              echo "[INFO] 安装成功 (try=$i)，正在等待系统重启并初始化..."
+              REBOOT_OK=1
+              break
+            fi
+            sleep 10
+          done
+
+          if [ "$REBOOT_OK" != "1" ]; then
+            echo "[E] 重启后 Web 未就绪，启动失败"
+            docker logs --tail 200 dsm 2>&1 || true
+            exit 1
+          fi
+
+          # ── 套件安装等待 ──────────────────────────────────────────
+          WAIT_TOTAL=300; WAIT_STEP=5; elapsed=0; dots=""
+          while (( elapsed < WAIT_TOTAL )); do
+            dots+="."
+
+            printf "\r\033[K[INFO] 正在安装系统套件 %s (%ds/%ds)" \
+              "$dots" "$elapsed" "$WAIT_TOTAL"
+
+            if ! docker ps --filter "name=^dsm$" --filter "status=running" -q | grep -q .; then
+              printf "\n[E] dsm 容器已退出\n"
+              break
+            fi
+
+            sleep "$WAIT_STEP"
+            elapsed=$(( elapsed + WAIT_STEP ))
+          done
+
+          printf "\n"
+
+          docker logs --tail 300 dsm 2>&1 || true
+
+          echo "[INFO] DSM安装成功，正在停止并删除容器"
+          cd "$WORKDIR/rr"
+          docker compose -f docker-compose.yaml down -v || true
+
+          cd "$WORKDIR"
+          echo "[INFO] 开始重命名并导出镜像"
+
+          if [ ! -f "rr/rr.img" ]; then
+            echo "[E] rr/rr.img 不存在，无法导出 OVA"
+            exit 1
+          fi
+          if [ ! -f "rr/data.qcow2" ]; then
+            echo "[E] rr/data.qcow2 不存在，无法导出双盘 OVA"
+            exit 1
+          fi
+
+          . "$AINAS2IN1_DIR/script/2in1func.sh"
+          convertova rr/rr.img rr/data.qcow2 "${ARTIFACT}.ova"
+          ls -lh "${ARTIFACT}.ova"
+          echo "[INFO] 开始 gzip 压缩: ${ARTIFACT}.ova -> ${ARTIFACT}.ova.gz"
+          gzip -1 -c "${ARTIFACT}.ova" > "${ARTIFACT}.ova.gz"
+          echo "[INFO] gzip 压缩完成: ${ARTIFACT}.ova.gz"
+          ZIP_NAME="${ARTIFACT}.ova.gz"
+
+          rm -f rr/rr.base.img
+          rm -rf "$AINAS2IN1_DIR" "${STAGE_HELPER:-}"
+
+          echo "ARTIFACT=${ARTIFACT}"    >> "$GITHUB_ENV"
+          echo "ARTIFACT_ZIP=$ZIP_NAME"  >> "$GITHUB_ENV"
+
+
+      - name: 安装失败时收尾并上传 rr.img
+        if: failure()
+        shell: bash
+        env:
+          MODEL: ${{ matrix.model }}
+        run: |
+          set -uo pipefail   # 注意：这里不加 -e，收尾步骤要尽量把能做的都做完
+
+          WORKDIR="$PWD"
+
+          # ① 先停掉可能仍在运行、占用 rr.img 的 dsm 容器
+          if [ -f "$WORKDIR/rr/docker-compose.yaml" ]; then
+            ( cd "$WORKDIR/rr" && docker compose -f docker-compose.yaml down -v ) || true
+          fi
+          docker rm -f dsm >/dev/null 2>&1 || true
+
+          # ② 卸载可能残留的挂载点，摘除 loop 设备，避免读到不一致镜像
+          sudo umount /mnt/p1 /mnt/p3 2>/dev/null || true
+          for L in $(losetup -j "$WORKDIR/rr/rr.img" 2>/dev/null | cut -d: -f1); do
+            sudo losetup --detach "$L" || true
+          done
+          sudo sync
+
+          # ③ 确认成品镜像存在后再压缩
+          if [ ! -f "$WORKDIR/rr/rr.img" ]; then
+            echo "[E] rr/rr.img 不存在，可能失败在编译更早阶段，跳过上传"
+            exit 0
+          fi
+          echo "[INFO] rr.img 大小: $(stat -c%s "$WORKDIR/rr/rr.img") 字节"
+
+          OUT="$WORKDIR/rr/rr-failed-${MODEL}.img.gz"
+          gzip -1 -c "$WORKDIR/rr/rr.img" > "$OUT"
+          ls -lh "$OUT"
+          echo "DEBUG_IMG=$OUT" >> "$GITHUB_ENV"
+
+       #- name: 上传失败调试镜像到 Actions 制品区
+        #if: failure()
+       # uses: actions/upload-artifact@v4
+        #with:
+          #name: rr-img-failed-${{ matrix.model }}
+          #path: rr/rr-failed-${{ matrix.model }}.img.gz
+          #retention-days: 7
+          #if-no-files-found: warn
+
+
+
+      - name: 发布制品到 ainas2in1 Release
+        shell: bash
+        env:
+          ACTION_TOKEN: ${{ secrets.AiNas }}
+        run: |
+          set -euo pipefail
+          : "${TAG:?缺少 TAG}"
+          : "${ACTION_TOKEN:?缺少 ACTION_TOKEN}"
+
+          export GH_TOKEN="$ACTION_TOKEN"
+          export GH_REPO="myp015/ainas2in1"
+          RELEASE_TAG="OVA_rr${TAG}"
+
+          ASSETS=()
+          if [ -n "${ARTIFACT_ZIP:-}" ] && [ -f "$GITHUB_WORKSPACE/$ARTIFACT_ZIP" ]; then
+            ART_PATH="$GITHUB_WORKSPACE/$ARTIFACT_ZIP"
+            ART_SIZE=$(stat -c%s "$ART_PATH")
+            MAX_ASSET=2147483648
+            if [ "$ART_SIZE" -ge "$MAX_ASSET" ]; then
+              echo "[INFO] 制品过大 (${ART_SIZE} bytes)，拆分为 <=1.9GB 分片"
+              rm -f "${ART_PATH}.part."* || true
+              split -b 1900m -d -a 3 "$ART_PATH" "${ART_PATH}.part."
+              ls -lh "${ART_PATH}.part."*
+              for PART in "${ART_PATH}.part."*; do
+                ASSETS+=("$PART")
+              done
+            else
+              ASSETS+=("$ART_PATH")
+            fi
+          fi
+          if [ ${#ASSETS[@]} -eq 0 ]; then
+            echo "[E] 没有可上传的 Release 资产"
+            exit 1
+          fi
+
+          # Release 已由串行 ensure-release job 创建；当前 matrix job 只负责上传自身资产。
+          for ATTEMPT in 1 2 3 4 5; do
+            echo "[INFO] 上传资产 attempt ${ATTEMPT}: ${ASSETS[*]}"
+            set +e
+            UPLOAD_OUT=$(gh release upload "$RELEASE_TAG" "${ASSETS[@]}" --clobber 2>&1)
+            UPLOAD_RC=$?
+            set -e
+            if [ "$UPLOAD_RC" -eq 0 ]; then
+              exit 0
+            fi
+            echo "$UPLOAD_OUT"
+            if echo "$UPLOAD_OUT" | grep -qiE 'HTTP 404|HTTP 422|already exists|409|HTTP 429|HTTP 502|HTTP 503|HTTP 504|rate limit|secondary rate'; then
+              echo "[INFO] 上传暂时失败，${ATTEMPT}0s 后重试"
+              sleep $((ATTEMPT * 10))
+              continue
+            fi
+            exit "$UPLOAD_RC"
+          done
+          exit 1
+          
