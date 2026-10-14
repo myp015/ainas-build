@@ -296,6 +296,9 @@ jobs:
           GRUB_MNT="/mnt/p1"
           SYSTEM_MNT="/mnt/p3"
 
+          # 流程函数库（patch_* / docker_* / repack_* / dsm_setup）
+          . "$AINAS2IN1_DIR/script/2in1func.sh"
+
           # ── UPDATE 特殊处理 ────────────────────────────────────────
           UPDATE_ONLY="false"
           UPDATE_FLAVOR=""
@@ -358,35 +361,18 @@ jobs:
           unzip "$FILENAME" -d rr rr.img
           cp -f rr/rr.img rr/rr.base.img
 
-          # ── GRUB 修补 ──────────────────────────────────────────────
+          # ── 改分区 label（改的是分区表属性，与 p1 内容修补无关）───
           GRUB_LOOP=$(sudo losetup -f)
           sudo mkdir -p /mnt/p1 /mnt/p2 /mnt/p3
           sudo losetup -P "$GRUB_LOOP" rr/rr.img
-
           sudo e2label "${GRUB_LOOP}p2" RDGZ
           sudo e2label "${GRUB_LOOP}p3" RAMDISK
           sudo fatlabel "${GRUB_LOOP}p1" AiNasloader
-
-          sudo mount -o rw "${GRUB_LOOP}p1" "$GRUB_MNT"
-          echo "[INFO] 开始修补 grub.cfg"
-          sudo cp -f "$GRUB_MNT/boot/grub/grub.cfg" /tmp/grub.cfg
-          sudo bash -c 'cd /tmp && bash "$1" "$2" "$3"' _ "$AINAS2IN1_DIR/script/2in1_grubcfg_patch.sh" "$MODEL" "$DSM_LINE_SHORT"
-          sudo cp -f /tmp/grub.cfg "$GRUB_MNT/boot/grub/grub.cfg"
-          echo "[INFO] grub.cfg 修补成功"
-
-          # 确保 p1 存在 AINAS_VERSION（原版为 RR_VERSION，改名以匹配 consts.sh / update-list.yml）
-          if [ -f "$GRUB_MNT/RR_VERSION" ]; then
-            sudo cp -f "$GRUB_MNT/RR_VERSION" "$GRUB_MNT/AINAS_VERSION"
-            echo "[INFO] p1 已由 RR_VERSION 生成 AINAS_VERSION: $(sudo cat "$GRUB_MNT/AINAS_VERSION" | tr -d '\r\n ')"
-          elif [ -f "$GRUB_MNT/AINAS_VERSION" ]; then
-            echo "[INFO] p1 AINAS_VERSION 已存在: $(sudo cat "$GRUB_MNT/AINAS_VERSION" | tr -d '\r\n ')"
-          else
-            echo "[WARN] p1 无 AINAS_VERSION / RR_VERSION，跳过版本文件处理"
-          fi
-
-          sudo umount "$GRUB_MNT" || true
           sudo losetup --detach "$GRUB_LOOP" || true
-          
+
+          # ── GRUB 修补 ──────────────────────────────────────────────
+          patch_2in1_p1 rr/rr.img "$GRUB_MNT" "$AINAS2IN1_DIR" "$MODEL" "$DSM_LINE_SHORT"
+
           # ── 早删 rr.base.img 备份，释放约 15G ──
           rm -f rr/rr.base.img || true
           echo "[INFO] 已删除 rr.base.img 备份"
@@ -420,123 +406,11 @@ jobs:
             getModules "${SYSTEM_MNT}/modules" "true"
           '
 
-          # ── Addons 处理 ────────────────────────────────────────────
-          sudo mkdir -p "$SYSTEM_MNT/addons"
-          sudo cp -a "$AINAS2IN1_DIR/addons/nvmevolume" "$SYSTEM_MNT/addons/" || true
-          sudo cp -a "$AINAS2IN1_DIR/addons/resizepart"  "$SYSTEM_MNT/addons/" || true
-          sudo rm -rf "$SYSTEM_MNT/addons/updatenotify" "$SYSTEM_MNT/addons/mountloader" || true
+          # ── Addons 处理 + cpuinfo 修补 ─────────────────────────────
+          patch_2in1_addons "$SYSTEM_MNT" "$MODEL" "$AINAS2IN1_DIR"
 
-          DISK_TGZ="$SYSTEM_MNT/addons/disks/all.tgz"
-          DISK_WORK="/tmp/disks_patch"
-          if echo "${MODEL}" | grep -Eq '^(DS918\+|DS3622xs\+|DVA3221)$'; then
-            echo "[INFO] 开始替换磁盘驱动（非DT型号）"
-            if [ -f "$DISK_TGZ" ]; then
-              rm -rf "$DISK_WORK"
-              mkdir -p "$DISK_WORK/extract" "$DISK_WORK/rootfs"
-              sudo tar -zxf "$DISK_TGZ" -C "$DISK_WORK/extract"
-              if [ -f "$DISK_WORK/extract/root/usr/bin/disks.sh" ]; then
-                sudo rm -rf "$SYSTEM_MNT/addons/disks"
-                sudo mkdir -p "$SYSTEM_MNT/addons"
-                sudo cp -a "$AINAS2IN1_DIR/addons/disks" "$SYSTEM_MNT/addons/"
-                echo "[INFO] 磁盘驱动已从 ainas-2in1 仓库替换成功"
-              else
-                echo "[INFO] disks.sh 未找到，跳过磁盘驱动替换"
-              fi
-            else
-              echo "[INFO] $DISK_TGZ 不存在，跳过磁盘驱动替换"
-            fi
-          else
-            echo "[INFO] 开始修补磁盘驱动（DT型号）"
-            if [ -f "$DISK_TGZ" ]; then
-              rm -rf "$DISK_WORK"
-              mkdir -p "$DISK_WORK/extract"
-              sudo tar -zxf "$DISK_TGZ" -C "$DISK_WORK/extract"
-              if [ -f "$DISK_WORK/extract/root/usr/bin/disks.sh" ]; then
-                (cd "$DISK_WORK/extract/root/usr/bin" && bash "$AINAS2IN1_DIR/script/2in1_disk_patch.sh")
-                if ! (cd "$DISK_WORK/extract/root/usr/bin" && grep -q 'RAMDISK' disks.sh); then
-                  echo "[E] 磁盘驱动补丁验证失败：RAMDISK 标记未找到"
-                  exit 1
-                fi
-                (cd "$DISK_WORK/extract/root/usr/bin" && grep -n 'disks.sh' disks.sh | sed -n '1,5p' || true)
-                (cd "$DISK_WORK/extract" && sudo tar -czf "$DISK_TGZ" .)
-                echo "[INFO] 磁盘驱动修补成功"
-              else
-                echo "[INFO] disks.sh 未找到，跳过磁盘驱动修补"
-              fi
-            else
-              echo "[INFO] $DISK_TGZ 不存在，跳过磁盘驱动修补"
-            fi
-          fi
-
-          # ── cpuinfo 修补 ───────────────────────────────────────────
-          echo "[INFO] 开始修补 cpuinfo"
-          CPUINFO_TGZ="$SYSTEM_MNT/addons/cpuinfo/all.tgz"
-          CPUINFO_WORK="/tmp/cpuinfo_patch"
-          if [ -f "$CPUINFO_TGZ" ]; then
-            rm -rf "$CPUINFO_WORK"
-            mkdir -p "$CPUINFO_WORK/extract" "$CPUINFO_WORK/rootfs"
-            sudo tar -zxf "$CPUINFO_TGZ" -C "$CPUINFO_WORK/extract"
-
-            PATCH_TARGET=""
-            REPACK_MODE=""
-            if [ -f "$CPUINFO_WORK/extract/all.tar" ]; then
-              REPACK_MODE="inner-tar"
-              sudo tar -xf "$CPUINFO_WORK/extract/all.tar" -C "$CPUINFO_WORK/rootfs"
-              [ -f "$CPUINFO_WORK/rootfs/root/usr/bin/cpuinfo.sh" ] && \
-                PATCH_TARGET="$CPUINFO_WORK/rootfs/root/usr/bin/cpuinfo.sh"
-            elif [ -f "$CPUINFO_WORK/extract/root/usr/bin/cpuinfo.sh" ]; then
-              REPACK_MODE="direct"
-              PATCH_TARGET="$CPUINFO_WORK/extract/root/usr/bin/cpuinfo.sh"
-            fi
-
-            if [ -n "$PATCH_TARGET" ]; then
-              python3 "$AINAS2IN1_DIR/script/2in1_patch-cpuinfo.py" "$PATCH_TARGET"
-              if ! grep -q "Requires=dev-synoboot2.device\|#Requires=dev-synoboot2.device" "$PATCH_TARGET"; then
-                echo "[E] cpuinfo 补丁验证失败：syno-flash sed 行未找到于 $PATCH_TARGET"
-                exit 1
-              fi
-              echo "[INFO] cpuinfo 补丁验证成功"
-              if [ "$REPACK_MODE" = "inner-tar" ]; then
-                (cd "$CPUINFO_WORK/rootfs"  && sudo tar -cf "$CPUINFO_WORK/extract/all.tar" .)
-                (cd "$CPUINFO_WORK/extract" && sudo tar -czf "$CPUINFO_TGZ" .)
-              else
-                (cd "$CPUINFO_WORK/extract" && sudo tar -czf "$CPUINFO_TGZ" .)
-              fi
-              echo "[INFO] cpuinfo all.tgz 重新打包成功 (mode=$REPACK_MODE)"
-            else
-              echo "[INFO] cpuinfo.sh 未在已知 all.tgz 结构中找到，跳过 cpuinfo 修补"
-            fi
-          else
-            echo "[INFO] $CPUINFO_TGZ 不存在，跳过 cpuinfo 修补"
-          fi
-
-          # ── initrd 修补与重打包（改用 2in1func.sh 的解包/重打包函数）──
-          . "$AINAS2IN1_DIR/script/2in1func.sh"
-
-          INITRD_SRC="$SYSTEM_MNT/initrd-rr"
-          INITRD_WORK="/tmp/initrd_work"
-          INITRD_NEW="/tmp/initrd-ainas.new"
-
-          echo "[INFO] 使用 unpackInitrd 解包 initrd-rr"
-          sudo rm -rf "$INITRD_WORK" "$INITRD_NEW"
-          sudo mkdir -p "$INITRD_WORK"
-          unpackInitrd "$INITRD_SRC" "$INITRD_WORK"
-
-          cd "$INITRD_WORK"
-          if [ "$(printf '%s\n' "$TAG" "25.9.7" | sort -V | head -n1)" = "$TAG" ] && [ "$TAG" != "25.9.7" ]; then
-            sudo bash "$AINAS2IN1_DIR/script/2in1_ram_patch-25_3_3.sh"
-            sudo cp -f "$AINAS2IN1_DIR/script/.bashrc" "$INITRD_WORK/root/.bashrc"
-          else
-            sudo bash "$AINAS2IN1_DIR/script/2in1_ram_patch-26_3_3.sh"
-          fi
-          cd "$WORKDIR"
-
-          echo "[INFO] 使用 repackInitrd 重新打包为 initrd-ainas"
-          repackInitrd "$INITRD_SRC" "$INITRD_WORK" "$INITRD_NEW"
-          sudo cp -f "$INITRD_NEW" "$SYSTEM_MNT/initrd-ainas"
-          sudo rm -f "$INITRD_SRC"
-          sudo rm -f "$INITRD_NEW"
-          sudo sync
+          # ── initrd 修补与重打包 ────────────────────────────────────
+          patch_2in1_ram "$SYSTEM_MNT" "$TAG" "$AINAS2IN1_DIR" "$WORKDIR"
 
           sudo umount "$SYSTEM_MNT" || true
           sudo rm -rf "$SYSTEM_MNT"
@@ -544,130 +418,9 @@ jobs:
 
           # ── 使用 RR Docker 编译镜像（非 UPDATE 模式）─────────────
           if [ "${UPDATE_ONLY}" != "true" ]; then
-            cat > build.sh <<'EOF2'
-            set -eo pipefail
-            . menu.sh
-            DSM_VERSION="${DSM_VERSION}"
-            echo "[INFO] 型号=${MODEL} 目标DSM版本=\${DSM_VERSION}"
-            menu.sh modelMenu "${MODEL}"
-
-            LOCALE_FILE="$(dirname "${USER_CONFIG_FILE}")/.locale"
-            echo "${LANGUAGE}.UTF-8" >"${LOCALE_FILE}"
-            echo "[INFO] locale 文件内容: $(cat "${LOCALE_FILE}" 2>/dev/null || echo 缺失)"
-
-            writeConfigKey "addons" "{}" "${USER_CONFIG_FILE}"
-            FORCE_NVME_CACHE=0
-            ADDONS_SEED="${ADDONS}"
-            echo "[INFO] ADDONS插件=${ADDONS_SEED}"
-            IFS=',' read -ra ADDON_ARR <<< "${ADDONS_SEED}"
-            declare -A __SEEN_ADDON=()
-            for A in "${ADDON_ARR[@]}"; do
-              if echo "${A}" | grep -q ':'; then
-                KEY="$(echo "${A}" | cut -d':' -f1 | xargs)"
-                VAL="$(echo "${A}" | cut -d':' -f2- | xargs)"
-              else
-                KEY="$(echo "${A}" | xargs)"
-                VAL=""
-              fi
-              [ -z "${KEY}" ] && continue
-              [ -n "${__SEEN_ADDON[${KEY}]}" ] && continue
-              __SEEN_ADDON[${KEY}]=1
-              writeConfigKey "addons.\"${KEY}\"" "${VAL}" "${USER_CONFIG_FILE}"
-            done
-            if echo "${MODEL}" | grep -Eq '^(DS918\+|DS1019\+|DS1621xs\+|RS1619xs)$'; then
-              FORCE_NVME_CACHE=1
-              KEY="nvmecache"
-              VAL=""
-              writeConfigKey "addons.\"${KEY}\"" "${VAL}" "${USER_CONFIG_FILE}"
-            fi
-
-            readConfigMap "addons" "${USER_CONFIG_FILE}" >/dev/null 2>&1 || true
-
-            # ── 选择版本(联网拉 pat) + 编译，带重试 ───────────────────
-            MAX_RETRY="${MAX_RETRY:-5}"
-            RETRY_SLEEP="${RETRY_SLEEP:-20}"
-
-            fetch_and_make() {
-              menu.sh productversMenu "${DSM_VERSION}"
-
-              PAT_URL="$(readConfigKey "paturl" "${USER_CONFIG_FILE}" 2>/dev/null || echo '')"
-              if [ -z "${PAT_URL}" ] || [ "${PAT_URL}" = "null" ] || [ "${PAT_URL}" = '""' ]; then
-                echo "[WARN] paturl 为空，判定为联网失败"
-                return 7
-              fi
-              echo "[INFO] 已获取 paturl: ${PAT_URL}"
-
-              set +e
-              menu.sh make
-              local rc=$?
-              set -e
-              return "${rc}"
-            }
-
-            RC=0
-            for i in $(seq 1 "${MAX_RETRY}"); do
-              echo "[INFO] 第 ${i}/${MAX_RETRY} 次尝试(选版本+编译)"
-              set +e
-              fetch_and_make
-              RC=$?
-              set -e
-              if [ "${RC}" -eq 0 ]; then
-                echo "[INFO] 编译成功"; break
-              fi
-              echo "[WARN] 第 ${i} 次失败 (rc=${RC})"
-              [ -f "${LOG_FILE}" ] && cat "${LOG_FILE}" || true
-              if [ "${RC}" -ne 7 ]; then
-                echo "[E] 非联网错误，停止重试"; break
-              fi
-              menu.sh cleanCache || true
-              [ "${i}" -lt "${MAX_RETRY}" ] && { echo "[INFO] ${RETRY_SLEEP}s 后重试"; sleep "${RETRY_SLEEP}"; }
-            done
-
-            if [ "${RC}" -ne 0 ]; then
-              echo "[E] menu.sh make 最终失败 (rc=${RC})"
-              [ -f "${LOG_FILE}" ] && cat "${LOG_FILE}" || true
-              exit "${RC}"
-            fi
-
-            rm -rf /mnt/p3/ssh || true
-            menu.sh cleanCache
-          EOF2
-
-            sed -i \
-              -e "s|\${MODEL}|${MODEL}|g" \
-              -e "s|\${DSM_VERSION}|${DSM_VERSION}|g" \
-              -e "s|\${LANGUAGE}|${LANGUAGE}|g" \
-              -e "s|\${ADDONS}|${ADDONS}|g" \
-            build.sh
-            chmod +x build.sh
-
-            rm -rf "$STAGE_HELPER"
-            mkdir -p "$STAGE_HELPER/script"
-            cp -f "$AINAS2IN1_DIR/script/2in1func.sh" "$STAGE_HELPER/script/"
-            cp -f "$AINAS2IN1_DIR/img/grub.img.gz"    "$STAGE_HELPER/"
-
-            RR_IMAGE_TAG="$TAG"
-            if [ "$TAG" != "25.9.7" ] && [ "$(printf '%s\n' "$TAG" "25.9.7" | sort -V | head -n1)" = "$TAG" ]; then
-              RR_IMAGE_TAG="26.4.0"
-            fi
-            echo "[INFO] RR Docker 镜像标签=${RR_IMAGE_TAG}"
-
-            mkdir -p /tmp/docker_ainas /tmp/docker_root
-            sudo cp -a /tmp/initrd_work/opt/ainas /tmp/docker_ainas/
-            sudo cp -a /tmp/initrd_work/root/.bashrc /tmp/docker_root/.bashrc
-            sudo chown -R "$USER":"$USER" /tmp/docker_ainas /tmp/docker_root || true
-            sudo rm -rf /tmp/initrd_work
-
-            docker run --rm --privileged \
-              -v "/tmp/docker_ainas/ainas:/opt/ainas" \
-              -v "/tmp/docker_root/.bashrc:/root/.bashrc" \
-              -v "$PWD/build.sh:/opt/ainas/build.sh" \
-              -v "$PWD:$PWD" -w /opt/ainas \
-              "wjz304/rr:${RR_IMAGE_TAG}" bash /opt/ainas/build.sh
+            docker_2in1_build "$MODEL" "$DSM_VERSION" "$LANGUAGE" "$ADDONS" "$TAG" \
+              "$AINAS2IN1_DIR" "$STAGE_HELPER" "$WORKDIR"
           fi
-          
-          
-
 
           # ── 清理 p3 临时文件 ──────────────────────────────────────
           sudo mkdir -p "$SYSTEM_MNT"
@@ -689,189 +442,14 @@ jobs:
             fi
           else
             # ── 2in1 镜像重打包 ───────────────────────────────────
-            source "$STAGE_HELPER/script/2in1func.sh"
+            repack_2in1 "$WORKDIR" "$STAGE_HELPER"
 
-            USER_CONFIG="user-config.yml"
-            LOCALE_CONFIG=".locale"
-            USER_LOOP=$(sudo losetup -f)
-            sudo losetup -P "$USER_LOOP" rr/rr.img
-            sudo mkdir -p /mnt/p1
-            sudo mount "${USER_LOOP}p1" /mnt/p1
-            cp -f /mnt/p1/user-config.yml "$USER_CONFIG" 2>/dev/null || true
-            cp -f /mnt/p1/.locale         "$LOCALE_CONFIG" 2>/dev/null || true
-            sudo umount /mnt/p1 || true
-            sudo losetup --detach "$USER_LOOP" || true
-
-            gzip -dc "$STAGE_HELPER/grub.img.gz" > rr/rr_2in1.img
-            echo "[INFO] 开始重新打包 2in1 镜像: rr/rr.img -> rr/rr_2in1.img"
-            repack_2in1_Img rr/rr.img rr/rr_2in1.img
-            echo "[INFO] 2in1 镜像重新打包完成: rr/rr_2in1.img"
-            rm -f rr/rr.img
-            mv -f rr/rr_2in1.img rr/rr.img
-
-            # ── 解析 pats.xlsx 匹配 PAT 下载地址 ─────────────────
-            echo "[INFO] 正在解析 pats.xlsx 并匹配 PAT 下载地址"
-            curl -fsSL --connect-timeout 15 "$PAT_XLSX_URL" -o "$PAT_XLSX"
-
-            python3 -m pip -q install --user openpyxl
-            PAT_LINE=$(python3 -c "import os,re,openpyxl;wb=openpyxl.load_workbook('/tmp/pats.xlsx',data_only=True);ws=wb[wb.sheetnames[0]];model=os.environ['MODEL'];line_req=os.environ.get('DSM_LINE_REQ','7.3.2');rows=[(('' if r[0] is None else str(r[0]).strip()),('' if len(r)<2 or r[1] is None else str(r[1]).strip()),('' if len(r)<3 or r[2] is None else str(r[2]).strip())) for r in ws.iter_rows(min_row=1,values_only=True)];rows=[t for t in rows if t[0] and t[1] and t[2] and not (t[0].lower()=='model' and t[1].lower().startswith('version'))];cand=[(v,u) for m,v,u in rows if m==model and v.startswith(line_req+'-')];allm=[(v,u) for m,v,u in rows if m==model];sel=cand if cand else allm;sel or (_ for _ in ()).throw(SystemExit(f'no pat found for model={model}'));best=sorted(sel,key=lambda x:[int(t) for t in re.findall(r'\\d+',x[0])],reverse=True)[0];print(best[0]+'\t'+best[1])")
-            PAT_VERSION="${PAT_LINE%%$'\t'*}"
-            PAT_URL="${PAT_LINE#*$'\t'}"
-            [ -n "$PAT_VERSION" ] && [ -n "$PAT_URL" ] || { echo "[E] PAT 解析失败"; exit 1; }
-            if [[ "$PAT_VERSION" != "${DSM_LINE_REQ}-"* ]]; then
-              echo "[E] PAT 版本不匹配: req=${DSM_LINE_REQ}, got=${PAT_VERSION}"
-              exit 1
-            fi
-            echo "[INFO] PAT_VERSION=$PAT_VERSION"
-            echo "[INFO] PAT_URL=$PAT_URL"
-            VER_MAIN="${PAT_VERSION%%-*}"
-            VER_MAIN_NODOT="${VER_MAIN//./}"
-            VER_BUILD="${PAT_VERSION#*-}"
-            VER_BUILD="${VER_BUILD%%-*}"
-            ARTIFACT_VERSION="${VER_MAIN_NODOT}_${VER_BUILD}"
-            ARTIFACT="${MODEL}_${ARTIFACT_VERSION}_15g_Ainas2in1_${SAFE_TAG}"
-            echo "[INFO] 制品重命名为: $ARTIFACT"
-
-            mkdir -p "$DSM_INSTALL_DIR"
-            PAT_FILE="$DSM_INSTALL_DIR/$(basename "$PAT_URL")"
-            curl -fsSL --connect-timeout 20 "$PAT_URL" -o "$PAT_FILE"
-            ls -lh "$PAT_FILE"
-
-            # ── 启动 DSM 安装容器 ─────────────────────────────────
-            echo "[INFO] 正在使用 ainas-2in1 docker-compose 启动 DSM 安装容器"
-            cp -f "$AINAS2IN1_DIR/docker/docker-compose.yaml" "$DSM_INSTALL_DIR/docker-compose.yaml"
-            sed -i "s#\./rr.img:/rr.img#${WORKDIR}/rr/rr.img:/rr.img#g" "$DSM_INSTALL_DIR/docker-compose.yaml"
-            sed -i 's/^\([[:space:]]*container_name:[[:space:]]*\).*/\1dsm/' "$DSM_INSTALL_DIR/docker-compose.yaml"
-            cd "$DSM_INSTALL_DIR"
-            docker compose -f docker-compose.yaml down || true
-            docker rm -f dsm >/dev/null 2>&1 || true
-
-            # ── /dev/kvm 权限检查 ─────────────────────────────────
-            if [ -e /dev/kvm ]; then
-              echo "[INFO] /dev/kvm 存在，开放权限以启用 QEMU 硬件加速"
-              echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules >/dev/null
-              sudo udevadm control --reload-rules || true
-              sudo udevadm trigger --name-match=kvm || true
-              sudo chmod 0666 /dev/kvm || true
-              ls -l /dev/kvm || true
-            else
-              echo "[INFO] /dev/kvm 不存在，QEMU 将使用软件模拟（速度较慢）"
-            fi
-
-            # ── 容器启动函数 ──────────────────────────────────────
-            start_dsm_container() {
-              echo "[INFO] 正在（重新）启动 dsm 容器: down -v + up"
-              docker compose -f docker-compose.yaml down -v || true
-              docker rm -f dsm >/dev/null 2>&1 || true
-              docker compose -f docker-compose.yaml up -d
-              echo "[INFO] dsm 容器已启动，输出前 60s 启动日志"
-              docker ps --filter "name=^dsm$" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
-              timeout 60 docker logs -f dsm 2>&1 || true
-            }
-
-            # ── 端口就绪探活 ──────────────────────────────────────
-            BOOT_READY_TIMEOUT="${BOOT_READY_TIMEOUT:-180}"
-            MAX_RESTART="${MAX_RESTART:-1}"
-            wait_port_ready() {
-              local deadline=$(( $(date +%s) + BOOT_READY_TIMEOUT ))
-              while (( $(date +%s) < deadline )); do
-                if ! docker ps --filter "name=^dsm$" --filter "status=running" -q | grep -q .; then
-                  echo "[INFO] dsm 容器已退出"
-                  return 1
-                fi
-                if timeout 3 bash -lc '</dev/tcp/127.0.0.1/5000' 2>/dev/null; then
-                  if curl -s --max-time 5 "http://127.0.0.1:5000/webman/get_state.cgi" | grep -qiE '"success"|Synology|DiskStation|<html'; then
-                    return 0
-                  fi
-                fi
-                sleep 5
-              done
-              return 1
-            }
-
-            # ── 重试循环 ──────────────────────────────────────────
-            BOOT_OK=0
-            for ATTEMPT in $(seq 0 "$MAX_RESTART"); do
-              start_dsm_container
-              if wait_port_ready; then
-                echo "[INFO] 5000 端口已就绪 (attempt=${ATTEMPT})，继续安装流程"
-                BOOT_OK=1
-                break
-              fi
-              echo "[INFO] attempt=${ATTEMPT} 等待 ${BOOT_READY_TIMEOUT}s 后 5000 端口仍未就绪（loader 可能未引导进 DSM）"
-            done
-
-            if [ "$BOOT_OK" != "1" ]; then
-              echo "[E] 重试 ${MAX_RESTART} 次后 DSM 5000 端口仍未就绪（loader 引导失败），退出"
-              docker logs --tail 200 dsm 2>&1 || true
-              exit 7
-            fi
-
-            HOST_PORT=5000
-            if timeout 3 bash -lc '</dev/tcp/127.0.0.1/5000' 2>/dev/null; then HOST_PORT=5000; fi
-            echo "[INFO] 正在执行自动安装监控程序"
-            set +e
-            MAX_MINUTES=5 TARGET_PORT=${HOST_PORT} bash "$AINAS2IN1_DIR/script/dsm_auto_install.sh" 127.0.0.1 "$PAT_FILE"
-            FIRST_RC=$?
-            set -e
-            if [ "$FIRST_RC" -ne 0 ]; then
-              if [ "$FIRST_RC" -eq 6 ]; then
-                echo "[E] 检测到 error_version，直接退出"
-                exit 6
-              fi
-              echo "[E] 首次 5 分钟内未进入安装程序 (rc=${FIRST_RC})，直接退出"
-              exit "$FIRST_RC"
-            fi
-
-            echo "[INFO] 安装完成，正在抓取容器日志快照"
-            docker logs --tail 200 dsm 2>&1 || true
-
-            # ── 等待重启后 Web 就绪 ───────────────────────────────────
-            REBOOT_OK=0
-            for i in $(seq 1 60); do
-                if ! docker ps --filter "name=^dsm$" --filter "status=running" -q | grep -q .; then
-                echo "[E] dsm 容器已退出，启动失败"
-                break
-                fi
-                OUT=$(curl -sS --max-time 3 http://127.0.0.1:5000 2>/dev/null || true)
-                if [ -n "$OUT" ]; then
-                echo "[INFO] 安装成功 (try=$i)，正在等待系统重启并初始化..."
-                REBOOT_OK=1
-                break
-                fi
-                sleep 10
-            done
-
-            if [ "$REBOOT_OK" != "1" ]; then
-                echo "[E] 重启后 Web 未就绪，启动失败"
-                docker logs --tail 200 dsm 2>&1 || true
-                exit 1
-            fi
-
-          # ── 套件安装等待 ──────────────────────────────────────────
-            WAIT_TOTAL=300; WAIT_STEP=5; elapsed=0; dots=""
-            while (( elapsed < WAIT_TOTAL )); do
-                dots+="."
-
-                printf "\r\033[K[INFO] 正在安装系统套件 %s (%ds/%ds)" \
-                "$dots" "$elapsed" "$WAIT_TOTAL"
-
-                if ! docker ps --filter "name=^dsm$" --filter "status=running" -q | grep -q .; then
-                printf "\n[E] dsm 容器已退出\n"
-                break
-                fi
-
-                sleep "$WAIT_STEP"
-                elapsed=$(( elapsed + WAIT_STEP ))
-            done
-
-            printf "\n"
-
-            docker logs --tail 300 dsm 2>&1 || true
-
-            echo "[INFO] 启动成功，正在停止并删除容器"
-            cd "$DSM_INSTALL_DIR"
-            docker compose -f docker-compose.yaml down -v || true
+            # ── DSM 自动安装（解析 pats.xlsx → 启容器 → 安装 → 停容器）──
+            dsm_setup "$MODEL" "$DSM_LINE_REQ" "$PAT_XLSX_URL" "$DSM_INSTALL_DIR" \
+              "$AINAS2IN1_DIR" "$WORKDIR" \
+              "$AINAS2IN1_DIR/docker/docker-compose.yaml" "$DSM_INSTALL_DIR/docker-compose.yaml" \
+              "_15g_Ainas2in1" "$SAFE_TAG" "180" \
+              "s#\./rr.img:/rr.img#${WORKDIR}/rr/rr.img:/rr.img#g"
 
             cd "$WORKDIR"
             echo "[INFO] 开始重命名并导出镜像（img.gz）"
@@ -882,6 +460,7 @@ jobs:
             ZIP_NAME="${ARTIFACT}.img.gz"
           fi
 
+          rm -f "$WORKDIR/2in1func.sh"
           rm -rf "$AINAS2IN1_DIR" "${STAGE_HELPER:-}"
 
           echo "ARTIFACT=${ARTIFACT}"   >> "$GITHUB_ENV"
