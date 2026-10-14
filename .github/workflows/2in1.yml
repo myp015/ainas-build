@@ -201,7 +201,7 @@ jobs:
           : "${ACTION_TOKEN:?缺少 ACTION_TOKEN}"
           : "${TAG:?缺少 TAG}"
           export GH_TOKEN="$ACTION_TOKEN"
-          export GH_REPO="myp015/ainas2in1"
+          export GH_REPO="myp015/ainas-2in1"
           RELEASE_TAG="AiNas2in1_${TAG}"
           # 单个 job 仍可能遇到 GitHub 短暂 429/503；串行重试创建/查询，避免 matrix 一开始被阻断。
           for attempt in $(seq 1 12); do
@@ -258,10 +258,10 @@ jobs:
           git config --global user.name "github-actions[bot]"
           sudo timedatectl set-timezone "Asia/Shanghai"
 
-      - name: checkout ainas2in1
+      - name: checkout ainas-2in1
         uses: actions/checkout@v4
         with:
-          repository: myp015/ainas2in1
+          repository: myp015/ainas-2in1
           token: ${{ secrets.AiNas }}
           path: .2in1
 
@@ -423,7 +423,7 @@ jobs:
                 sudo rm -rf "$SYSTEM_MNT/addons/disks"
                 sudo mkdir -p "$SYSTEM_MNT/addons"
                 sudo cp -a "$AINAS2IN1_DIR/addons/disks" "$SYSTEM_MNT/addons/"
-                echo "[INFO] 磁盘驱动已从 ainas2in1 仓库替换成功"
+                echo "[INFO] 磁盘驱动已从 ainas-2in1 仓库替换成功"
               else
                 echo "[INFO] disks.sh 未找到，跳过磁盘驱动替换"
               fi
@@ -723,7 +723,7 @@ jobs:
             ls -lh "$PAT_FILE"
 
             # ── 启动 DSM 安装容器 ─────────────────────────────────
-            echo "[INFO] 正在使用 ainas2in1 docker-compose 启动 DSM 安装容器"
+            echo "[INFO] 正在使用 ainas-2in1 docker-compose 启动 DSM 安装容器"
             cp -f "$AINAS2IN1_DIR/docker/docker-compose.yaml" "$DSM_INSTALL_DIR/docker-compose.yaml"
             sed -i "s#\./rr.img:/rr.img#${WORKDIR}/rr/rr.img:/rr.img#g" "$DSM_INSTALL_DIR/docker-compose.yaml"
             sed -i 's/^\([[:space:]]*container_name:[[:space:]]*\).*/\1dsm/' "$DSM_INSTALL_DIR/docker-compose.yaml"
@@ -873,7 +873,7 @@ jobs:
           echo "ARTIFACT_ZIP=$ZIP_NAME" >> "$GITHUB_ENV"
           echo "UPDATE_ZIP=$UPDATE_ZIP" >> "$GITHUB_ENV"
 
-      - name: 发布制品到 ainas2in1 Release
+      - name: 发布制品到 ainas-2in1 Release
         shell: bash
         env:
           ACTION_TOKEN: ${{ secrets.AiNas }}
@@ -883,7 +883,7 @@ jobs:
           : "${ACTION_TOKEN:?缺少 ACTION_TOKEN}"
 
           export GH_TOKEN="$ACTION_TOKEN"
-          export GH_REPO="myp015/ainas2in1"
+          export GH_REPO="myp015/ainas-2in1"
           RELEASE_TAG="AiNas2in1_${TAG}"
 
           ASSETS=()
