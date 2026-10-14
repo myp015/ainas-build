@@ -303,7 +303,7 @@ jobs:
           if [ "${MODEL}" = "__UPDATE__" ]; then
             WORKDIR="$PWD"
             AINAS2IN1_DIR="${WORKDIR}/.2in1"
-            SYSTEM_MNT="/mnt/p3"
+            PART3_PATH="/mnt/p3"
             : "${RR_FILENAME:?缺少 RR_FILENAME}"
             echo "[INFO] UPDATE 任务：解压 RR 镜像，应用 initrd patch，再打包 updateall"
             unzip "$RR_FILENAME" -d rr rr.img
@@ -316,8 +316,8 @@ jobs:
             . "$AINAS2IN1_DIR/script/2in1func.sh"
             DISK_LOOP=$(sudo losetup -f)
             sudo losetup -P "$DISK_LOOP" rr/rr.img
-            sudo mkdir -p "$SYSTEM_MNT"
-            sudo mount "${DISK_LOOP}p3" "$SYSTEM_MNT"
+            sudo mkdir -p "$PART3_PATH"
+            sudo mount "${DISK_LOOP}p3" "$PART3_PATH"
 
             # ── grub.cfg 修补（update 场景 model 空 → Boot DSM）──
             echo "[INFO] 修补 grub.cfg（update 场景 model=Boot DSM）"
@@ -327,62 +327,11 @@ jobs:
             sudo umount /mnt/p1 || true
 
             # ── cpuinfo 插件修补 ──────────────────────────────
-            echo "[INFO] 修补 cpuinfo 插件"
-            CPUINFO_TGZ="$SYSTEM_MNT/addons/cpuinfo/all.tgz"
-            CPUINFO_WORK="/tmp/cpuinfo_patch"
-            if [ -f "$CPUINFO_TGZ" ]; then
-              rm -rf "$CPUINFO_WORK"
-              mkdir -p "$CPUINFO_WORK/extract" "$CPUINFO_WORK/rootfs"
-              sudo tar -zxf "$CPUINFO_TGZ" -C "$CPUINFO_WORK/extract"
+            patch_rr_addons cpuinfo "$PART3_PATH" "$AINAS2IN1_DIR"
 
-              CPUINFO_PATCH_TARGET=""
-              CPUINFO_REPACK_MODE=""
-              if [ -f "$CPUINFO_WORK/extract/all.tar" ]; then
-                CPUINFO_REPACK_MODE="inner-tar"
-                sudo tar -xf "$CPUINFO_WORK/extract/all.tar" -C "$CPUINFO_WORK/rootfs"
-                [ -f "$CPUINFO_WORK/rootfs/root/usr/bin/cpuinfo.sh" ] && \
-                  CPUINFO_PATCH_TARGET="$CPUINFO_WORK/rootfs/root/usr/bin/cpuinfo.sh"
-              elif [ -f "$CPUINFO_WORK/extract/root/usr/bin/cpuinfo.sh" ]; then
-                CPUINFO_REPACK_MODE="direct"
-                CPUINFO_PATCH_TARGET="$CPUINFO_WORK/extract/root/usr/bin/cpuinfo.sh"
-              fi
-
-              if [ -n "$CPUINFO_PATCH_TARGET" ]; then
-                python3 "$AINAS2IN1_DIR/script/patch-cpuinfo.py" "$CPUINFO_PATCH_TARGET"
-                if [ "$CPUINFO_REPACK_MODE" = "inner-tar" ]; then
-                  (cd "$CPUINFO_WORK/rootfs" && sudo tar -cf "$CPUINFO_WORK/extract/all.tar" .)
-                  (cd "$CPUINFO_WORK/extract" && sudo tar -czf "$CPUINFO_TGZ" .)
-                else
-                  (cd "$CPUINFO_WORK/extract" && sudo tar -czf "$CPUINFO_TGZ" .)
-                fi
-                echo "[INFO] cpuinfo all.tgz 重新打包成功 (模式=$CPUINFO_REPACK_MODE)"
-              else
-                echo "[INFO] cpuinfo.sh 未找到，跳过 cpuinfo 修补"
-              fi
-            else
-              echo "[INFO] $CPUINFO_TGZ 不存在，跳过 cpuinfo 修补"
-            fi
-
-            INITRD_SRC="$SYSTEM_MNT/initrd-rr"
-            INITRD_WORK="/tmp/initrd_work"
-            INITRD_NEW="/tmp/initrd-rr.new"
-            echo "[INFO] 解包并修补 initrd-rr"
-            sudo rm -rf "$INITRD_WORK" "$INITRD_NEW"
-            sudo mkdir -p "$INITRD_WORK"
-            unpackInitrd "$INITRD_SRC" "$INITRD_WORK"
-
-            cd "$INITRD_WORK"
-            sudo bash "$AINAS2IN1_DIR/script/replace_ainas_po_notice.sh"
-            sudo AINAS2IN1_DIR="$AINAS2IN1_DIR" bash -c 'set -euo pipefail; . "${AINAS2IN1_DIR}/script/2in1func.sh"; convertpo2mo opt/rr/lang'
-            sudo bash "$AINAS2IN1_DIR/script/rr_ram_patch.sh"
-            cd "$WORKDIR"
-
-            echo "[INFO] 重新打包 initrd-rr"
-            repackInitrd "$INITRD_SRC" "$INITRD_WORK" "$INITRD_NEW"
-            sudo cp -f "$INITRD_NEW" "$INITRD_SRC"
-            sudo sync
-            sudo rm -rf "$INITRD_WORK" "$INITRD_NEW"
-            sudo umount "$SYSTEM_MNT" || true
+            # ── initrd 修补与重打包 ───────────────────────────
+            patch_rr_ram "$PART3_PATH" "$AINAS2IN1_DIR" "$WORKDIR"
+            sudo umount "$PART3_PATH" || true
             sudo losetup --detach "$DISK_LOOP" || true
 
             echo "[INFO] 打包 updateall-<版本号>.zip（RR 版，不分 dt/nodt）"
@@ -397,8 +346,11 @@ jobs:
           # ── 目录与常量 ────────────────────────────────────────────
           WORKDIR="$PWD"
           AINAS2IN1_DIR="${WORKDIR}/.2in1"
-          GRUB_MNT="/mnt/p1"
-          SYSTEM_MNT="/mnt/p3"
+          PART1_PATH="/mnt/p1"
+          PART3_PATH="/mnt/p3"
+
+          # 流程函数库（patch_* / docker_* / repack_*）
+          . "$AINAS2IN1_DIR/script/2in1func.sh"
 
           # ── DSM 版本映射（版本编号来自 pats.xlsx，仅 >= 7.2.1）──────
           pick_dsm_version() {
@@ -448,118 +400,33 @@ jobs:
           cp -f rr/rr.img rr/rr.base.img
 
           # ── GRUB 修补 ─────────────────────────────────────────────
-          GRUB_LOOP=$(sudo losetup -f)
-          sudo mkdir -p /mnt/p1 /mnt/p2 /mnt/p3
-          sudo losetup -P "$GRUB_LOOP" rr/rr.img
-
-          sudo mount -o rw "${GRUB_LOOP}p1" "$GRUB_MNT"
-          echo "[INFO] 开始修补 grub.cfg"
           # RR 原版镜像任务无型号，MODEL_ENV 置空 → patch 脚本默认 model=Boot DSM
+          # 官方 p1 没有 .locale，gettext 会回退原始 msgid；显式设为中文，
+          # 确保 zh_CN/rr.mo 中的 AiNas 文案生效；后续可在菜单切换其他语言。
           if [ "${MODEL}" = "__RR_ORIGINAL__" ]; then
             GRUB_MODEL_ENV=""
+            GRUB_LOCALE="zh_CN.UTF-8"
           else
             GRUB_MODEL_ENV="$MODEL"
+            GRUB_LOCALE=""
           fi
-          sudo env MODEL_ENV="$GRUB_MODEL_ENV" python3 "$AINAS2IN1_DIR/script/patch-grub-cfg.py" "$GRUB_MNT/boot/grub/grub.cfg"
-          # RR 原版镜像跳过 Docker 构建；官方 p1 没有 .locale，gettext 会回退原始 msgid。
-          # 显式设为中文，确保 zh_CN/rr.mo 中的 AiNas 文案生效；后续可在菜单切换其他语言。
-          if [ "${MODEL}" = "__RR_ORIGINAL__" ]; then
-            printf '%s\n' 'zh_CN.UTF-8' | sudo tee "$GRUB_MNT/.locale" >/dev/null
-            echo "[INFO] RR 原版镜像默认语言：zh_CN.UTF-8"
-          fi
-          echo "[INFO] grub.cfg 修补成功"
-          sudo umount "$GRUB_MNT" || true
-          sudo losetup --detach "$GRUB_LOOP" || true
+          patch_rr_p1 rr/rr.img "$PART1_PATH" "$AINAS2IN1_DIR" "$GRUB_MODEL_ENV" "$GRUB_LOCALE"
 
           # ── 挂载 p3 分区 ──────────────────────────────────────────
           DISK_LOOP=$(sudo losetup -f)
           sudo losetup -P "$DISK_LOOP" rr/rr.img
-          sudo rm -rf "$SYSTEM_MNT"
-          sudo mkdir -p "$SYSTEM_MNT"
-          sudo mount "${DISK_LOOP}p3" "$SYSTEM_MNT"
+          sudo rm -rf "$PART3_PATH"
+          sudo mkdir -p "$PART3_PATH"
+          sudo mount "${DISK_LOOP}p3" "$PART3_PATH"
 
           # ── cpuinfo 修补 ──────────────────────────────────────────
-          echo "[INFO] 开始修补 cpuinfo"
-          CPUINFO_TGZ="$SYSTEM_MNT/addons/cpuinfo/all.tgz"
-          CPUINFO_WORK="/tmp/cpuinfo_patch"
-          if [ -f "$CPUINFO_TGZ" ]; then
-            rm -rf "$CPUINFO_WORK"
-            mkdir -p "$CPUINFO_WORK/extract" "$CPUINFO_WORK/rootfs"
-            sudo tar -zxf "$CPUINFO_TGZ" -C "$CPUINFO_WORK/extract"
+          patch_rr_addons cpuinfo "$PART3_PATH" "$AINAS2IN1_DIR"
 
-            CPUINFO_PATCH_TARGET=""
-            CPUINFO_REPACK_MODE=""
-            if [ -f "$CPUINFO_WORK/extract/all.tar" ]; then
-              CPUINFO_REPACK_MODE="inner-tar"
-              sudo tar -xf "$CPUINFO_WORK/extract/all.tar" -C "$CPUINFO_WORK/rootfs"
-              [ -f "$CPUINFO_WORK/rootfs/root/usr/bin/cpuinfo.sh" ] && \
-                CPUINFO_PATCH_TARGET="$CPUINFO_WORK/rootfs/root/usr/bin/cpuinfo.sh"
-            elif [ -f "$CPUINFO_WORK/extract/root/usr/bin/cpuinfo.sh" ]; then
-              CPUINFO_REPACK_MODE="direct"
-              CPUINFO_PATCH_TARGET="$CPUINFO_WORK/extract/root/usr/bin/cpuinfo.sh"
-            fi
+          # ── initrd 修补与重打包 ───────────────────────────────────
+          patch_rr_ram "$PART3_PATH" "$AINAS2IN1_DIR" "$WORKDIR" verify
 
-            if [ -n "$CPUINFO_PATCH_TARGET" ]; then
-              python3 "$AINAS2IN1_DIR/script/patch-cpuinfo.py" "$CPUINFO_PATCH_TARGET"
-              if [ "$CPUINFO_REPACK_MODE" = "inner-tar" ]; then
-                (cd "$CPUINFO_WORK/rootfs"  && sudo tar -cf "$CPUINFO_WORK/extract/all.tar" .)
-                (cd "$CPUINFO_WORK/extract" && sudo tar -czf "$CPUINFO_TGZ" .)
-              else
-                (cd "$CPUINFO_WORK/extract" && sudo tar -czf "$CPUINFO_TGZ" .)
-              fi
-              echo "[INFO] cpuinfo all.tgz 重新打包成功 (模式=$CPUINFO_REPACK_MODE)"
-            else
-              echo "[INFO] cpuinfo.sh 未在已知 all.tgz 结构中找到，跳过 cpuinfo 修补"
-            fi
-          else
-            echo "[INFO] $CPUINFO_TGZ 不存在，跳过 cpuinfo 修补"
-          fi
-
-          # ── initrd 修补与重打包（改用 2in1func.sh 的解包/重打包函数）──
-          . "$AINAS2IN1_DIR/script/2in1func.sh"
-
-          INITRD_SRC="$SYSTEM_MNT/initrd-rr"
-          INITRD_WORK="/tmp/initrd_work"
-          INITRD_NEW="/tmp/initrd-rr.new"
-
-          echo "[INFO] 使用 unpackInitrd 解包 initrd-rr"
-          sudo rm -rf "$INITRD_WORK" "$INITRD_NEW"
-          sudo mkdir -p "$INITRD_WORK"
-          unpackInitrd "$INITRD_SRC" "$INITRD_WORK"
-
-          cd "$INITRD_WORK"
-          sudo bash "$AINAS2IN1_DIR/script/replace_ainas_po_notice.sh"
-          sudo AINAS2IN1_DIR="$AINAS2IN1_DIR" bash -c 'set -euo pipefail; . "${AINAS2IN1_DIR}/script/2in1func.sh"; convertpo2mo opt/rr/lang'
-          # RR 版 menu.sh patch：升级菜单改为订单验证模式（本地包直接更新；在线下载需订单号验证 kind=rr）
-          sudo bash "$AINAS2IN1_DIR/script/rr_ram_patch.sh"
-          cd "$WORKDIR"
-
-          echo "[INFO] 使用 repackInitrd 重新打包 initrd-rr"
-          repackInitrd "$INITRD_SRC" "$INITRD_WORK" "$INITRD_NEW"
-          sudo cp -f "$INITRD_NEW" "$INITRD_SRC"
-          sudo sync
-
-          # 最终 initrd 反查：避免仅看到 msgfmt 日志，却把未修补内容写入制品。
-          # 重点验证英文/中文 rr.mo 均已写回，以及菜单订单验证补丁存在。
-          VERIFY_INITRD="/tmp/initrd_verify"
-          sudo rm -rf "$VERIFY_INITRD"
-          sudo mkdir -p "$VERIFY_INITRD"
-          unpackInitrd "$INITRD_SRC" "$VERIFY_INITRD"
-          echo "[INFO] 最终 initrd 验证：检查语言目录"
-          test -f "$VERIFY_INITRD/opt/rr/lang/en_US/LC_MESSAGES/rr.mo"
-          test -f "$VERIFY_INITRD/opt/rr/lang/zh_CN/LC_MESSAGES/rr.mo"
-          echo "[INFO] 最终 initrd 验证：检查英文 AiNas 文案"
-          grep -aFq "Taobao Store: AiNas URL:" "$VERIFY_INITRD/opt/rr/lang/en_US/LC_MESSAGES/rr.mo"
-          # .mo 为二进制 UTF-8 文件；不能用 strings（可能只输出 ASCII），直接以二进制模式匹配中文。
-          echo "[INFO] 最终 initrd 验证：检查中文 AiNas 文案"
-          grep -aFq "淘宝店铺:AiNas" "$VERIFY_INITRD/opt/rr/lang/zh_CN/LC_MESSAGES/rr.mo"
-          echo "[INFO] 最终 initrd 验证：检查 RR 订单菜单"
-          grep -Fq "Please enter your RR order number:" "$VERIFY_INITRD/opt/rr/menu.sh"
-          echo "[INFO] 最终 initrd 验证通过：en_US/zh_CN rr.mo + RR 订单菜单补丁均已写入"
-          sudo rm -rf "$VERIFY_INITRD" "$INITRD_WORK" "$INITRD_NEW"
-
-          sudo umount "$SYSTEM_MNT" || true
-          sudo rm -rf "$SYSTEM_MNT"
+          sudo umount "$PART3_PATH" || true
+          sudo rm -rf "$PART3_PATH"
 
           # RR 原版镜像任务：释放 loop
           if [ "${MODEL}" = "__RR_ORIGINAL__" ]; then
@@ -569,182 +436,25 @@ jobs:
           # ── RR 原版镜像任务：跳过 Docker 编译 ──────────────
           if [ "${MODEL}" != "__RR_ORIGINAL__" ]; then
           # ── 使用 RR Docker 编译镜像 ───────────────────────────────
-          cat > build.sh <<'EOF2'
-          set -eo pipefail
-          . menu.sh
-          echo "[INFO] 型号=${MODEL} 目标DSM版本=${DSM_VERSION}"
-          menu.sh modelMenu "${MODEL}"
-
-          LOCALE_FILE="$(dirname "${USER_CONFIG_FILE}")/.locale"
-          echo "${LANGUAGE}.UTF-8" >"${LOCALE_FILE}"
-          echo "[INFO] locale 文件内容: $(cat "${LOCALE_FILE}" 2>/dev/null || echo 缺失)"
-
-          # ── 写入 addons（只需一次，与联网无关）────────────────────
-          writeConfigKey "addons" "{}" "${USER_CONFIG_FILE}"
-          FORCE_NVME_CACHE=0
-          ADDONS_SEED="${ADDONS}"
-          echo "[INFO] ADDONS插件=${ADDONS_SEED}"
-          IFS=',' read -ra ADDON_ARR <<< "${ADDONS_SEED}"
-          declare -A __SEEN_ADDON=()
-          for A in "${ADDON_ARR[@]}"; do
-            if echo "${A}" | grep -q ':'; then
-              KEY="$(echo "${A}" | cut -d':' -f1 | xargs)"
-              VAL="$(echo "${A}" | cut -d':' -f2- | xargs)"
-            else
-              KEY="$(echo "${A}" | xargs)"
-              VAL=""
-            fi
-            [ -z "${KEY}" ] && continue
-            [ -n "${__SEEN_ADDON[${KEY}]}" ] && continue
-            __SEEN_ADDON[${KEY}]=1
-            writeConfigKey "addons.${KEY}" "${VAL}" "${USER_CONFIG_FILE}"
-          done
-          if echo "${MODEL}" | grep -Eq '^(DS918\+|DS1019\+|DS1621xs\+|RS1619xs)$'; then
-            FORCE_NVME_CACHE=1
-            KEY="nvmecache"
-            VAL=""
-            writeConfigKey "addons.${KEY}" "${VAL}" "${USER_CONFIG_FILE}"
-          fi
-          readConfigMap "addons" "${USER_CONFIG_FILE}" >/dev/null 2>&1 || true
-
-          # ── 选择版本(联网拉 pat) + 编译，带重试 ───────────────────
-          MAX_RETRY="${MAX_RETRY:-5}"
-          RETRY_SLEEP="${RETRY_SLEEP:-20}"
-
-          fetch_and_make() {
-            # productversMenu 会联网拉取 pat 信息
-            menu.sh productversMenu "${DSM_VERSION}"
-
-            # 校验 paturl：user-config.yml 中为 paturl: ""，空即联网失败，返回 7 触发重试
-            PAT_URL="$(readConfigKey "paturl" "${USER_CONFIG_FILE}" 2>/dev/null || echo '')"
-            if [ -z "${PAT_URL}" ] || [ "${PAT_URL}" = "null" ] || [ "${PAT_URL}" = '""' ]; then
-              echo "[WARN] paturl 为空，判定为联网失败"
-              return 7
-            fi
-            echo "[INFO] 已获取 paturl: ${PAT_URL}"
-
-            set +e
-            # 用 PIPESTATUS 取 make 的真实退出码，而不是 tee 的
-            menu.sh make 2>&1 | tee /tmp/make.log
-            local rc=${PIPESTATUS[0]}
-            set -e
-
-            # 关键：扫描 dialog 弹窗式错误（退出码可能是 0，必须靠日志判定）
-            if grep -Eq 'ramdisk patch 失败|installAddon: .*addon not found|patch 失败|ERROR:' /tmp/make.log; then
-              echo "[E] 检测到编译错误（ramdisk/addon patch 失败）"
-              return 1
-            fi
-
-            return "${rc}"
-          }
-
-          RC=0
-          for i in $(seq 1 "${MAX_RETRY}"); do
-            echo "[INFO] 第 ${i}/${MAX_RETRY} 次尝试(选版本+编译)"
-            set +e
-            fetch_and_make
-            RC=$?
-            set -e
-            if [ "${RC}" -eq 0 ]; then
-              echo "[INFO] 编译成功"; break
-            fi
-            echo "[WARN] 第 ${i} 次失败 (rc=${RC})"
-            [ -f "${LOG_FILE}" ] && cat "${LOG_FILE}" || true
-            # 仅对联网类错误(7)重试；其它错误直接停止
-            if [ "${RC}" -ne 7 ]; then
-              echo "[E] 非联网错误，停止重试"; break
-            fi
-            menu.sh cleanCache || true
-            [ "${i}" -lt "${MAX_RETRY}" ] && { echo "[INFO] ${RETRY_SLEEP}s 后重试"; sleep "${RETRY_SLEEP}"; }
-          done
-
-          if [ "${RC}" -ne 0 ]; then
-            echo "[E] menu.sh make 最终失败 (rc=${RC})"
-            [ -f "${LOG_FILE}" ] && cat "${LOG_FILE}" || true
-            exit "${RC}"
-          fi
-
-          rm -rf /mnt/p3/ssh || true
-          menu.sh cleanCache
-          EOF2
-
-
-          # 向 heredoc 脚本注入运行时变量（外层 shell 展开）
-          sed -i \
-            -e "s|\${MODEL}|${MODEL}|g" \
-            -e "s|\${DSM_VERSION}|${DSM_VERSION}|g" \
-            -e "s|\${LANGUAGE}|${LANGUAGE}|g" \
-            -e "s|\${ADDONS}|${ADDONS}|g" \
-            build.sh
-          chmod +x build.sh
-          
-
-          RR_IMAGE_TAG="$RR_TAG"
-          if [ "$RR_TAG" != "25.9.7" ] && [ "$(printf '%s' "$RR_TAG" "25.9.7" | sort -V | head -n1)" = "$RR_TAG" ]; then
-            RR_IMAGE_TAG="25.9.7"
-          fi
-          echo "[INFO] RR Docker 镜像标签=${RR_IMAGE_TAG}"
-          docker pull "wjz304/rr:${RR_IMAGE_TAG}"
-          docker run --rm --privileged \
-            -v "$PWD/build.sh:/opt/rr/build.sh" \
-            -v "$PWD:$PWD" -w "$PWD" \
-            "wjz304/rr:${RR_IMAGE_TAG}" bash /opt/rr/build.sh
+          docker_rr_build "$MODEL" "$DSM_VERSION" "$LANGUAGE" "$ADDONS" "$RR_TAG" \
+            "$AINAS2IN1_DIR" "$WORKDIR"
 
           # ── 清理 p3 临时文件 ──────────────────────────────────────
-          sudo mkdir -p "$SYSTEM_MNT"
-          sudo mount "${DISK_LOOP}p3" "$SYSTEM_MNT" || true
-          sudo rm -rf "$SYSTEM_MNT/dl" "$SYSTEM_MNT/auxfiles" "$SYSTEM_MNT/logs" || true
-          sudo umount "$SYSTEM_MNT" || true
+          sudo mkdir -p "$PART3_PATH"
+          sudo mount "${DISK_LOOP}p3" "$PART3_PATH" || true
+          sudo rm -rf "$PART3_PATH/dl" "$PART3_PATH/auxfiles" "$PART3_PATH/logs" || true
+          sudo umount "$PART3_PATH" || true
           sudo losetup --detach "$DISK_LOOP"
+          rm -f "$WORKDIR/2in1func.sh"
 
           fi
 
-          # ── 提取 user-config.yml（模型/RR原版任务都需要）──
-          . "$AINAS2IN1_DIR/script/2in1func.sh"
-          USER_CONFIG_YML="user-config.yml"
-          USER_LOOP=$(sudo losetup -f)
-          sudo losetup -P "$USER_LOOP" rr/rr.img
-          sudo mkdir -p /mnt/p1
-          sudo mount "${USER_LOOP}p1" /mnt/p1
+          # ── 提取 user-config.yml + 选择引导镜像 + Repack 镜像 ─────
           if [ "${MODEL}" = "__RR_ORIGINAL__" ]; then
-            test "$(cat /mnt/p1/.locale 2>/dev/null)" = "zh_CN.UTF-8"
-            echo "[INFO] RR 原版镜像 p1 locale 验证通过：zh_CN.UTF-8"
-          fi
-          cp -f /mnt/p1/user-config.yml "$USER_CONFIG_YML" 2>/dev/null || true
-          sudo umount /mnt/p1 || true
-          sudo losetup --detach "$USER_LOOP" || true
-
-          # ── 选择引导镜像 ──────────────────────────────────────────
-          if [ "$(printf '%s\n' "${RR_TAG}" "26.2.2" | sort -V | head -n1)" = "26.2.2" ]; then
-            GRUB_IMG="ainas/grub2.14.img.gz"
+            repack_rr rr/rr.img "$RR_TAG" "$WORKDIR" "$IMAGE_SIZE" keep
           else
-            GRUB_IMG="ainas/grub2.12.img.gz"
+            repack_rr rr/rr.img "$RR_TAG" "$WORKDIR" "$IMAGE_SIZE"
           fi
-          echo "[INFO] rr tag=${RR_TAG} 选用的引导镜像=${GRUB_IMG}"
-
-          # ── 按目标大小 Repack 镜像 ────────────────────────────────
-          # 原版 RR 镜像任务：保持原版镜像（不 repack），zip -9 压缩（官方做法，避免文件系统膨胀）
-          if [ "${MODEL}" = "__RR_ORIGINAL__" ]; then
-            echo "[INFO] RR 原版镜像任务：保持原版镜像，不 repack（zip -9 压缩，官方做法）"
-          else
-          case "$IMAGE_SIZE" in
-            2.5GB)
-              gzip -dc "$GRUB_IMG" > rr/rr_2GB.img
-              #resizeImg rr/rr_2GB.img +1024M
-              repack_rr_Img rr/rr.img rr/rr_2GB.img
-              rm -f rr/rr.img
-              mv -f rr/rr_2GB.img rr/rr.img
-              ;;
-            4GB)
-              echo "[INFO] 保持默认 4GB 镜像"
-              ;;
-            *)
-              echo "[E] 不支持的镜像大小: $IMAGE_SIZE"
-              exit 1
-              ;;
-          esac
-          fi
-          echo "[INFO] 最终镜像大小(字节): $(stat -c%s rr/rr.img)"
 
           # ── 导出并打包制品 ────────────────────────────────────────
           case "$IMAGE_FORMAT" in
@@ -755,7 +465,7 @@ jobs:
               else
                 mv -f rr/rr.img "${ARTIFACT_NAME}.img"
               fi
-              [ "$USER_CONFIG_YML" = "user-config.yml" ] || mv -f "$USER_CONFIG_YML" "user-config.yml"
+              [ "$USER_CONFIG_FILE" = "user-config.yml" ] || mv -f "$USER_CONFIG_FILE" "user-config.yml"
               ;;
             *)
               echo "[E] 不支持的镜像格式: $IMAGE_FORMAT"

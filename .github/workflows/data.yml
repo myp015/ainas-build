@@ -27,6 +27,14 @@ jobs:
         with:
           ref: main
 
+      # 函数库（2in1func.sh）与 Python CLI（func.py + requirements.txt）已统一收拢到 ainas-2in1
+      - name: Checkout ainas-2in1
+        uses: actions/checkout@main
+        with:
+          repository: myp015/ainas-2in1
+          token: ${{ secrets.AiNas }}
+          path: ainas-2in1
+
       - name: Init Env
         run: |
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
@@ -68,9 +76,9 @@ jobs:
 
           # Backup the original python3 executable.
           sudo mv -f "$(realpath $(which python3))/EXTERNALLY-MANAGED" "$(realpath $(which python3))/EXTERNALLY-MANAGED.bak" 2>/dev/null || true
-          sudo pip3 install -U -r scripts/requirements.txt
+          sudo pip3 install -U -r ainas-2in1/script/requirements.txt
 
-          . scripts/func.sh
+          . ainas-2in1/script/2in1func.sh
 
           LOOPX=$(sudo losetup -f)
           sudo losetup -P "${LOOPX}" "rr/rr.img"
@@ -104,7 +112,7 @@ jobs:
 
           # 仅生成 pats（models/addons/modules 不再生成）
           mkdir -p docs
-          python3 scripts/func.py getpats -w "rr/initrd" -j "docs/pats.json" -x "docs/pats.xlsx"
+          python3 ainas-2in1/script/func.py getpats -w "rr/initrd" -j "docs/pats.json" -x "docs/pats.xlsx"
 
           rm -rf "rr/initrd"
 

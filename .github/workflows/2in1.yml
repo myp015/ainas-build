@@ -293,8 +293,8 @@ jobs:
           PAT_XLSX_URL="https://raw.githubusercontent.com/RROrg/rr/main/docs/pats.xlsx"
           PAT_XLSX="/tmp/pats.xlsx"
           DSM_INSTALL_DIR="/tmp/dsm-install"
-          GRUB_MNT="/mnt/p1"
-          SYSTEM_MNT="/mnt/p3"
+          PART1_PATH="/mnt/p1"
+          PART3_PATH="/mnt/p3"
 
           # 流程函数库（patch_* / docker_* / repack_* / dsm_setup）
           . "$AINAS2IN1_DIR/script/2in1func.sh"
@@ -371,7 +371,7 @@ jobs:
           sudo losetup --detach "$GRUB_LOOP" || true
 
           # ── GRUB 修补 ──────────────────────────────────────────────
-          patch_2in1_p1 rr/rr.img "$GRUB_MNT" "$AINAS2IN1_DIR" "$MODEL" "$DSM_LINE_SHORT"
+          patch_2in1_p1 rr/rr.img "$PART1_PATH" "$AINAS2IN1_DIR" "$MODEL" "$DSM_LINE_SHORT"
 
           # ── 早删 rr.base.img 备份，释放约 15G ──
           rm -f rr/rr.base.img || true
@@ -382,38 +382,38 @@ jobs:
           # ── 挂载 p3 分区 ───────────────────────────────────────────
           DISK_LOOP=$(sudo losetup -f)
           sudo losetup -P "$DISK_LOOP" rr/rr.img
-          sudo rm -rf "$SYSTEM_MNT"
-          sudo mkdir -p "$SYSTEM_MNT"
-          sudo mount "${DISK_LOOP}p3" "$SYSTEM_MNT"
+          sudo rm -rf "$PART3_PATH"
+          sudo mkdir -p "$PART3_PATH"
+          sudo mount "${DISK_LOOP}p3" "$PART3_PATH"
 
           # ── bzImage 重命名 ─────────────────────────────────────────
-          if [ -f "$SYSTEM_MNT/bzImage-rr" ]; then
-            sudo mv -f "$SYSTEM_MNT/bzImage-rr" "$SYSTEM_MNT/bzImage-ainas"
+          if [ -f "$PART3_PATH/bzImage-rr" ]; then
+            sudo mv -f "$PART3_PATH/bzImage-rr" "$PART3_PATH/bzImage-ainas"
             echo "[INFO] 已将 bzImage-rr 重命名为 bzImage-ainas"
           else
             echo "[INFO] p3 分区中未找到 bzImage-rr，跳过重命名"
           fi
 
           # ── 取 CKs / LKMs / addons / modules ───────────────────────
-          # 仓库地址已直接写在 scripts/func.sh 里，这里不再 sed 替换。
+          # 函数库与仓库地址适配都在 ainas-2in1 的 script/2in1func.sh 里，这里不再 sed 替换。
           # 这些函数会 rm -rf 目标目录，而 p3 内文件属 root，必须以 root 执行；
           # 顺带让新落盘的文件保持 root 属主，与镜像其余部分一致。
-          sudo env AINAS_TOKEN="${AINAS_TOKEN}" WORKDIR="${WORKDIR}" SYSTEM_MNT="${SYSTEM_MNT}" bash -c '
-            . "${WORKDIR}/scripts/func.sh" "${AINAS_TOKEN}"
-            getCKs     "${SYSTEM_MNT}/cks"     "true"
-            getLKMs    "${SYSTEM_MNT}/lkms"    "true"
-            getAddons  "${SYSTEM_MNT}/addons"  "true"
-            getModules "${SYSTEM_MNT}/modules" "true"
+          sudo env AINAS_TOKEN="${AINAS_TOKEN}" AINAS2IN1_DIR="${AINAS2IN1_DIR}" PART3_PATH="${PART3_PATH}" bash -c '
+            . "${AINAS2IN1_DIR}/script/2in1func.sh" "${AINAS_TOKEN}"
+            getCKs     "${PART3_PATH}/cks"     "true"
+            getLKMs    "${PART3_PATH}/lkms"    "true"
+            getAddons  "${PART3_PATH}/addons"  "true"
+            getModules "${PART3_PATH}/modules" "true"
           '
 
           # ── Addons 处理 + cpuinfo 修补 ─────────────────────────────
-          patch_2in1_addons "$SYSTEM_MNT" "$MODEL" "$AINAS2IN1_DIR"
+          patch_2in1_addons "$PART3_PATH" "$MODEL" "$AINAS2IN1_DIR"
 
           # ── initrd 修补与重打包 ────────────────────────────────────
-          patch_2in1_ram "$SYSTEM_MNT" "$TAG" "$AINAS2IN1_DIR" "$WORKDIR"
+          patch_2in1_ram "$PART3_PATH" "$TAG" "$AINAS2IN1_DIR" "$WORKDIR"
 
-          sudo umount "$SYSTEM_MNT" || true
-          sudo rm -rf "$SYSTEM_MNT"
+          sudo umount "$PART3_PATH" || true
+          sudo rm -rf "$PART3_PATH"
 
 
           # ── 使用 RR Docker 编译镜像（非 UPDATE 模式）─────────────
@@ -423,10 +423,10 @@ jobs:
           fi
 
           # ── 清理 p3 临时文件 ──────────────────────────────────────
-          sudo mkdir -p "$SYSTEM_MNT"
-          sudo mount "${DISK_LOOP}p3" "$SYSTEM_MNT" || true
-          sudo rm -rf "$SYSTEM_MNT/dl" "$SYSTEM_MNT/auxfiles" "$SYSTEM_MNT/logs" || true
-          sudo umount "$SYSTEM_MNT" || true
+          sudo mkdir -p "$PART3_PATH"
+          sudo mount "${DISK_LOOP}p3" "$PART3_PATH" || true
+          sudo rm -rf "$PART3_PATH/dl" "$PART3_PATH/auxfiles" "$PART3_PATH/logs" || true
+          sudo umount "$PART3_PATH" || true
           sudo losetup --detach "$DISK_LOOP"
 
           # ── UPDATE 包构建 ─────────────────────────────────────────
