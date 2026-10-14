@@ -374,7 +374,7 @@ jobs:
             cd "$INITRD_WORK"
             sudo bash "$AINAS2IN1_DIR/script/replace_ainas_po_notice.sh"
             sudo AINAS2IN1_DIR="$AINAS2IN1_DIR" bash -c 'set -euo pipefail; . "${AINAS2IN1_DIR}/script/2in1func.sh"; convertpo2mo opt/rr/lang'
-            sudo bash "$AINAS2IN1_DIR/script/rr_menu_patch.sh"
+            sudo bash "$AINAS2IN1_DIR/script/rr_ram_patch.sh"
             cd "$WORKDIR"
 
             echo "[INFO] 重新打包 initrd-rr"
@@ -531,7 +531,7 @@ jobs:
           sudo bash "$AINAS2IN1_DIR/script/replace_ainas_po_notice.sh"
           sudo AINAS2IN1_DIR="$AINAS2IN1_DIR" bash -c 'set -euo pipefail; . "${AINAS2IN1_DIR}/script/2in1func.sh"; convertpo2mo opt/rr/lang'
           # RR 版 menu.sh patch：升级菜单改为订单验证模式（本地包直接更新；在线下载需订单号验证 kind=rr）
-          sudo bash "$AINAS2IN1_DIR/script/rr_menu_patch.sh"
+          sudo bash "$AINAS2IN1_DIR/script/rr_ram_patch.sh"
           cd "$WORKDIR"
 
           echo "[INFO] 使用 repackInitrd 重新打包 initrd-rr"
