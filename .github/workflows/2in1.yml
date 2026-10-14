@@ -405,6 +405,17 @@ jobs:
             echo "[INFO] p3 分区中未找到 bzImage-rr，跳过重命名"
           fi
 
+          # ── 取 CKs / LKMs / addons / modules ───────────────────────
+          # 仓库地址已直接写在 scripts/func.sh 里，这里不再 sed 替换
+          # 这几个函数直接 rm -rf + mkdir + unzip 到目标目录，先拿到挂载点的写权限
+          sudo chown "$(id -u):$(id -g)" "$SYSTEM_MNT"
+          . "$WORKDIR/scripts/func.sh" "${{ secrets.AiNas }}"
+
+          getCKs     "$SYSTEM_MNT/cks"     "true"
+          getLKMs    "$SYSTEM_MNT/lkms"    "true"
+          getAddons  "$SYSTEM_MNT/addons"  "true"
+          getModules "$SYSTEM_MNT/modules" "true"
+
           # ── Addons 处理 ────────────────────────────────────────────
           sudo mkdir -p "$SYSTEM_MNT/addons"
           sudo cp -a "$AINAS2IN1_DIR/addons/nvmevolume" "$SYSTEM_MNT/addons/" || true

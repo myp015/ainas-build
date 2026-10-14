@@ -10,7 +10,9 @@
 
 [ -n "${1}" ] && export TOKEN="${1}"
 
-REPO="https://api.github.com/repos/RROrg"
+# 本文件已按 ainas 适配：仓库根指向 myp015，get* 过滤草稿 release。
+# 请勿再在各工作流里 sed 替换仓库名，改这里即可。
+REPO="https://api.github.com/repos/myp015"
 
 # Convert po2mo
 # $1 path
@@ -73,24 +75,24 @@ function getExtractor() {
 # $2 (true|false[d]) include prerelease
 function getBuildroot() {
   echo "Getting Buildroot begin"
-  local DEST_PATH="${1:-buildroot}"
-  local CACHE_DIR="/tmp/buildroot"
-  local CACHE_FILE="/tmp/buildroot.zip"
+  local DEST_PATH="${1:-ainas-buildroot}"
+  local CACHE_DIR="/tmp/ainas-buildroot"
+  local CACHE_FILE="/tmp/ainas-buildroot.zip"
   rm -f "${CACHE_FILE}"
   local TAG
   if [ "${2}" = "true" ]; then
-    TAG=$(curl -skL -H "Authorization: token ${TOKEN}" "${REPO}/rr-buildroot/releases" | jq -r ".[].tag_name" | sort -rV | head -1)
+    TAG=$(curl -skL -H "Authorization: token ${TOKEN}" "${REPO}/ainas-buildroot/releases" | jq -r '[.[] | select(.draft == false)] | .[].tag_name' | sort -rV | head -1)
   else
-    TAG=$(curl -skL -H "Authorization: token ${TOKEN}" "${REPO}/rr-buildroot/releases/latest" | jq -r ".tag_name")
+    TAG=$(curl -skL -H "Authorization: token ${TOKEN}" "${REPO}/ainas-buildroot/releases/latest" | jq -r ".tag_name")
   fi
   while read -r ID NAME; do
     if [ "${NAME}" = "buildroot-${TAG}.zip" ]; then
       local STATUS
-      STATUS=$(curl -kL -w "%{http_code}" -H "Authorization: token ${TOKEN}" -H "Accept: application/octet-stream" "${REPO}/rr-buildroot/releases/assets/${ID}" -o "${CACHE_FILE}")
+      STATUS=$(curl -kL -w "%{http_code}" -H "Authorization: token ${TOKEN}" -H "Accept: application/octet-stream" "${REPO}/ainas-buildroot/releases/assets/${ID}" -o "${CACHE_FILE}")
       echo "TAG=${TAG}; Status=${STATUS}"
       [ ${STATUS:-0} -ne 200 ] && exit 1
     fi
-  done <<<"$(curl -skL -H "Authorization: Bearer ${TOKEN}" "${REPO}/rr-buildroot/releases/tags/${TAG}" | jq -r '.assets[] | "\(.id) \(.name)"')"
+  done <<<"$(curl -skL -H "Authorization: Bearer ${TOKEN}" "${REPO}/ainas-buildroot/releases/tags/${TAG}" | jq -r '.assets[] | "\(.id) \(.name)"')"
   # Unzip Buildroot
   rm -rf "${CACHE_DIR}"
   mkdir -p "${CACHE_DIR}"
@@ -113,18 +115,18 @@ function getCKs() {
   rm -f "${CACHE_FILE}"
   local TAG
   if [ "${2}" = "true" ]; then
-    TAG=$(curl -skL -H "Authorization: token ${TOKEN}" "${REPO}/rr-cks/releases" | jq -r ".[].tag_name" | sort -rV | head -1)
+    TAG=$(curl -skL -H "Authorization: token ${TOKEN}" "${REPO}/ainas-cks/releases" | jq -r '[.[] | select(.draft == false)] | .[].tag_name' | sort -rV | head -1)
   else
-    TAG=$(curl -skL -H "Authorization: token ${TOKEN}" "${REPO}/rr-cks/releases/latest" | jq -r ".tag_name")
+    TAG=$(curl -skL -H "Authorization: token ${TOKEN}" "${REPO}/ainas-cks/releases/latest" | jq -r ".tag_name")
   fi
   while read -r ID NAME; do
-    if [ "${NAME}" = "rr-cks-${TAG}.zip" ]; then
+    if [ "${NAME}" = "ainas-cks-${TAG}.zip" ]; then
       local STATUS
-      STATUS=$(curl -kL -w "%{http_code}" -H "Authorization: token ${TOKEN}" -H "Accept: application/octet-stream" "${REPO}/rr-cks/releases/assets/${ID}" -o "${CACHE_FILE}")
+      STATUS=$(curl -kL -w "%{http_code}" -H "Authorization: token ${TOKEN}" -H "Accept: application/octet-stream" "${REPO}/ainas-cks/releases/assets/${ID}" -o "${CACHE_FILE}")
       echo "TAG=${TAG}; Status=${STATUS}"
       [ ${STATUS:-0} -ne 200 ] && exit 1
     fi
-  done <<<"$(curl -skL -H "Authorization: Bearer ${TOKEN}" "${REPO}/rr-cks/releases/tags/${TAG}" | jq -r '.assets[] | "\(.id) \(.name)"')"
+  done <<<"$(curl -skL -H "Authorization: Bearer ${TOKEN}" "${REPO}/ainas-cks/releases/tags/${TAG}" | jq -r '.assets[] | "\(.id) \(.name)"')"
   [ ! -f "${CACHE_FILE}" ] && exit 1
   # Unzip CKs
   rm -rf "${DEST_PATH}"
@@ -144,18 +146,18 @@ function getLKMs() {
   rm -f "${CACHE_FILE}"
   local TAG
   if [ "${2}" = "true" ]; then
-    TAG=$(curl -skL -H "Authorization: token ${TOKEN}" "${REPO}/rr-lkms/releases" | jq -r ".[].tag_name" | sort -rV | head -1)
+    TAG=$(curl -skL -H "Authorization: token ${TOKEN}" "${REPO}/ainas-lkm/releases" | jq -r '[.[] | select(.draft == false)] | .[].tag_name' | sort -rV | head -1)
   else
-    TAG=$(curl -skL -H "Authorization: token ${TOKEN}" "${REPO}/rr-lkms/releases/latest" | jq -r ".tag_name")
+    TAG=$(curl -skL -H "Authorization: token ${TOKEN}" "${REPO}/ainas-lkm/releases/latest" | jq -r ".tag_name")
   fi
   while read -r ID NAME; do
     if [ "${NAME}" = "rp-lkms-${TAG}.zip" ]; then
       local STATUS
-      STATUS=$(curl -kL -w "%{http_code}" -H "Authorization: token ${TOKEN}" -H "Accept: application/octet-stream" "${REPO}/rr-lkms/releases/assets/${ID}" -o "${CACHE_FILE}")
+      STATUS=$(curl -kL -w "%{http_code}" -H "Authorization: token ${TOKEN}" -H "Accept: application/octet-stream" "${REPO}/ainas-lkm/releases/assets/${ID}" -o "${CACHE_FILE}")
       echo "TAG=${TAG}; Status=${STATUS}"
       [ ${STATUS:-0} -ne 200 ] && exit 1
     fi
-  done <<<"$(curl -skL -H "Authorization: Bearer ${TOKEN}" "${REPO}/rr-lkms/releases/tags/${TAG}" | jq -r '.assets[] | "\(.id) \(.name)"')"
+  done <<<"$(curl -skL -H "Authorization: Bearer ${TOKEN}" "${REPO}/ainas-lkm/releases/tags/${TAG}" | jq -r '.assets[] | "\(.id) \(.name)"')"
   [ ! -f "${CACHE_FILE}" ] && exit 1
   # Unzip LKMs
   rm -rf "${DEST_PATH}"
@@ -175,18 +177,18 @@ function getAddons() {
   local CACHE_FILE="/tmp/addons.zip"
   local TAG
   if [ "${2}" = "true" ]; then
-    TAG=$(curl -skL -H "Authorization: token ${TOKEN}" "${REPO}/rr-addons/releases" | jq -r ".[].tag_name" | sort -rV | head -1)
+    TAG=$(curl -skL -H "Authorization: token ${TOKEN}" "${REPO}/ainas-addons/releases" | jq -r '[.[] | select(.draft == false)] | .[].tag_name' | sort -rV | head -1)
   else
-    TAG=$(curl -skL -H "Authorization: token ${TOKEN}" "${REPO}/rr-addons/releases/latest" | jq -r ".tag_name")
+    TAG=$(curl -skL -H "Authorization: token ${TOKEN}" "${REPO}/ainas-addons/releases/latest" | jq -r ".tag_name")
   fi
   while read -r ID NAME; do
     if [ "${NAME}" = "addons-${TAG}.zip" ]; then
       local STATUS
-      STATUS=$(curl -kL -w "%{http_code}" -H "Authorization: token ${TOKEN}" -H "Accept: application/octet-stream" "${REPO}/rr-addons/releases/assets/${ID}" -o "${CACHE_FILE}")
+      STATUS=$(curl -kL -w "%{http_code}" -H "Authorization: token ${TOKEN}" -H "Accept: application/octet-stream" "${REPO}/ainas-addons/releases/assets/${ID}" -o "${CACHE_FILE}")
       echo "TAG=${TAG}; Status=${STATUS}"
       [ ${STATUS:-0} -ne 200 ] && exit 1
     fi
-  done <<<"$(curl -skL -H "Authorization: Bearer ${TOKEN}" "${REPO}/rr-addons/releases/tags/${TAG}" | jq -r '.assets[] | "\(.id) \(.name)"')"
+  done <<<"$(curl -skL -H "Authorization: Bearer ${TOKEN}" "${REPO}/ainas-addons/releases/tags/${TAG}" | jq -r '.assets[] | "\(.id) \(.name)"')"
   [ ! -f "${CACHE_FILE}" ] && exit 1
   rm -rf "${DEST_PATH}"
   mkdir -p "${DEST_PATH}"
@@ -221,18 +223,18 @@ function getModules() {
   rm -f "${CACHE_FILE}"
   local TAG
   if [ "${2}" = "true" ]; then
-    TAG=$(curl -skL -H "Authorization: token ${TOKEN}" "${REPO}/rr-modules/releases" | jq -r ".[].tag_name" | sort -rV | head -1)
+    TAG=$(curl -skL -H "Authorization: token ${TOKEN}" "${REPO}/syno-modules/releases" | jq -r '[.[] | select(.draft == false)] | .[].tag_name' | sort -rV | head -1)
   else
-    TAG=$(curl -skL -H "Authorization: token ${TOKEN}" "${REPO}/rr-modules/releases/latest" | jq -r ".tag_name")
+    TAG=$(curl -skL -H "Authorization: token ${TOKEN}" "${REPO}/syno-modules/releases/latest" | jq -r ".tag_name")
   fi
   while read -r ID NAME; do
     if [ "${NAME}" = "modules-${TAG}.zip" ]; then
       local STATUS
-      STATUS=$(curl -kL -w "%{http_code}" -H "Authorization: token ${TOKEN}" -H "Accept: application/octet-stream" "${REPO}/rr-modules/releases/assets/${ID}" -o "${CACHE_FILE}")
+      STATUS=$(curl -kL -w "%{http_code}" -H "Authorization: token ${TOKEN}" -H "Accept: application/octet-stream" "${REPO}/syno-modules/releases/assets/${ID}" -o "${CACHE_FILE}")
       echo "TAG=${TAG}; Status=${STATUS}"
       [ ${STATUS:-0} -ne 200 ] && exit 1
     fi
-  done <<<"$(curl -skL -H "Authorization: Bearer ${TOKEN}" "${REPO}/rr-modules/releases/tags/${TAG}" | jq -r '.assets[] | "\(.id) \(.name)"')"
+  done <<<"$(curl -skL -H "Authorization: Bearer ${TOKEN}" "${REPO}/syno-modules/releases/tags/${TAG}" | jq -r '.assets[] | "\(.id) \(.name)"')"
   [ ! -f "${CACHE_FILE}" ] && exit 1
   # Unzip Modules
   rm -rf "${DEST_PATH}"
@@ -459,7 +461,7 @@ function createvmx() {
 config.version = "8"
 virtualHW.version = "17"
 displayName = "${VMNAME}"
-annotation = "https://github.com/RROrg/rr"
+annotation = "https://github.com/myp015/ainas-rr"
 guestOS = "ubuntu-64"
 firmware = "efi"
 mks.enable3d = "TRUE"

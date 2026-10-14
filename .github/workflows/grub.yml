@@ -5,7 +5,7 @@
 # See /LICENSE for more information.
 #
 # RR 原版结构（保持不动），仅仓库地址适配 myp015：
-#   checkout RROrg/buildroot  → myp015/buildroot（secrets.AiNas）
+#   checkout RROrg/buildroot  → myp015/ainas-buildroot（secrets.AiNas）
 #   checkout RROrg/rr         → myp015/ainas-rr（secrets.AiNas，push grub.img.gz 回 ainas-rr）
 #
 
@@ -42,9 +42,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@main
         with:
-          repository: myp015/buildroot
+          repository: myp015/ainas-buildroot
           token: ${{ secrets.AiNas }}
-          path: buildroot
+          path: ainas-buildroot
 
       - name: Checkout
         uses: actions/checkout@main
@@ -65,7 +65,7 @@ jobs:
 
       - name: Make Grub
         run: |
-          . buildroot/grub_rr.sh "${{ inputs.grubver}}" "${{ inputs.bioslst}}" "${{ inputs.namestr}}"
+          . ainas-buildroot/grub_rr.sh "${{ inputs.grubver}}" "${{ inputs.bioslst}}" "${{ inputs.namestr}}"
 
       - name: Upload artifact
         if: success() && inputs.push == false
