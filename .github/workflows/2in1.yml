@@ -371,7 +371,7 @@ jobs:
           sudo losetup --detach "$GRUB_LOOP" || true
 
           # ── GRUB 修补 ──────────────────────────────────────────────
-          patch_2in1_p1 rr/rr.img "$PART1_PATH" "$AINAS2IN1_DIR" "$MODEL" "$DSM_LINE_SHORT"
+          patch_p1 rr/rr.img "$PART1_PATH" 2in1 "$MODEL" "$DSM_LINE_SHORT"
 
           # ── 早删 rr.base.img 备份，释放约 15G ──
           rm -f rr/rr.base.img || true
@@ -406,11 +406,12 @@ jobs:
             getModules "${PART3_PATH}/modules" "true"
           '
 
-          # ── Addons 处理 + cpuinfo 修补 ─────────────────────────────
-          patch_2in1_addons "$PART3_PATH" "$MODEL" "$AINAS2IN1_DIR"
+          # ── Addons 磁盘驱动修补 + cpuinfo 修补 ─────────────────────
+          patch_addons_disk "$PART3_PATH" "$MODEL"
+          patch_cpuinfo "${PART3_PATH}/addons" "2in1_patch-cpuinfo.py" verify
 
           # ── initrd 修补与重打包 ────────────────────────────────────
-          patch_2in1_ram "$PART3_PATH" "$TAG" "$AINAS2IN1_DIR" "$WORKDIR"
+          patch_ram "$PART3_PATH" 2in1 "$WORKDIR" "$TAG"
 
           sudo umount "$PART3_PATH" || true
           sudo rm -rf "$PART3_PATH"
@@ -418,8 +419,8 @@ jobs:
 
           # ── 使用 RR Docker 编译镜像（非 UPDATE 模式）─────────────
           if [ "${UPDATE_ONLY}" != "true" ]; then
-            docker_2in1_build "$MODEL" "$DSM_VERSION" "$LANGUAGE" "$ADDONS" "$TAG" \
-              "$AINAS2IN1_DIR" "$STAGE_HELPER" "$WORKDIR"
+            docker_build 2in1 "$MODEL" "$DSM_VERSION" "$LANGUAGE" "$ADDONS" "$TAG" \
+              "$WORKDIR" "$STAGE_HELPER"
           fi
 
           # ── 清理 p3 临时文件 ──────────────────────────────────────
@@ -446,7 +447,7 @@ jobs:
 
             # ── DSM 自动安装（解析 pats.xlsx → 启容器 → 安装 → 停容器）──
             dsm_setup "$MODEL" "$DSM_LINE_REQ" "$PAT_XLSX_URL" "$DSM_INSTALL_DIR" \
-              "$AINAS2IN1_DIR" "$WORKDIR" \
+              "$WORKDIR" \
               "$AINAS2IN1_DIR/docker/docker-compose.yaml" "$DSM_INSTALL_DIR/docker-compose.yaml" \
               "_15g_Ainas2in1" "$SAFE_TAG" "180" \
               "s#\./rr.img:/rr.img#${WORKDIR}/rr/rr.img:/rr.img#g"

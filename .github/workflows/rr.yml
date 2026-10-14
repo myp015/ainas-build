@@ -327,10 +327,10 @@ jobs:
             sudo umount /mnt/p1 || true
 
             # ── cpuinfo 插件修补 ──────────────────────────────
-            patch_rr_addons cpuinfo "$PART3_PATH" "$AINAS2IN1_DIR"
+            patch_cpuinfo "${PART3_PATH}/addons" "patch-cpuinfo.py"
 
             # ── initrd 修补与重打包 ───────────────────────────
-            patch_rr_ram "$PART3_PATH" "$AINAS2IN1_DIR" "$WORKDIR"
+            patch_ram "$PART3_PATH" rr "$WORKDIR"
             sudo umount "$PART3_PATH" || true
             sudo losetup --detach "$DISK_LOOP" || true
 
@@ -410,7 +410,7 @@ jobs:
             GRUB_MODEL_ENV="$MODEL"
             GRUB_LOCALE=""
           fi
-          patch_rr_p1 rr/rr.img "$PART1_PATH" "$AINAS2IN1_DIR" "$GRUB_MODEL_ENV" "$GRUB_LOCALE"
+          patch_p1 rr/rr.img "$PART1_PATH" rr "$GRUB_MODEL_ENV" "$GRUB_LOCALE"
 
           # ── 挂载 p3 分区 ──────────────────────────────────────────
           DISK_LOOP=$(sudo losetup -f)
@@ -420,10 +420,10 @@ jobs:
           sudo mount "${DISK_LOOP}p3" "$PART3_PATH"
 
           # ── cpuinfo 修补 ──────────────────────────────────────────
-          patch_rr_addons cpuinfo "$PART3_PATH" "$AINAS2IN1_DIR"
+          patch_cpuinfo "${PART3_PATH}/addons" "patch-cpuinfo.py"
 
           # ── initrd 修补与重打包 ───────────────────────────────────
-          patch_rr_ram "$PART3_PATH" "$AINAS2IN1_DIR" "$WORKDIR" verify
+          patch_ram "$PART3_PATH" rr "$WORKDIR" verify
 
           sudo umount "$PART3_PATH" || true
           sudo rm -rf "$PART3_PATH"
@@ -436,8 +436,8 @@ jobs:
           # ── RR 原版镜像任务：跳过 Docker 编译 ──────────────
           if [ "${MODEL}" != "__RR_ORIGINAL__" ]; then
           # ── 使用 RR Docker 编译镜像 ───────────────────────────────
-          docker_rr_build "$MODEL" "$DSM_VERSION" "$LANGUAGE" "$ADDONS" "$RR_TAG" \
-            "$AINAS2IN1_DIR" "$WORKDIR"
+          docker_build rr "$MODEL" "$DSM_VERSION" "$LANGUAGE" "$ADDONS" "$RR_TAG" \
+            "$WORKDIR"
 
           # ── 清理 p3 临时文件 ──────────────────────────────────────
           sudo mkdir -p "$PART3_PATH"
