@@ -1,0 +1,96 @@
+#
+# Copyright (C) 2022 Ing <https://github.com/wjz304>
+#
+# This is free software, licensed under the MIT License.
+# See /LICENSE for more information.
+#
+# 2in1 GPT 引导盘构建：
+#   checkout myp015/ainas2in1（secrets.AiNas）
+#   → script/install-grub-2.14.sh 构建 grub-2.14（i386-pc/i386-efi/x86_64-efi）
+#   → script/2in1_grubmake-gpt.sh 生成 14.5G GPT 双引导镜像 grub.img.gz
+#   → push 回 myp015/ainas2in1 的 img/grub.img.gz（secrets.AiNas）
+#
+# 说明：2in1_grubmake-gpt.sh 依赖同目录 mdadm-syno，脚本按 cwd 下 ./mdadm-syno 查找，
+#       故先将其复制到工作目录再执行。
+#
+
+name: Build 2in1-grub
+
+on:
+  workflow_dispatch:
+    inputs:
+      push:
+        description: "push"
+        default: false
+        type: boolean
+      disk_size:
+        description: "整盘大小 (如 14.5G / 20G)"
+        default: "14.5G"
+        type: string
+      p6_size_mib:
+        description: "P6(RAMDISK) 大小 MiB"
+        default: "2048"
+        type: string
+
+jobs:
+  grub:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@main
+        with:
+          token: ${{ secrets.AiNas }}
+
+      - name: Checkout ainas2in1
+        uses: actions/checkout@main
+        with:
+          repository: myp015/ainas2in1
+          token: ${{ secrets.AiNas }}
+          path: ainas2in1
+
+      - name: Initialization environment
+        run: |
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git config --global user.name "github-actions[bot]"
+          sudo timedatectl set-timezone "Asia/Shanghai"
+
+          sudo apt update
+          sudo apt install -y autoconf autoconf-archive automake autopoint build-essential pkg-config bison flex gettext gawk libtool
+          sudo apt install -y libfreetype6-dev unifont fonts-dejavu libfuse-dev libzfslinux-dev liblzma-dev libdevmapper-dev
+          sudo apt install -y dosfstools e2fsprogs btrfs-progs parted qemu-utils gzip grub-common
+
+      - name: Build grub-2.14
+        run: |
+          bash ainas2in1/script/install-grub-2.14.sh "grub-2.14" "i386-pc i386-efi x86_64-efi"
+
+      - name: Make 2in1 GPT image
+        run: |
+          cp -f ainas2in1/script/mdadm-syno ./mdadm-syno
+          chmod +x ./mdadm-syno
+          bash ainas2in1/script/2in1_grubmake-gpt.sh "${{ inputs.disk_size }}" "${{ inputs.p6_size_mib }}"
+
+      - name: Upload artifact
+        if: success() && inputs.push == false
+        uses: actions/upload-artifact@v7
+        with:
+          name: grub
+          path: |
+            grub.img.gz
+          retention-days: 5
+
+      - name: Check and Push
+        if: success() && inputs.push == true
+        run: |
+          [ -f "grub.img.gz" ] || { echo "[E] grub.img.gz 未生成"; exit 1; }
+
+          mv -f grub.img.gz ainas2in1/img/grub.img.gz
+
+          cd ainas2in1
+          echo "Git push ..."
+          git pull
+          status=$(git status -s | grep -E 'img/grub.img.gz' | awk '{printf " %s", $2}')
+          if [ -n "${status}" ]; then
+            git add ${status}
+            git commit -m "update $(date +%Y-%m-%d" "%H:%M:%S)"
+            git push -f
+          fi

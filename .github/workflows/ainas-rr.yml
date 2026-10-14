@@ -1,0 +1,296 @@
+#
+# Copyright (C) 2022 Ing <https://github.com/wjz304>
+#
+# This is free software, licensed under the MIT License.
+# See /LICENSE for more information.
+#
+# RR 原版结构（保持不动），仅仓库地址适配 myp015：
+#   checkout RROrg/rr      → myp015/ainas-rr（secrets.AiNas）
+#   func.sh get* 仓库适配   → myp015/{buildroot,ainas-cks,ainas-lkm,ainas-addons,syno-modules}
+#   Release 发 RROrg/rr     → myp015/ainas-rr（secrets.AiNas）
+#   移除 rr-misc/docker     → myp015 无 rr-misc，myp015/ainas-rr 无 Dockerfile
+#   get* 过滤草稿           → select(.draft==false)，避免残留草稿 release 被 sort 误选为最新
+#
+
+name: Build AINAS-RR
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "format %y.%-m.$i or auto"
+        required: false
+        type: string
+      prerelease:
+        description: "pre release"
+        default: false
+        type: boolean
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@main
+        with:
+          token: ${{ secrets.AiNas }}
+        #with:
+        #  lfs: 'true'
+
+      - name: Checkout
+        uses: actions/checkout@main
+        with:
+          repository: myp015/ainas-rr
+          token: ${{ secrets.AiNas }}
+          path: rr
+
+      # Patch func.sh: RROrg → myp015（仓库地址适配）
+      - name: Patch func.sh to myp015
+        run: |
+          sed -i \
+            -e 's|https://api.github.com/repos/RROrg|https://api.github.com/repos/myp015|' \
+            -e 's|/rr-buildroot/|/buildroot/|g' \
+            -e 's|/rr-cks/|/ainas-cks/|g' \
+            -e 's|/rr-lkms/|/ainas-lkm/|g' \
+            -e 's|/rr-modules/|/syno-modules/|g' \
+            -e 's|/rr-addons/|/ainas-addons/|g' \
+            -e 's|rr-cks-\${TAG}.zip|ainas-cks-\${TAG}.zip|' \
+            -e 's|https://github.com/RROrg/rr|https://github.com/myp015/ainas-rr|' \
+            -e 's#jq -r "\.\[\]\.tag_name"#jq -r '"'"'[.[] | select(.draft == false)] | .[].tag_name'"'"'#' \
+            rr/scripts/func.sh
+
+      # Install dependencies
+      - name: Install dependencies
+        run: |
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git config --global user.name "github-actions[bot]"
+          sudo timedatectl set-timezone "Asia/Shanghai"
+
+          sudo apt update
+          sudo apt install -y locales busybox dialog gettext sed gawk jq curl
+          sudo apt install -y python-is-python3 python3-pip libelf-dev qemu-utils parted dosfstools cpio xz-utils lz4 lzma bzip2 gzip zstd
+          # sudo snap install yq
+          if ! type yq >/dev/null 2>&1 || ! yq --version 2>/dev/null | grep -q "v4."; then
+            sudo curl -kL https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -o /usr/bin/yq && sudo chmod a+x /usr/bin/yq
+          fi
+
+      # calculates the version number and push
+      - name: Calculate version
+        run: |
+          # 按月低增版本号（26.10.0 / 26.10.1 ...），同月重复发布第 3 段 +1
+          # 显式传入 version 且格式匹配当前年月时，以传入为准；否则自动计算
+          # （对齐 cks.yml：原逻辑空输入时 VERSION 保持空 → 不发布 GitHub Release；
+          # 修复后空输入也走自动计算并发布）
+          TAGDATE="$(date +'%Y%m%d%H%M')"
+
+          if [ -n "${{ inputs.version }}" ] && [ "$(echo ${{ inputs.version }} | cut -d '.' -f 1,2)" = "$(date +'%y.%-m')" ]; then
+            VERSION="${{ inputs.version }}"
+          else
+            # 自动：查 ainas-rr 最新 tag，同月则第 3 段 +1，跨月则 .0
+            LATEST_TAG="$(curl -skLH "Authorization: token ${{ secrets.AiNas }}" "https://api.github.com/repos/myp015/ainas-rr/releases" | jq -r '.[0].tag_name' 2>/dev/null)"
+            if [ -n "${LATEST_TAG}" ] && [ "$(echo ${LATEST_TAG} | cut -d '.' -f 1,2)" = "$(date +'%y.%-m')" ]; then
+              if [ "$(echo ${LATEST_TAG} | awk -F '.' '{print NF}')" -ge 4 ]; then
+                # 旧格式 4 段 tag（如 26.9.13.1）不参与低增，回退到月份首版
+                VERSION="$(date +'%y.%-m').0"
+              else
+                VERSION="$(echo ${LATEST_TAG} | awk -F '.' '{$3=$3+1}1' OFS='.')"
+              fi
+            else
+              VERSION="$(date +'%y.%-m').0"
+            fi
+          fi
+
+          # 防残留 tag 冲突：Calculate version 只查 releases[0]，历史失败 run 可能
+          # 留下 git tag 但无 release 对象 → release-action 422 already_exists。
+          # 循环 +1 直到对应 git tag 不存在（最多 20 次防死循环）。
+          for i in $(seq 1 20); do
+            if curl -skLH "Authorization: token ${{ secrets.AiNas }}" \
+                 "https://api.github.com/repos/myp015/ainas-rr/git/refs/tags/${VERSION}" 2>/dev/null \
+                 | grep -q '"ref"'; then
+              VERSION="$(echo ${VERSION} | awk -F '.' '{$3=$3+1}1' OFS='.')"
+            else
+              break
+            fi
+          done
+
+          echo "TAGDATE: ${TAGDATE}"
+          echo "VERSION: ${VERSION}"
+          echo "TAGDATE=${TAGDATE}" >>$GITHUB_ENV
+          echo "VERSION=${VERSION}" >>$GITHUB_ENV
+
+          cd rr
+          [ "${{ inputs.prerelease }}" = "true" ] && RELEASE="pre" || RELEASE=""
+          sed -i "s/^RR_RELEASE=.*$/RR_RELEASE=\"${RELEASE}\"/" files/initrd/opt/rr/include/consts.sh
+          echo "${VERSION}" >VERSION
+          echo "${VERSION}" >files/mnt/p1/RR_VERSION
+          sed -i "s/^RR_VERSION=.*$/RR_VERSION=\"${VERSION}\"/" files/initrd/opt/rr/include/consts.sh
+          if [ -n "${VERSION}" ]; then
+            git checkout main
+            git pull
+            status=$(git status -s | awk '{printf " %s", $2}')
+            if [ -n "${status}" ]; then
+              git add ${status}
+              git commit -m "update $(date +%Y-%m-%d" "%H:%M:%S)"
+              git push -f
+            fi
+          fi
+          cd -
+
+      # Convert po2mo, Get exts
+      - name: Convert po2mo, Get extractor, LKMs, addons and Modules
+        run: |
+          . rr/scripts/func.sh "${{ secrets.AiNas }}"
+
+          echo "Get extractor"
+          getCKs "rr/files/mnt/p3/cks" "true"
+          getLKMs "rr/files/mnt/p3/lkms" "true"
+          getAddons "rr/files/mnt/p3/addons" "true"
+          getModules "rr/files/mnt/p3/modules" "true"
+          getBuildroot "rr/files/mnt/p3" "true"
+          getExtractor "rr/files/mnt/p3/extractor"
+
+          echo "Repack initrd"
+          convertpo2mo "rr/files/initrd/opt/rr/lang"
+          repackInitrd "rr/files/mnt/p3/initrd-rr" "rr/files/initrd"
+
+      # Build incremental
+      - name: Build image
+        run: |
+          cd rr
+          . scripts/func.sh "${{ secrets.AiNas }}"
+
+          echo "Create RR image"
+          gzip -dc "files/initrd/opt/rr/grub.img.gz" >"grub.img"
+          resizeImg "grub.img" "+2048M" "rr.img"
+          fdisk -l "rr.img"
+          repackImg files "rr.img"
+
+          echo "Create RR ova"
+          convertova "rr.img" "rr.ova"
+
+          echo "Create RR vhd"
+          qemu-img convert rr.img -O vpc rr.vhd
+          createvmc "rr.vhd" "rr.vmc"
+
+      # Zip image and generate checksum
+      - name: Pack
+        run: |
+          cd rr
+          TAGDATE="${{ env.TAGDATE }}"
+          VERSION="${{ env.VERSION }}"
+          VERSION="${VERSION:-"${TAGDATE}"}"
+
+          sha256sum rr.img >sha256sum
+          zip -9 "rr-${VERSION}.img.zip" rr.img sha256sum
+
+          sha256sum rr.ova >sha256sum
+          zip -9 "rr-${VERSION}.ova.zip" rr.ova sha256sum
+
+          sha256sum rr.vhd  >sha256sum
+          sha256sum rr.vmc >>sha256sum
+          zip -9 "rr-${VERSION}.vhd.zip" rr.vhd rr.vmc sha256sum
+
+          # update.zip
+          sha256sum update-list.yml update-check.sh >sha256sum
+          zip -9j "update-${VERSION}.zip" update-list.yml update-check.sh
+          while read F; do
+            if [ -d "${F}" ]; then
+              FTGZ="$(basename "${F}").tgz"
+              tar -zcf "${FTGZ}" -C "${F}" .
+              sha256sum "${FTGZ}" >>sha256sum
+              zip -9j "update-${VERSION}.zip" "${FTGZ}"
+              rm -f "${FTGZ}"
+            else
+              (cd $(dirname "${F}") && sha256sum $(basename "${F}")) >>sha256sum
+              zip -9j "update-${VERSION}.zip" "${F}"
+            fi
+          done <<<$(yq '.replace | explode(.) | to_entries | map([.key])[] | .[]' update-list.yml)
+          zip -9j "update-${VERSION}.zip" sha256sum
+
+          # updateall.zip
+          rm -f sha256sum
+          echo '  "files/mnt/p3/cks/": "/mnt/p3/cks/"' >>update-list.yml
+          echo '  "files/mnt/p3/lkms/": "/mnt/p3/lkms/"' >>update-list.yml
+          echo '  "files/mnt/p3/addons/": "/mnt/p3/addons/"' >>update-list.yml
+          echo '  "files/mnt/p3/modules/": "/mnt/p3/modules/"' >>update-list.yml
+
+          zip -9j "updateall-${VERSION}.zip" update-list.yml update-check.sh
+          while read F; do
+            if [ -d "${F}" ]; then
+              FTGZ="$(basename "${F}").tgz"
+              tar -zcf "${FTGZ}" -C "${F}" .
+              sha256sum "${FTGZ}" >>sha256sum
+              zip -9j "updateall-${VERSION}.zip" "${FTGZ}"
+              rm -f "${FTGZ}"
+            else
+              (cd $(dirname "${F}") && sha256sum $(basename "${F}")) >>sha256sum
+              zip -9j "updateall-${VERSION}.zip" "${F}"
+            fi
+          done <<<$(yq '.replace | explode(.) | to_entries | map([.key])[] | .[]' update-list.yml)
+          zip -9j "updateall-${VERSION}.zip" sha256sum
+
+          # sha256sum
+          sha256sum "rr-${VERSION}.img.zip"     >sha256sum
+          sha256sum "rr-${VERSION}.ova.zip"    >>sha256sum
+          sha256sum "rr-${VERSION}.vhd.zip"    >>sha256sum
+          sha256sum "update-${VERSION}.zip"    >>sha256sum
+          sha256sum "updateall-${VERSION}.zip" >>sha256sum
+
+      # Upload artifact
+      - name: Upload to Artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: rr.img
+          path: |
+            rr/rr-*.img.zip
+          retention-days: 5
+
+      - name: Upload to Artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: rr.ova
+          path: |
+            rr/rr-*.ova.zip
+          retention-days: 5
+
+      - name: Upload to Artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: rr.vhd
+          path: |
+            rr/rr-*.vhd.zip
+          retention-days: 5
+
+      - name: Upload to Artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: updateall
+          path: |
+            rr/updateall-*.zip
+          retention-days: 5
+
+      - name: Upload to Artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: update
+          path: |
+            rr/update-*.zip
+          retention-days: 5
+
+      # Publish a release if is a tag
+      - name: Release
+        if: success() && env.VERSION != ''
+        uses: ncipollo/release-action@v1
+        with:
+          tag: ${{ env.VERSION }}
+          prerelease: ${{ inputs.prerelease }}
+          artifacts: |
+            rr/rr-*.zip
+            rr/updateall-*.zip
+            rr/sha256sum
+          body: |
+            - Please do not upgrade this version now (In release testing...),
+            - Please upgrade after updating the Changelog ...
+          owner: myp015
+          repo: ainas-rr
+          token: ${{ secrets.AiNas }}

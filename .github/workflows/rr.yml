@@ -4,293 +4,881 @@
 # This is free software, licensed under the MIT License.
 # See /LICENSE for more information.
 #
-# RR 原版结构（保持不动），仅仓库地址适配 myp015：
-#   checkout RROrg/rr      → myp015/ainas-rr（secrets.AiNas）
-#   func.sh get* 仓库适配   → myp015/{buildroot,ainas-cks,ainas-lkm,ainas-addons,syno-modules}
-#   Release 发 RROrg/rr     → myp015/ainas-rr（secrets.AiNas）
-#   移除 rr-misc/docker     → myp015 无 rr-misc，myp015/ainas-rr 无 Dockerfile
-#   get* 过滤草稿           → select(.draft==false)，避免残留草稿 release 被 sort 误选为最新
-#
 
-name: Build RR
-
+name: RR Build
 on:
   workflow_dispatch:
     inputs:
-      version:
-        description: "format %y.%-m.$i or auto"
-        required: false
-        type: string
-      prerelease:
-        description: "pre release"
-        default: false
+      all_models:
+        description: "编译模式"
+        type: choice
+        options:
+          - 自选
+          - 全选
+        default: 全选
+      model_ds918p:
+        description: "DS918+"
         type: boolean
+        default: false
+      model_ds920p:
+        description: "DS920+"
+        type: boolean
+        default: false
+      model_ds923p:
+        description: "DS923+"
+        type: boolean
+        default: false
+      model_ds925p:
+        description: "DS925+"
+        type: boolean
+        default: false
+      model_ds3622xsp:
+        description: "DS3622xs+"
+        type: boolean
+        default: false
+      model_sa6400:
+        description: "SA6400"
+        type: boolean
+        default: false
+      model_ds425p:
+        description: "DS425+"
+        type: boolean
+        default: false
+      model_dva3221:
+        description: "DVA3221"
+        type: boolean
+        default: false
+      model_dva1622:
+        description: "DVA1622"
+        type: boolean
+        default: false
+      custom_models:
+        description: "自定义型号(工作流未列出的,多个用逗号分隔,如 DS1621+,RS4021xs+)"
+        type: string
+        default: ""      
+      build_update_zip:
+        description: "编译升级包（updateall-*.zip）默认开启，可取消"
+        type: boolean
+        default: true
+      build_rr_original:
+        description: "生成原版 RR 镜像（rr-版本号.img.zip，跳过 Docker 编译）默认开启，可取消"
+        type: boolean
+        default: true
+      image_size:
+        description: "Image size"
+        type: choice
+        options:
+          - 2.5GB
+          - 4GB
+        default: 2.5GB
+      rr_version:
+        description: "RR version (可选,留空=latest;示例:26.4.0 或 v26.4.0)"
+        type: string
+        default: ""
+      dsm_version:
+        description: "DSM 版本编号（从 pats.xlsx 获取，选择 >= 7.2.1 的所有版本）"
+        type: choice
+        options:
+          - "7.2.1"
+          - "7.2.2"
+          - "7.3.0"
+          - "7.3.1"
+          - "7.3.2"
+          - "7.4.1"
+        default: "7.2.1"
 
 jobs:
-  build:
+  resolve-release:
+    runs-on: ubuntu-latest
+    outputs:
+      rr_tag: ${{ steps.pick.outputs.rr_tag }}
+      rr_asset_url: ${{ steps.pick.outputs.rr_asset_url }}
+    steps:
+      - id: pick
+        shell: bash
+        run: |
+          set -euo pipefail
+          REQ_RAW="${{ inputs.rr_version }}"
+          REQ_TAG="$(printf '%s' "$REQ_RAW" | tr -d '[:space:]')"
+          REQ_TAG="${REQ_TAG#rr-}"
+          REQ_TAG="${REQ_TAG%.img.zip}"
+          REQ_TAG="${REQ_TAG#v}"
+
+          fetch_latest() {
+            curl -fsSL --connect-timeout 10 "https://api.github.com/repos/RROrg/rr/releases/latest"
+          }
+          fetch_tag() {
+            local t="$1"
+            curl -fsSL --connect-timeout 10 "https://api.github.com/repos/RROrg/rr/releases/tags/${t}"
+          }
+
+          if [ -z "$REQ_TAG" ] || [ "$REQ_TAG" = "latest" ]; then
+            echo "[INFO] 未填写 rr_version，自动使用 latest"
+            RELEASE_JSON="$(fetch_latest)"
+          else
+            if ! RELEASE_JSON="$(fetch_tag "$REQ_TAG" 2>/dev/null)"; then
+              echo "[INFO] 指定版本 rr_version=${REQ_RAW} 未找到，回退到最新版本"
+              RELEASE_JSON="$(fetch_latest)"
+            fi
+          fi
+
+          RR_TAG="$(printf '%s' "$RELEASE_JSON" | jq -r '.tag_name' | sed 's/^v//')"
+          RR_ASSET_URL="$(printf '%s' "$RELEASE_JSON" | jq -r '.assets[]? | select(.name | test("^rr-.*[.]img[.]zip$")) | .browser_download_url' | head -n1)"
+          if [ -z "$RR_TAG" ] || [ "$RR_TAG" = "null" ] || [ -z "$RR_ASSET_URL" ] || [ "$RR_ASSET_URL" = "null" ]; then
+            echo "[E] 下载失败：无法解析 RR 发布信息 (rr_version=${REQ_RAW:-latest})"
+            exit 1
+          fi
+
+          echo "[INFO] 已解析 RR 版本：${RR_TAG}"
+          echo "rr_tag=$RR_TAG" >> "$GITHUB_OUTPUT"
+          echo "rr_asset_url=$RR_ASSET_URL" >> "$GITHUB_OUTPUT"
+
+  select-models:
+    runs-on: ubuntu-latest
+    outputs:
+      models: ${{ steps.pick.outputs.models }}
+    steps:
+      - id: pick
+        shell: bash
+        run: |
+          set -euo pipefail
+          MODELS=()
+
+          if [ "${{ inputs.all_models }}" = "全选" ]; then
+            echo "[INFO] 已开启全选，将编译所有支持的型号"
+            MODELS+=("DS918+" "DS920+" "DS923+" "DS925+" "DS3622xs+" "SA6400" "DS425+" "DVA3221" "DVA1622")
+          else
+            [ "${{ inputs.model_ds918p }}"    = "true" ] && MODELS+=("DS918+")
+            [ "${{ inputs.model_ds920p }}"    = "true" ] && MODELS+=("DS920+")
+            [ "${{ inputs.model_ds923p }}"    = "true" ] && MODELS+=("DS923+")
+            [ "${{ inputs.model_ds925p }}"    = "true" ] && MODELS+=("DS925+")
+            [ "${{ inputs.model_ds3622xsp }}" = "true" ] && MODELS+=("DS3622xs+")
+            [ "${{ inputs.model_sa6400 }}"    = "true" ] && MODELS+=("SA6400")
+            [ "${{ inputs.model_ds425p }}"    = "true" ] && MODELS+=("DS425+")
+            [ "${{ inputs.model_dva3221 }}"   = "true" ] && MODELS+=("DVA3221")
+            [ "${{ inputs.model_dva1622 }}"   = "true" ] && MODELS+=("DVA1622")
+          fi
+          
+          # 追加自定义型号（工作流未列出的型号）
+          CUSTOM_RAW="${{ inputs.custom_models }}"
+          if [ -n "$(printf '%s' "$CUSTOM_RAW" | tr -d '[:space:]')" ]; then
+            echo "[INFO] 检测到自定义型号输入: ${CUSTOM_RAW}"
+            IFS=',' read -ra CUSTOM_ARR <<< "$CUSTOM_RAW"
+            for cm in "${CUSTOM_ARR[@]}"; do
+              cm="$(echo "$cm" | xargs)"
+              [ -n "$cm" ] && MODELS+=("$cm")
+            done
+          fi
+          
+          
+          # 去重
+          UNIQ_MODELS=()
+          for MODEL_ITEM in "${MODELS[@]}"; do
+            SKIP=0
+            for SEEN_ITEM in "${UNIQ_MODELS[@]}"; do
+              [ "$SEEN_ITEM" = "$MODEL_ITEM" ] && { SKIP=1; break; }
+            done
+            [ $SKIP -eq 0 ] && UNIQ_MODELS+=("$MODEL_ITEM")
+          done
+          MODELS=("${UNIQ_MODELS[@]}")
+
+          if [ ${#MODELS[@]} -eq 0 ] && [ "${{ inputs.build_update_zip }}" != "true" ]; then
+            echo "[E] 请至少勾选一个型号，或勾选 update 包编译"
+            exit 1
+          fi
+
+          # update 包作为独立任务（不分 dt/nodt）
+          if [ "${{ inputs.build_update_zip }}" = "true" ]; then
+            MODELS+=("__UPDATE__")
+          fi
+          # 原版 RR 镜像作为独立任务（跳过 Docker 编译）
+          if [ "${{ inputs.build_rr_original }}" = "true" ]; then
+            MODELS+=("__RR_ORIGINAL__")
+          fi
+
+          echo "[INFO] 已选择任务: ${MODELS[*]}"
+          MODELS_JSON=$(printf "%s\n" "${MODELS[@]}" | python3 -c "import sys,json; print(json.dumps([l.strip() for l in sys.stdin if l.strip()]))")
+          echo "models=$MODELS_JSON" >> "$GITHUB_OUTPUT"
+
+  # 单独串行创建并确认 Release，避免原版/update matrix 任务同时创建/查询同一标签。
+  ensure-release:
+    needs: resolve-release
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@main
-        with:
-          token: ${{ secrets.AiNas }}
-        #with:
-        #  lfs: 'true'
-
-      - name: Checkout
-        uses: actions/checkout@main
-        with:
-          repository: myp015/ainas-rr
-          token: ${{ secrets.AiNas }}
-          path: rr
-
-      # Patch func.sh: RROrg → myp015（仓库地址适配）
-      - name: Patch func.sh to myp015
+      - name: 创建或确认 RR Release
+        shell: bash
+        env:
+          ACTION_TOKEN: ${{ secrets.AiNas }}
+          RR_TAG: ${{ needs.resolve-release.outputs.rr_tag }}
         run: |
-          sed -i \
-            -e 's|https://api.github.com/repos/RROrg|https://api.github.com/repos/myp015|' \
-            -e 's|/rr-buildroot/|/buildroot/|g' \
-            -e 's|/rr-cks/|/ainas-cks/|g' \
-            -e 's|/rr-lkms/|/ainas-lkm/|g' \
-            -e 's|/rr-modules/|/syno-modules/|g' \
-            -e 's|/rr-addons/|/ainas-addons/|g' \
-            -e 's|rr-cks-\${TAG}.zip|ainas-cks-\${TAG}.zip|' \
-            -e 's|https://github.com/RROrg/rr|https://github.com/myp015/ainas-rr|' \
-            -e 's#jq -r "\.\[\]\.tag_name"#jq -r '"'"'[.[] | select(.draft == false)] | .[].tag_name'"'"'#' \
-            rr/scripts/func.sh
+          set -euo pipefail
+          : "${ACTION_TOKEN:?缺少 ACTION_TOKEN}"
+          : "${RR_TAG:?缺少 RR_TAG}"
+          export GH_TOKEN="$ACTION_TOKEN"
+          export GH_REPO="myp015/ainas2in1"
+          RELEASE_TAG="rr-${RR_TAG}"
+          # 单个 job 仍可能遇到 GitHub 短暂 429/503；串行重试创建/查询，避免 matrix 一开始被阻断。
+          for attempt in $(seq 1 12); do
+            if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+              echo "[INFO] Release 已确认可见: $RELEASE_TAG"
+              exit 0
+            fi
+            echo "[INFO] 创建或确认 Release: $RELEASE_TAG (${attempt}/12)"
+            set +e
+            create_out=$(gh release create "$RELEASE_TAG" \
+              --title "$RELEASE_TAG" \
+              --notes "RR build artifacts for ${RR_TAG}" \
+              --latest=false 2>&1)
+            create_rc=$?
+            set -e
+            if [ "$create_rc" -eq 0 ]; then
+              echo "[INFO] Release 创建成功，等待 API 可见"
+            else
+              echo "$create_out"
+              if ! echo "$create_out" | grep -qiE 'already exists|already_exists|Validation Failed|HTTP 429|HTTP 502|HTTP 503|HTTP 504|rate limit|secondary rate'; then
+                exit "$create_rc"
+              fi
+            fi
+            sleep $((attempt * 5))
+          done
+          echo "[E] Release ${RELEASE_TAG} 创建/查询连续失败" >&2
+          exit 1
 
-      # Install dependencies
-      - name: Install dependencies
+  build:
+    name: ${{ matrix.model == '__UPDATE__' && 'build (update)' || (matrix.model == '__RR_ORIGINAL__' && 'build (rr-original)' || format('build ({0})', matrix.model)) }}
+    needs: [resolve-release, select-models, ensure-release]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      # max-parallel: 3
+      matrix:
+        model: ${{ fromJson(needs.select-models.outputs.models) }}
+    env:
+      IMAGE_FORMAT: img
+      IMAGE_SIZE: ${{ inputs.image_size }}
+      BUILD_UPDATE_ZIP: ${{ inputs.build_update_zip }}
+      LANGUAGE: zh_CN
+      BUILD_KERNEL: official
+      ADDONS: acpid,reboottoloader,addincards,cpuinfo,expands,diskcompat,lsiutil,nvmevolume,powersched,remotefs,storagepanel,smartctl,trivial,apppatch,vmtools
+      ACTION_TOKEN: ${{ secrets.AiNas }}
+      RR_ASSET_URL: ${{ needs.resolve-release.outputs.rr_asset_url }}
+      RR_TAG: ${{ needs.resolve-release.outputs.rr_tag }}
+      MODEL: ${{ matrix.model }}
+      DSM_LINE: ${{ inputs.dsm_version }}
+    steps:
+      - name: Checkout main repo
+        uses: actions/checkout@main
+
+      - name: 初始化环境
         run: |
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git config --global user.name "github-actions[bot]"
           sudo timedatectl set-timezone "Asia/Shanghai"
 
-          sudo apt update
-          sudo apt install -y locales busybox dialog gettext sed gawk jq curl
-          sudo apt install -y python-is-python3 python3-pip libelf-dev qemu-utils parted dosfstools cpio xz-utils lz4 lzma bzip2 gzip zstd
-          # sudo snap install yq
-          if ! type yq >/dev/null 2>&1 || ! yq --version 2>/dev/null | grep -q "v4."; then
-            sudo curl -kL https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -o /usr/bin/yq && sudo chmod a+x /usr/bin/yq
-          fi
+      - name: Checkout ainas2in1
+        uses: actions/checkout@v4
+        with:
+          repository: myp015/ainas2in1
+          token: ${{ secrets.AiNas }}
+          path: .2in1
 
-      # calculates the version number and push
-      - name: Calculate version
+      - name: 下载 RR 镜像资源
+        shell: bash
         run: |
-          # 按月低增版本号（26.10.0 / 26.10.1 ...），同月重复发布第 3 段 +1
-          # 显式传入 version 且格式匹配当前年月时，以传入为准；否则自动计算
-          # （对齐 cks.yml：原逻辑空输入时 VERSION 保持空 → 不发布 GitHub Release；
-          # 修复后空输入也走自动计算并发布）
-          TAGDATE="$(date +'%Y%m%d%H%M')"
+          set -euo pipefail
+          : "${RR_TAG:?缺少 RR_TAG}"
+          : "${RR_ASSET_URL:?缺少 RR_ASSET_URL}"
+          RR_FILENAME="rr-${RR_TAG}.img.zip"
+          echo "[INFO] 正在下载 RR 镜像资源：${RR_FILENAME}"
+          curl -fsSL --connect-timeout 10 "$RR_ASSET_URL" -o "$RR_FILENAME"
+          echo "RR_TAG=$RR_TAG" >> "$GITHUB_ENV"
+          echo "RR_FILENAME=$RR_FILENAME" >> "$GITHUB_ENV"
 
-          if [ -n "${{ inputs.version }}" ] && [ "$(echo ${{ inputs.version }} | cut -d '.' -f 1,2)" = "$(date +'%y.%-m')" ]; then
-            VERSION="${{ inputs.version }}"
-          else
-            # 自动：查 ainas-rr 最新 tag，同月则第 3 段 +1，跨月则 .0
-            LATEST_TAG="$(curl -skLH "Authorization: token ${{ secrets.AiNas }}" "https://api.github.com/repos/myp015/ainas-rr/releases" | jq -r '.[0].tag_name' 2>/dev/null)"
-            if [ -n "${LATEST_TAG}" ] && [ "$(echo ${LATEST_TAG} | cut -d '.' -f 1,2)" = "$(date +'%y.%-m')" ]; then
-              if [ "$(echo ${LATEST_TAG} | awk -F '.' '{print NF}')" -ge 4 ]; then
-                # 旧格式 4 段 tag（如 26.9.13.1）不参与低增，回退到月份首版
-                VERSION="$(date +'%y.%-m').0"
+      - name: 编译镜像
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # ── UPDATE 独立任务：应用 initrd patch 后打包 updateall ──
+          if [ "${MODEL}" = "__UPDATE__" ]; then
+            WORKDIR="$PWD"
+            AINAS2IN1_DIR="${WORKDIR}/.2in1"
+            SYSTEM_MNT="/mnt/p3"
+            : "${RR_FILENAME:?缺少 RR_FILENAME}"
+            echo "[INFO] UPDATE 任务：解压 RR 镜像，应用 initrd patch，再打包 updateall"
+            unzip "$RR_FILENAME" -d rr rr.img
+
+            # 系统依赖
+            sudo apt-get update
+            sudo apt-get install -y gettext cpio zstd dosfstools rsync qemu-utils
+
+            # 挂载 p3，修补 initrd（menu.sh 订单验证 patch 等）
+            . "$AINAS2IN1_DIR/script/2in1func.sh"
+            DISK_LOOP=$(sudo losetup -f)
+            sudo losetup -P "$DISK_LOOP" rr/rr.img
+            sudo mkdir -p "$SYSTEM_MNT"
+            sudo mount "${DISK_LOOP}p3" "$SYSTEM_MNT"
+
+            # ── grub.cfg 修补（update 场景 model 空 → Boot DSM）──
+            echo "[INFO] 修补 grub.cfg（update 场景 model=Boot DSM）"
+            sudo mkdir -p /mnt/p1
+            sudo mount -o rw "${DISK_LOOP}p1" /mnt/p1
+            sudo env MODEL_ENV="" python3 "$AINAS2IN1_DIR/script/patch-grub-cfg.py" /mnt/p1/boot/grub/grub.cfg
+            sudo umount /mnt/p1 || true
+
+            # ── cpuinfo 插件修补 ──────────────────────────────
+            echo "[INFO] 修补 cpuinfo 插件"
+            CPUINFO_TGZ="$SYSTEM_MNT/addons/cpuinfo/all.tgz"
+            CPUINFO_WORK="/tmp/cpuinfo_patch"
+            if [ -f "$CPUINFO_TGZ" ]; then
+              rm -rf "$CPUINFO_WORK"
+              mkdir -p "$CPUINFO_WORK/extract" "$CPUINFO_WORK/rootfs"
+              sudo tar -zxf "$CPUINFO_TGZ" -C "$CPUINFO_WORK/extract"
+
+              CPUINFO_PATCH_TARGET=""
+              CPUINFO_REPACK_MODE=""
+              if [ -f "$CPUINFO_WORK/extract/all.tar" ]; then
+                CPUINFO_REPACK_MODE="inner-tar"
+                sudo tar -xf "$CPUINFO_WORK/extract/all.tar" -C "$CPUINFO_WORK/rootfs"
+                [ -f "$CPUINFO_WORK/rootfs/root/usr/bin/cpuinfo.sh" ] && \
+                  CPUINFO_PATCH_TARGET="$CPUINFO_WORK/rootfs/root/usr/bin/cpuinfo.sh"
+              elif [ -f "$CPUINFO_WORK/extract/root/usr/bin/cpuinfo.sh" ]; then
+                CPUINFO_REPACK_MODE="direct"
+                CPUINFO_PATCH_TARGET="$CPUINFO_WORK/extract/root/usr/bin/cpuinfo.sh"
+              fi
+
+              if [ -n "$CPUINFO_PATCH_TARGET" ]; then
+                python3 "$AINAS2IN1_DIR/script/patch-cpuinfo.py" "$CPUINFO_PATCH_TARGET"
+                if [ "$CPUINFO_REPACK_MODE" = "inner-tar" ]; then
+                  (cd "$CPUINFO_WORK/rootfs" && sudo tar -cf "$CPUINFO_WORK/extract/all.tar" .)
+                  (cd "$CPUINFO_WORK/extract" && sudo tar -czf "$CPUINFO_TGZ" .)
+                else
+                  (cd "$CPUINFO_WORK/extract" && sudo tar -czf "$CPUINFO_TGZ" .)
+                fi
+                echo "[INFO] cpuinfo all.tgz 重新打包成功 (模式=$CPUINFO_REPACK_MODE)"
               else
-                VERSION="$(echo ${LATEST_TAG} | awk -F '.' '{$3=$3+1}1' OFS='.')"
+                echo "[INFO] cpuinfo.sh 未找到，跳过 cpuinfo 修补"
               fi
             else
-              VERSION="$(date +'%y.%-m').0"
+              echo "[INFO] $CPUINFO_TGZ 不存在，跳过 cpuinfo 修补"
             fi
+
+            INITRD_SRC="$SYSTEM_MNT/initrd-rr"
+            INITRD_WORK="/tmp/initrd_work"
+            INITRD_NEW="/tmp/initrd-rr.new"
+            echo "[INFO] 解包并修补 initrd-rr"
+            sudo rm -rf "$INITRD_WORK" "$INITRD_NEW"
+            sudo mkdir -p "$INITRD_WORK"
+            unpackInitrd "$INITRD_SRC" "$INITRD_WORK"
+
+            cd "$INITRD_WORK"
+            sudo bash "$AINAS2IN1_DIR/script/replace_ainas_po_notice.sh"
+            sudo AINAS2IN1_DIR="$AINAS2IN1_DIR" bash -c 'set -euo pipefail; . "${AINAS2IN1_DIR}/script/2in1func.sh"; convertpo2mo opt/rr/lang'
+            sudo bash "$AINAS2IN1_DIR/script/rr_menu_patch.sh"
+            cd "$WORKDIR"
+
+            echo "[INFO] 重新打包 initrd-rr"
+            repackInitrd "$INITRD_SRC" "$INITRD_WORK" "$INITRD_NEW"
+            sudo cp -f "$INITRD_NEW" "$INITRD_SRC"
+            sudo sync
+            sudo rm -rf "$INITRD_WORK" "$INITRD_NEW"
+            sudo umount "$SYSTEM_MNT" || true
+            sudo losetup --detach "$DISK_LOOP" || true
+
+            echo "[INFO] 打包 updateall-<版本号>.zip（RR 版，不分 dt/nodt）"
+            bash "$AINAS2IN1_DIR/script/2in1_build_update.sh" rr/rr.img "$GITHUB_WORKSPACE" "" "rr"
+            UPDATE_ZIP="$(ls -1 updateall-*.zip 2>/dev/null | head -n1 || true)"
+            echo "UPDATE_ZIP=$UPDATE_ZIP" >> "$GITHUB_ENV"
+
+            # 无需上传镜像，直接结束
+            exit 0
           fi
 
-          # 防残留 tag 冲突：Calculate version 只查 releases[0]，历史失败 run 可能
-          # 留下 git tag 但无 release 对象 → release-action 422 already_exists。
-          # 循环 +1 直到对应 git tag 不存在（最多 20 次防死循环）。
-          for i in $(seq 1 20); do
-            if curl -skLH "Authorization: token ${{ secrets.AiNas }}" \
-                 "https://api.github.com/repos/myp015/ainas-rr/git/refs/tags/${VERSION}" 2>/dev/null \
-                 | grep -q '"ref"'; then
-              VERSION="$(echo ${VERSION} | awk -F '.' '{$3=$3+1}1' OFS='.')"
-            else
-              break
+          # ── 目录与常量 ────────────────────────────────────────────
+          WORKDIR="$PWD"
+          AINAS2IN1_DIR="${WORKDIR}/.2in1"
+          GRUB_MNT="/mnt/p1"
+          SYSTEM_MNT="/mnt/p3"
+
+          # ── DSM 版本映射（版本编号来自 pats.xlsx，仅 >= 7.2.1）──────
+          pick_dsm_version() {
+            local line="$1"
+            case "$line" in
+              7.2.1) printf '7.2.1-69057-1'   ;;
+              7.2.2) printf '7.2.2-72806-0'   ;;
+              7.3.0) printf '7.3.0-81180-0'   ;;
+              7.3.1) printf '7.3.1-86003-0'   ;;
+              7.3.2) printf '7.3.2-86009-0'   ;;
+              7.4.1)
+                python3 -m pip -q install --user openpyxl
+                DSM_VERSION_74=$(MODEL="${MODEL}" python3 -c "import os,re,urllib.request,openpyxl;url='https://raw.githubusercontent.com/RROrg/rr/main/docs/pats.xlsx';path='/tmp/pats.xlsx';urllib.request.urlretrieve(url,path);wb=openpyxl.load_workbook(path,data_only=True);ws=wb[wb.sheetnames[0]];model=os.environ['MODEL'];line_req='7.4.1';rows=[(('' if r[0] is None else str(r[0]).strip()),('' if len(r)<2 or r[1] is None else str(r[1]).strip()),('' if len(r)<3 or r[2] is None else str(r[2]).strip())) for r in ws.iter_rows(min_row=1,values_only=True)];rows=[t for t in rows if t[0] and t[1] and t[2] and not (t[0].lower()=='model' and t[1].lower().startswith('version'))];cand=[(v,u) for m,v,u in rows if m==model and v.startswith(line_req+'-')];allm=[(v,u) for m,v,u in rows if m==model];sel=cand if cand else allm;sel or (_ for _ in ()).throw(SystemExit(f'no pat found for model={model}'));best=sorted(sel,key=lambda x:[int(t) for t in re.findall(r'\d+',x[0])],reverse=True)[0];print(best[0])")
+                printf '%s' "$DSM_VERSION_74"
+                ;;
+              *)
+                echo "[E] 不支持的 DSM 版本: $line" >&2
+                return 1
+                ;;
+            esac
+          }
+
+          DSM_LINE_REQ="${DSM_LINE:-7.2.1}"
+          if echo "${MODEL}" | grep -Eq '^(DS925\+|DS425\+)$' && [ "${DSM_LINE_REQ}" = "7.2.1" ]; then
+            echo "[INFO] ${MODEL} 不支持 DSM 7.2.1，自动切换到 7.2.2"
+            DSM_LINE_REQ="7.2.2"
+          fi
+
+          DSM_VERSION="$(pick_dsm_version "${DSM_LINE_REQ}")"
+          DSM_VERSION_MAIN="${DSM_VERSION%%-*}"
+          DSM_VERSION_BUILD="${DSM_VERSION#*-}"
+          DSM_VERSION_BUILD="${DSM_VERSION_BUILD%%-*}"
+          DSM_VERSION_SLUG="${DSM_VERSION_MAIN//./}_${DSM_VERSION_BUILD}"
+          if [ "${MODEL}" = "__RR_ORIGINAL__" ]; then
+            ARTIFACT_NAME="rr-${RR_TAG}"
+            echo "[INFO] 原版 RR 镜像任务：ARTIFACT_NAME=${ARTIFACT_NAME}"
+          else
+            ARTIFACT_NAME="${MODEL}_${DSM_VERSION_SLUG}_rr"
+          fi
+          echo "[INFO] 型号=${MODEL} 目标DSM版本=${DSM_VERSION} DSM系列=${DSM_LINE_REQ} 版本slug=${DSM_VERSION_SLUG}"
+
+          # ── 系统依赖 ──────────────────────────────────────────────
+          echo "[INFO] 正在安装构建依赖"
+          sudo apt-get update
+          sudo apt-get install -y gettext cpio zstd dosfstools rsync qemu-utils
+          unzip "$RR_FILENAME" -d rr rr.img
+          cp -f rr/rr.img rr/rr.base.img
+
+          # ── GRUB 修补 ─────────────────────────────────────────────
+          GRUB_LOOP=$(sudo losetup -f)
+          sudo mkdir -p /mnt/p1 /mnt/p2 /mnt/p3
+          sudo losetup -P "$GRUB_LOOP" rr/rr.img
+
+          sudo mount -o rw "${GRUB_LOOP}p1" "$GRUB_MNT"
+          echo "[INFO] 开始修补 grub.cfg"
+          # RR 原版镜像任务无型号，MODEL_ENV 置空 → patch 脚本默认 model=Boot DSM
+          if [ "${MODEL}" = "__RR_ORIGINAL__" ]; then
+            GRUB_MODEL_ENV=""
+          else
+            GRUB_MODEL_ENV="$MODEL"
+          fi
+          sudo env MODEL_ENV="$GRUB_MODEL_ENV" python3 "$AINAS2IN1_DIR/script/patch-grub-cfg.py" "$GRUB_MNT/boot/grub/grub.cfg"
+          # RR 原版镜像跳过 Docker 构建；官方 p1 没有 .locale，gettext 会回退原始 msgid。
+          # 显式设为中文，确保 zh_CN/rr.mo 中的 AiNas 文案生效；后续可在菜单切换其他语言。
+          if [ "${MODEL}" = "__RR_ORIGINAL__" ]; then
+            printf '%s\n' 'zh_CN.UTF-8' | sudo tee "$GRUB_MNT/.locale" >/dev/null
+            echo "[INFO] RR 原版镜像默认语言：zh_CN.UTF-8"
+          fi
+          echo "[INFO] grub.cfg 修补成功"
+          sudo umount "$GRUB_MNT" || true
+          sudo losetup --detach "$GRUB_LOOP" || true
+
+          # ── 挂载 p3 分区 ──────────────────────────────────────────
+          DISK_LOOP=$(sudo losetup -f)
+          sudo losetup -P "$DISK_LOOP" rr/rr.img
+          sudo rm -rf "$SYSTEM_MNT"
+          sudo mkdir -p "$SYSTEM_MNT"
+          sudo mount "${DISK_LOOP}p3" "$SYSTEM_MNT"
+
+          # ── cpuinfo 修补 ──────────────────────────────────────────
+          echo "[INFO] 开始修补 cpuinfo"
+          CPUINFO_TGZ="$SYSTEM_MNT/addons/cpuinfo/all.tgz"
+          CPUINFO_WORK="/tmp/cpuinfo_patch"
+          if [ -f "$CPUINFO_TGZ" ]; then
+            rm -rf "$CPUINFO_WORK"
+            mkdir -p "$CPUINFO_WORK/extract" "$CPUINFO_WORK/rootfs"
+            sudo tar -zxf "$CPUINFO_TGZ" -C "$CPUINFO_WORK/extract"
+
+            CPUINFO_PATCH_TARGET=""
+            CPUINFO_REPACK_MODE=""
+            if [ -f "$CPUINFO_WORK/extract/all.tar" ]; then
+              CPUINFO_REPACK_MODE="inner-tar"
+              sudo tar -xf "$CPUINFO_WORK/extract/all.tar" -C "$CPUINFO_WORK/rootfs"
+              [ -f "$CPUINFO_WORK/rootfs/root/usr/bin/cpuinfo.sh" ] && \
+                CPUINFO_PATCH_TARGET="$CPUINFO_WORK/rootfs/root/usr/bin/cpuinfo.sh"
+            elif [ -f "$CPUINFO_WORK/extract/root/usr/bin/cpuinfo.sh" ]; then
+              CPUINFO_REPACK_MODE="direct"
+              CPUINFO_PATCH_TARGET="$CPUINFO_WORK/extract/root/usr/bin/cpuinfo.sh"
             fi
+
+            if [ -n "$CPUINFO_PATCH_TARGET" ]; then
+              python3 "$AINAS2IN1_DIR/script/patch-cpuinfo.py" "$CPUINFO_PATCH_TARGET"
+              if [ "$CPUINFO_REPACK_MODE" = "inner-tar" ]; then
+                (cd "$CPUINFO_WORK/rootfs"  && sudo tar -cf "$CPUINFO_WORK/extract/all.tar" .)
+                (cd "$CPUINFO_WORK/extract" && sudo tar -czf "$CPUINFO_TGZ" .)
+              else
+                (cd "$CPUINFO_WORK/extract" && sudo tar -czf "$CPUINFO_TGZ" .)
+              fi
+              echo "[INFO] cpuinfo all.tgz 重新打包成功 (模式=$CPUINFO_REPACK_MODE)"
+            else
+              echo "[INFO] cpuinfo.sh 未在已知 all.tgz 结构中找到，跳过 cpuinfo 修补"
+            fi
+          else
+            echo "[INFO] $CPUINFO_TGZ 不存在，跳过 cpuinfo 修补"
+          fi
+
+          # ── initrd 修补与重打包（改用 2in1func.sh 的解包/重打包函数）──
+          . "$AINAS2IN1_DIR/script/2in1func.sh"
+
+          INITRD_SRC="$SYSTEM_MNT/initrd-rr"
+          INITRD_WORK="/tmp/initrd_work"
+          INITRD_NEW="/tmp/initrd-rr.new"
+
+          echo "[INFO] 使用 unpackInitrd 解包 initrd-rr"
+          sudo rm -rf "$INITRD_WORK" "$INITRD_NEW"
+          sudo mkdir -p "$INITRD_WORK"
+          unpackInitrd "$INITRD_SRC" "$INITRD_WORK"
+
+          cd "$INITRD_WORK"
+          sudo bash "$AINAS2IN1_DIR/script/replace_ainas_po_notice.sh"
+          sudo AINAS2IN1_DIR="$AINAS2IN1_DIR" bash -c 'set -euo pipefail; . "${AINAS2IN1_DIR}/script/2in1func.sh"; convertpo2mo opt/rr/lang'
+          # RR 版 menu.sh patch：升级菜单改为订单验证模式（本地包直接更新；在线下载需订单号验证 kind=rr）
+          sudo bash "$AINAS2IN1_DIR/script/rr_menu_patch.sh"
+          cd "$WORKDIR"
+
+          echo "[INFO] 使用 repackInitrd 重新打包 initrd-rr"
+          repackInitrd "$INITRD_SRC" "$INITRD_WORK" "$INITRD_NEW"
+          sudo cp -f "$INITRD_NEW" "$INITRD_SRC"
+          sudo sync
+
+          # 最终 initrd 反查：避免仅看到 msgfmt 日志，却把未修补内容写入制品。
+          # 重点验证英文/中文 rr.mo 均已写回，以及菜单订单验证补丁存在。
+          VERIFY_INITRD="/tmp/initrd_verify"
+          sudo rm -rf "$VERIFY_INITRD"
+          sudo mkdir -p "$VERIFY_INITRD"
+          unpackInitrd "$INITRD_SRC" "$VERIFY_INITRD"
+          echo "[INFO] 最终 initrd 验证：检查语言目录"
+          test -f "$VERIFY_INITRD/opt/rr/lang/en_US/LC_MESSAGES/rr.mo"
+          test -f "$VERIFY_INITRD/opt/rr/lang/zh_CN/LC_MESSAGES/rr.mo"
+          echo "[INFO] 最终 initrd 验证：检查英文 AiNas 文案"
+          grep -aFq "Taobao Store: AiNas URL:" "$VERIFY_INITRD/opt/rr/lang/en_US/LC_MESSAGES/rr.mo"
+          # .mo 为二进制 UTF-8 文件；不能用 strings（可能只输出 ASCII），直接以二进制模式匹配中文。
+          echo "[INFO] 最终 initrd 验证：检查中文 AiNas 文案"
+          grep -aFq "淘宝店铺:AiNas" "$VERIFY_INITRD/opt/rr/lang/zh_CN/LC_MESSAGES/rr.mo"
+          echo "[INFO] 最终 initrd 验证：检查 RR 订单菜单"
+          grep -Fq "Please enter your RR order number:" "$VERIFY_INITRD/opt/rr/menu.sh"
+          echo "[INFO] 最终 initrd 验证通过：en_US/zh_CN rr.mo + RR 订单菜单补丁均已写入"
+          sudo rm -rf "$VERIFY_INITRD" "$INITRD_WORK" "$INITRD_NEW"
+
+          sudo umount "$SYSTEM_MNT" || true
+          sudo rm -rf "$SYSTEM_MNT"
+
+          # RR 原版镜像任务：释放 loop
+          if [ "${MODEL}" = "__RR_ORIGINAL__" ]; then
+            sudo losetup --detach "$DISK_LOOP" || true
+          fi
+          
+          # ── RR 原版镜像任务：跳过 Docker 编译 ──────────────
+          if [ "${MODEL}" != "__RR_ORIGINAL__" ]; then
+          # ── 使用 RR Docker 编译镜像 ───────────────────────────────
+          cat > build.sh <<'EOF2'
+          set -eo pipefail
+          . menu.sh
+          echo "[INFO] 型号=${MODEL} 目标DSM版本=${DSM_VERSION}"
+          menu.sh modelMenu "${MODEL}"
+
+          LOCALE_FILE="$(dirname "${USER_CONFIG_FILE}")/.locale"
+          echo "${LANGUAGE}.UTF-8" >"${LOCALE_FILE}"
+          echo "[INFO] locale 文件内容: $(cat "${LOCALE_FILE}" 2>/dev/null || echo 缺失)"
+
+          # ── 写入 addons（只需一次，与联网无关）────────────────────
+          writeConfigKey "addons" "{}" "${USER_CONFIG_FILE}"
+          FORCE_NVME_CACHE=0
+          ADDONS_SEED="${ADDONS}"
+          echo "[INFO] ADDONS插件=${ADDONS_SEED}"
+          IFS=',' read -ra ADDON_ARR <<< "${ADDONS_SEED}"
+          declare -A __SEEN_ADDON=()
+          for A in "${ADDON_ARR[@]}"; do
+            if echo "${A}" | grep -q ':'; then
+              KEY="$(echo "${A}" | cut -d':' -f1 | xargs)"
+              VAL="$(echo "${A}" | cut -d':' -f2- | xargs)"
+            else
+              KEY="$(echo "${A}" | xargs)"
+              VAL=""
+            fi
+            [ -z "${KEY}" ] && continue
+            [ -n "${__SEEN_ADDON[${KEY}]}" ] && continue
+            __SEEN_ADDON[${KEY}]=1
+            writeConfigKey "addons.${KEY}" "${VAL}" "${USER_CONFIG_FILE}"
+          done
+          if echo "${MODEL}" | grep -Eq '^(DS918\+|DS1019\+|DS1621xs\+|RS1619xs)$'; then
+            FORCE_NVME_CACHE=1
+            KEY="nvmecache"
+            VAL=""
+            writeConfigKey "addons.${KEY}" "${VAL}" "${USER_CONFIG_FILE}"
+          fi
+          readConfigMap "addons" "${USER_CONFIG_FILE}" >/dev/null 2>&1 || true
+
+          # ── 选择版本(联网拉 pat) + 编译，带重试 ───────────────────
+          MAX_RETRY="${MAX_RETRY:-5}"
+          RETRY_SLEEP="${RETRY_SLEEP:-20}"
+
+          fetch_and_make() {
+            # productversMenu 会联网拉取 pat 信息
+            menu.sh productversMenu "${DSM_VERSION}"
+
+            # 校验 paturl：user-config.yml 中为 paturl: ""，空即联网失败，返回 7 触发重试
+            PAT_URL="$(readConfigKey "paturl" "${USER_CONFIG_FILE}" 2>/dev/null || echo '')"
+            if [ -z "${PAT_URL}" ] || [ "${PAT_URL}" = "null" ] || [ "${PAT_URL}" = '""' ]; then
+              echo "[WARN] paturl 为空，判定为联网失败"
+              return 7
+            fi
+            echo "[INFO] 已获取 paturl: ${PAT_URL}"
+
+            set +e
+            # 用 PIPESTATUS 取 make 的真实退出码，而不是 tee 的
+            menu.sh make 2>&1 | tee /tmp/make.log
+            local rc=${PIPESTATUS[0]}
+            set -e
+
+            # 关键：扫描 dialog 弹窗式错误（退出码可能是 0，必须靠日志判定）
+            if grep -Eq 'ramdisk patch 失败|installAddon: .*addon not found|patch 失败|ERROR:' /tmp/make.log; then
+              echo "[E] 检测到编译错误（ramdisk/addon patch 失败）"
+              return 1
+            fi
+
+            return "${rc}"
+          }
+
+          RC=0
+          for i in $(seq 1 "${MAX_RETRY}"); do
+            echo "[INFO] 第 ${i}/${MAX_RETRY} 次尝试(选版本+编译)"
+            set +e
+            fetch_and_make
+            RC=$?
+            set -e
+            if [ "${RC}" -eq 0 ]; then
+              echo "[INFO] 编译成功"; break
+            fi
+            echo "[WARN] 第 ${i} 次失败 (rc=${RC})"
+            [ -f "${LOG_FILE}" ] && cat "${LOG_FILE}" || true
+            # 仅对联网类错误(7)重试；其它错误直接停止
+            if [ "${RC}" -ne 7 ]; then
+              echo "[E] 非联网错误，停止重试"; break
+            fi
+            menu.sh cleanCache || true
+            [ "${i}" -lt "${MAX_RETRY}" ] && { echo "[INFO] ${RETRY_SLEEP}s 后重试"; sleep "${RETRY_SLEEP}"; }
           done
 
-          echo "TAGDATE: ${TAGDATE}"
-          echo "VERSION: ${VERSION}"
-          echo "TAGDATE=${TAGDATE}" >>$GITHUB_ENV
-          echo "VERSION=${VERSION}" >>$GITHUB_ENV
+          if [ "${RC}" -ne 0 ]; then
+            echo "[E] menu.sh make 最终失败 (rc=${RC})"
+            [ -f "${LOG_FILE}" ] && cat "${LOG_FILE}" || true
+            exit "${RC}"
+          fi
 
-          cd rr
-          [ "${{ inputs.prerelease }}" = "true" ] && RELEASE="pre" || RELEASE=""
-          sed -i "s/^RR_RELEASE=.*$/RR_RELEASE=\"${RELEASE}\"/" files/initrd/opt/rr/include/consts.sh
-          echo "${VERSION}" >VERSION
-          echo "${VERSION}" >files/mnt/p1/RR_VERSION
-          sed -i "s/^RR_VERSION=.*$/RR_VERSION=\"${VERSION}\"/" files/initrd/opt/rr/include/consts.sh
-          if [ -n "${VERSION}" ]; then
-            git checkout main
-            git pull
-            status=$(git status -s | awk '{printf " %s", $2}')
-            if [ -n "${status}" ]; then
-              git add ${status}
-              git commit -m "update $(date +%Y-%m-%d" "%H:%M:%S)"
-              git push -f
+          rm -rf /mnt/p3/ssh || true
+          menu.sh cleanCache
+          EOF2
+
+
+          # 向 heredoc 脚本注入运行时变量（外层 shell 展开）
+          sed -i \
+            -e "s|\${MODEL}|${MODEL}|g" \
+            -e "s|\${DSM_VERSION}|${DSM_VERSION}|g" \
+            -e "s|\${LANGUAGE}|${LANGUAGE}|g" \
+            -e "s|\${ADDONS}|${ADDONS}|g" \
+            build.sh
+          chmod +x build.sh
+          
+
+          RR_IMAGE_TAG="$RR_TAG"
+          if [ "$RR_TAG" != "25.9.7" ] && [ "$(printf '%s' "$RR_TAG" "25.9.7" | sort -V | head -n1)" = "$RR_TAG" ]; then
+            RR_IMAGE_TAG="25.9.7"
+          fi
+          echo "[INFO] RR Docker 镜像标签=${RR_IMAGE_TAG}"
+          docker pull "wjz304/rr:${RR_IMAGE_TAG}"
+          docker run --rm --privileged \
+            -v "$PWD/build.sh:/opt/rr/build.sh" \
+            -v "$PWD:$PWD" -w "$PWD" \
+            "wjz304/rr:${RR_IMAGE_TAG}" bash /opt/rr/build.sh
+
+          # ── 清理 p3 临时文件 ──────────────────────────────────────
+          sudo mkdir -p "$SYSTEM_MNT"
+          sudo mount "${DISK_LOOP}p3" "$SYSTEM_MNT" || true
+          sudo rm -rf "$SYSTEM_MNT/dl" "$SYSTEM_MNT/auxfiles" "$SYSTEM_MNT/logs" || true
+          sudo umount "$SYSTEM_MNT" || true
+          sudo losetup --detach "$DISK_LOOP"
+
+          fi
+
+          # ── 提取 user-config.yml（模型/RR原版任务都需要）──
+          . "$AINAS2IN1_DIR/script/2in1func.sh"
+          USER_CONFIG_YML="user-config.yml"
+          USER_LOOP=$(sudo losetup -f)
+          sudo losetup -P "$USER_LOOP" rr/rr.img
+          sudo mkdir -p /mnt/p1
+          sudo mount "${USER_LOOP}p1" /mnt/p1
+          if [ "${MODEL}" = "__RR_ORIGINAL__" ]; then
+            test "$(cat /mnt/p1/.locale 2>/dev/null)" = "zh_CN.UTF-8"
+            echo "[INFO] RR 原版镜像 p1 locale 验证通过：zh_CN.UTF-8"
+          fi
+          cp -f /mnt/p1/user-config.yml "$USER_CONFIG_YML" 2>/dev/null || true
+          sudo umount /mnt/p1 || true
+          sudo losetup --detach "$USER_LOOP" || true
+
+          # ── 选择引导镜像 ──────────────────────────────────────────
+          if [ "$(printf '%s\n' "${RR_TAG}" "26.2.2" | sort -V | head -n1)" = "26.2.2" ]; then
+            GRUB_IMG="ainas/grub2.14.img.gz"
+          else
+            GRUB_IMG="ainas/grub2.12.img.gz"
+          fi
+          echo "[INFO] rr tag=${RR_TAG} 选用的引导镜像=${GRUB_IMG}"
+
+          # ── 按目标大小 Repack 镜像 ────────────────────────────────
+          # 原版 RR 镜像任务：保持原版镜像（不 repack），zip -9 压缩（官方做法，避免文件系统膨胀）
+          if [ "${MODEL}" = "__RR_ORIGINAL__" ]; then
+            echo "[INFO] RR 原版镜像任务：保持原版镜像，不 repack（zip -9 压缩，官方做法）"
+          else
+          case "$IMAGE_SIZE" in
+            2.5GB)
+              gzip -dc "$GRUB_IMG" > rr/rr_2GB.img
+              #resizeImg rr/rr_2GB.img +1024M
+              repack_rr_Img rr/rr.img rr/rr_2GB.img
+              rm -f rr/rr.img
+              mv -f rr/rr_2GB.img rr/rr.img
+              ;;
+            4GB)
+              echo "[INFO] 保持默认 4GB 镜像"
+              ;;
+            *)
+              echo "[E] 不支持的镜像大小: $IMAGE_SIZE"
+              exit 1
+              ;;
+          esac
+          fi
+          echo "[INFO] 最终镜像大小(字节): $(stat -c%s rr/rr.img)"
+
+          # ── 导出并打包制品 ────────────────────────────────────────
+          case "$IMAGE_FORMAT" in
+            img)
+              if [ "${MODEL}" = "__RR_ORIGINAL__" ]; then
+                # 原版 RR 镜像：保持 rr.img 文件名（官方格式），zip 名带版本号
+                mv -f rr/rr.img rr.img
+              else
+                mv -f rr/rr.img "${ARTIFACT_NAME}.img"
+              fi
+              [ "$USER_CONFIG_YML" = "user-config.yml" ] || mv -f "$USER_CONFIG_YML" "user-config.yml"
+              ;;
+            *)
+              echo "[E] 不支持的镜像格式: $IMAGE_FORMAT"
+              exit 1
+              ;;
+          esac
+
+          rm -f rr/rr.img rr/rr.base.img
+
+          if [ "${MODEL}" = "__RR_ORIGINAL__" ]; then
+            # 原版 RR 镜像：官方压缩命令 zip -9，命名 rr-<版本>.img.zip，打包 rr.img + exe（不含 user-config.yml）
+            ARTIFACT_ZIP="rr-${RR_TAG}.img.zip"
+            rm -f "${ARTIFACT_NAME}.img"
+            zip -9 -q "$ARTIFACT_ZIP" rr.img
+            if [ -d "ainas" ]; then
+              for exe in ainas/*.exe; do
+                [ -f "$exe" ] && zip -qj "$ARTIFACT_ZIP" "$exe"
+              done
+            fi
+          else
+            ARTIFACT_ZIP="${ARTIFACT_NAME}.zip"
+            zip -qr "$ARTIFACT_ZIP" "${ARTIFACT_NAME}.img" user-config.yml
+            if [ -d "ainas" ]; then
+              for exe in ainas/*.exe; do
+                [ -f "$exe" ] && zip -qj "$ARTIFACT_ZIP" "$exe"
+              done
             fi
           fi
-          cd -
+          echo "[INFO] ${ARTIFACT_ZIP} 内容:"
+          zipinfo -1 "$ARTIFACT_ZIP" | sed 's/^/  /'
+          echo "[INFO] exe 数量: $(zipinfo -1 "$ARTIFACT_ZIP" | grep -c '\.exe$')"
 
-      # Convert po2mo, Get exts
-      - name: Convert po2mo, Get extractor, LKMs, addons and Modules
+          echo "ARTIFACT_NAME=${ARTIFACT_NAME}" >> "$GITHUB_ENV"
+          echo "ARTIFACT_ZIP=$ARTIFACT_ZIP" >> "$GITHUB_ENV"
+
+      - name: 发布制品到 ainas2in1 Release
+        shell: bash
+        env:
+          ACTION_TOKEN: ${{ secrets.AiNas }}
         run: |
-          . rr/scripts/func.sh "${{ secrets.AiNas }}"
+          set -euo pipefail
+          : "${RR_TAG:?缺少 RR_TAG}"
+          : "${ACTION_TOKEN:?缺少 ACTION_TOKEN}"
 
-          echo "Get extractor"
-          getCKs "rr/files/mnt/p3/cks" "true"
-          getLKMs "rr/files/mnt/p3/lkms" "true"
-          getAddons "rr/files/mnt/p3/addons" "true"
-          getModules "rr/files/mnt/p3/modules" "true"
-          getBuildroot "rr/files/mnt/p3" "true"
-          getExtractor "rr/files/mnt/p3/extractor"
+          export GH_TOKEN="$ACTION_TOKEN"
+          export GH_REPO="myp015/ainas2in1"
+          RELEASE_TAG="rr-${RR_TAG}"
 
-          echo "Repack initrd"
-          convertpo2mo "rr/files/initrd/opt/rr/lang"
-          repackInitrd "rr/files/mnt/p3/initrd-rr" "rr/files/initrd"
-
-      # Build incremental
-      - name: Build image
-        run: |
-          cd rr
-          . scripts/func.sh "${{ secrets.AiNas }}"
-
-          echo "Create RR image"
-          gzip -dc "files/initrd/opt/rr/grub.img.gz" >"grub.img"
-          resizeImg "grub.img" "+2048M" "rr.img"
-          fdisk -l "rr.img"
-          repackImg files "rr.img"
-
-          echo "Create RR ova"
-          convertova "rr.img" "rr.ova"
-
-          echo "Create RR vhd"
-          qemu-img convert rr.img -O vpc rr.vhd
-          createvmc "rr.vhd" "rr.vmc"
-
-      # Zip image and generate checksum
-      - name: Pack
-        run: |
-          cd rr
-          TAGDATE="${{ env.TAGDATE }}"
-          VERSION="${{ env.VERSION }}"
-          VERSION="${VERSION:-"${TAGDATE}"}"
-
-          sha256sum rr.img >sha256sum
-          zip -9 "rr-${VERSION}.img.zip" rr.img sha256sum
-
-          sha256sum rr.ova >sha256sum
-          zip -9 "rr-${VERSION}.ova.zip" rr.ova sha256sum
-
-          sha256sum rr.vhd  >sha256sum
-          sha256sum rr.vmc >>sha256sum
-          zip -9 "rr-${VERSION}.vhd.zip" rr.vhd rr.vmc sha256sum
-
-          # update.zip
-          sha256sum update-list.yml update-check.sh >sha256sum
-          zip -9j "update-${VERSION}.zip" update-list.yml update-check.sh
-          while read F; do
-            if [ -d "${F}" ]; then
-              FTGZ="$(basename "${F}").tgz"
-              tar -zcf "${FTGZ}" -C "${F}" .
-              sha256sum "${FTGZ}" >>sha256sum
-              zip -9j "update-${VERSION}.zip" "${FTGZ}"
-              rm -f "${FTGZ}"
+          # 组装待上传资产（模型镜像 + update 包，任一存在即可）
+          # GitHub 单文件上限 2GB，超过则 split 分卷上传（.part1/.part2/...）
+          MAX_ASSET_BYTES=2147483648
+          SPLIT_SIZE_MB=1900
+          add_asset_with_split() {
+            local f="$1"
+            local sz
+            sz=$(stat -c%s "$f")
+            if [ "$sz" -gt "$MAX_ASSET_BYTES" ]; then
+              echo "[INFO] ${f##*/} 大小 ${sz} 超过 2GB 限制，split 分卷 (${SPLIT_SIZE_MB}MB/卷)"
+              local base="${f%.zip}"
+              split -b "${SPLIT_SIZE_MB}M" -d -a 2 "$f" "${base}.part"
+              local p
+              for p in "${base}".part*; do
+                ASSETS+=("$p")
+                echo "  -> ${p##*/} ($(stat -c%s "$p") 字节)"
+              done
             else
-              (cd $(dirname "${F}") && sha256sum $(basename "${F}")) >>sha256sum
-              zip -9j "update-${VERSION}.zip" "${F}"
+              ASSETS+=("$f")
             fi
-          done <<<$(yq '.replace | explode(.) | to_entries | map([.key])[] | .[]' update-list.yml)
-          zip -9j "update-${VERSION}.zip" sha256sum
+          }
+          ASSETS=()
+          if [ -n "${ARTIFACT_ZIP:-}" ] && [ -f "$GITHUB_WORKSPACE/$ARTIFACT_ZIP" ]; then
+            add_asset_with_split "$GITHUB_WORKSPACE/$ARTIFACT_ZIP"
+          fi
+          if [ -n "${UPDATE_ZIP:-}" ] && [ -f "$GITHUB_WORKSPACE/$UPDATE_ZIP" ]; then
+            add_asset_with_split "$GITHUB_WORKSPACE/$UPDATE_ZIP"
+          fi
+          if [ ${#ASSETS[@]} -eq 0 ]; then
+            echo "[E] 没有可上传的资产"
+            exit 1
+          fi
 
-          # updateall.zip
-          rm -f sha256sum
-          echo '  "files/mnt/p3/cks/": "/mnt/p3/cks/"' >>update-list.yml
-          echo '  "files/mnt/p3/lkms/": "/mnt/p3/lkms/"' >>update-list.yml
-          echo '  "files/mnt/p3/addons/": "/mnt/p3/addons/"' >>update-list.yml
-          echo '  "files/mnt/p3/modules/": "/mnt/p3/modules/"' >>update-list.yml
-
-          zip -9j "updateall-${VERSION}.zip" update-list.yml update-check.sh
-          while read F; do
-            if [ -d "${F}" ]; then
-              FTGZ="$(basename "${F}").tgz"
-              tar -zcf "${FTGZ}" -C "${F}" .
-              sha256sum "${FTGZ}" >>sha256sum
-              zip -9j "updateall-${VERSION}.zip" "${FTGZ}"
-              rm -f "${FTGZ}"
-            else
-              (cd $(dirname "${F}") && sha256sum $(basename "${F}")) >>sha256sum
-              zip -9j "updateall-${VERSION}.zip" "${F}"
+          # Release 通常由 ensure-release 创建；但 build 后可能出现“release not found”
+          #（空 Release 被删/API 不一致）。上传前再次确认并重试，不存在则重建。
+          ensure_release() {
+            local create_out create_rc
+            if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+              return 0
             fi
-          done <<<$(yq '.replace | explode(.) | to_entries | map([.key])[] | .[]' update-list.yml)
-          zip -9j "updateall-${VERSION}.zip" sha256sum
+            echo "[INFO] Release ${RELEASE_TAG} 不存在，重建..."
+            set +e
+            create_out=$(gh release create "$RELEASE_TAG" \
+              --title "$RELEASE_TAG" \
+              --notes "RR build artifacts for ${RR_TAG}" \
+              --latest=false 2>&1)
+            create_rc=$?
+            set -e
+            if [ "$create_rc" -ne 0 ]; then
+              echo "$create_out"
+              echo "$create_out" | grep -qiE 'already exists|already_exists|HTTP 429|HTTP 502|HTTP 503|HTTP 504|rate limit|secondary rate' || return "$create_rc"
+            fi
+            gh release view "$RELEASE_TAG" >/dev/null 2>&1 && return 0
+            return 1
+          }
 
-          # sha256sum
-          sha256sum "rr-${VERSION}.img.zip"     >sha256sum
-          sha256sum "rr-${VERSION}.ova.zip"    >>sha256sum
-          sha256sum "rr-${VERSION}.vhd.zip"    >>sha256sum
-          sha256sum "update-${VERSION}.zip"    >>sha256sum
-          sha256sum "updateall-${VERSION}.zip" >>sha256sum
+          upload_with_retry() {
+            local attempt out rc
+            for attempt in 1 2 3 4 5; do
+              ensure_release
+              echo "[INFO] 上传制品尝试 ${attempt}/5 -> ${RELEASE_TAG}"
+              set +e
+              out=$(gh release upload "$RELEASE_TAG" "${ASSETS[@]}" --clobber 2>&1)
+              rc=$?
+              set -e
+              if [ "$rc" -eq 0 ]; then
+                return 0
+              fi
+              echo "$out"
+              if echo "$out" | grep -qiE 'HTTP 422|already exists|409|rate limit|secondary rate|HTTP 429|HTTP 502|HTTP 503|HTTP 504'; then
+                sleep $((attempt * 5)); continue
+              fi
+              return "$rc"
+            done
+            return 1
+          }
 
-      # Upload artifact
-      - name: Upload to Artifacts
-        uses: actions/upload-artifact@v7
-        with:
-          name: rr.img
-          path: |
-            rr/rr-*.img.zip
-          retention-days: 5
-
-      - name: Upload to Artifacts
-        uses: actions/upload-artifact@v7
-        with:
-          name: rr.ova
-          path: |
-            rr/rr-*.ova.zip
-          retention-days: 5
-
-      - name: Upload to Artifacts
-        uses: actions/upload-artifact@v7
-        with:
-          name: rr.vhd
-          path: |
-            rr/rr-*.vhd.zip
-          retention-days: 5
-
-      - name: Upload to Artifacts
-        uses: actions/upload-artifact@v7
-        with:
-          name: updateall
-          path: |
-            rr/updateall-*.zip
-          retention-days: 5
-
-      - name: Upload to Artifacts
-        uses: actions/upload-artifact@v7
-        with:
-          name: update
-          path: |
-            rr/update-*.zip
-          retention-days: 5
-
-      # Publish a release if is a tag
-      - name: Release
-        if: success() && env.VERSION != ''
-        uses: ncipollo/release-action@v1
-        with:
-          tag: ${{ env.VERSION }}
-          prerelease: ${{ inputs.prerelease }}
-          artifacts: |
-            rr/rr-*.zip
-            rr/updateall-*.zip
-            rr/sha256sum
-          body: |
-            - Please do not upgrade this version now (In release testing...),
-            - Please upgrade after updating the Changelog ...
-          owner: myp015
-          repo: ainas-rr
-          token: ${{ secrets.AiNas }}
+          upload_with_retry
