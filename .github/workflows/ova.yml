@@ -131,7 +131,7 @@ jobs:
           : "${ACTION_TOKEN:?缺少 ACTION_TOKEN}"
           : "${RR_TAG:?缺少 RR_TAG}"
           export GH_TOKEN="$ACTION_TOKEN"
-          export GH_REPO="myp015/ainas2in1"
+          export GH_REPO="myp015/ainas-2in1"
           RELEASE_TAG="OVA_rr${RR_TAG}"
           for attempt in $(seq 1 12); do
             if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
@@ -246,10 +246,10 @@ jobs:
           git config --global user.name "github-actions[bot]"
           sudo timedatectl set-timezone "Asia/Shanghai"
 
-      - name: checkout ainas2in1
+      - name: checkout ainas-2in1
         uses: actions/checkout@v4
         with:
-          repository: myp015/ainas2in1
+          repository: myp015/ainas-2in1
           token: ${{ secrets.AiNas }}
           path: .2in1
 
@@ -597,7 +597,7 @@ jobs:
           ls -lh "$PAT_FILE"
 
           # ── 启动 DSM 安装容器 ─────────────────────────────────────
-          echo "[INFO] 正在使用 ainas2in1 docker-compose 启动 DSM 安装容器"
+          echo "[INFO] 正在使用 ainas-2in1 docker-compose 启动 DSM 安装容器"
           cp -f "$AINAS2IN1_DIR/docker/vm-docker-compose.yaml" "$WORKDIR/rr/docker-compose.yaml"
           sed -i 's/^\([[:space:]]*container_name:[[:space:]]*\).*/\1dsm/' "$WORKDIR/rr/docker-compose.yaml"
           sed -i "s#file=/rr.img#file=/storage/alpine/rr.img#g" "$WORKDIR/rr/docker-compose.yaml"
@@ -808,7 +808,7 @@ jobs:
 
 
 
-      - name: 发布制品到 ainas2in1 Release
+      - name: 发布制品到 ainas-2in1 Release
         shell: bash
         env:
           ACTION_TOKEN: ${{ secrets.AiNas }}
@@ -818,7 +818,7 @@ jobs:
           : "${ACTION_TOKEN:?缺少 ACTION_TOKEN}"
 
           export GH_TOKEN="$ACTION_TOKEN"
-          export GH_REPO="myp015/ainas2in1"
+          export GH_REPO="myp015/ainas-2in1"
           RELEASE_TAG="OVA_rr${TAG}"
 
           ASSETS=()

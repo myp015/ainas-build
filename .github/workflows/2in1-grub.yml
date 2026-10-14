@@ -5,10 +5,10 @@
 # See /LICENSE for more information.
 #
 # 2in1 GPT 引导盘构建：
-#   checkout myp015/ainas2in1（secrets.AiNas）
+#   checkout myp015/ainas-2in1（secrets.AiNas）
 #   → script/install-grub-2.14.sh 构建 grub-2.14（i386-pc/i386-efi/x86_64-efi）
 #   → script/2in1_grubmake-gpt.sh 生成 14.5G GPT 双引导镜像 grub.img.gz
-#   → push 回 myp015/ainas2in1 的 img/grub.img.gz（secrets.AiNas）
+#   → push 回 myp015/ainas-2in1 的 img/grub.img.gz（secrets.AiNas）
 #
 # 说明：2in1_grubmake-gpt.sh 直接使用脚本同目录的 mdadm-syno（<script_dir>/mdadm-syno）。
 #
@@ -40,12 +40,12 @@ jobs:
         with:
           token: ${{ secrets.AiNas }}
 
-      - name: Checkout ainas2in1
+      - name: Checkout ainas-2in1
         uses: actions/checkout@main
         with:
-          repository: myp015/ainas2in1
+          repository: myp015/ainas-2in1
           token: ${{ secrets.AiNas }}
-          path: ainas2in1
+          path: ainas-2in1
 
       - name: Initialization environment
         run: |
@@ -60,11 +60,11 @@ jobs:
 
       - name: Build grub-2.14
         run: |
-          bash ainas2in1/script/install-grub-2.14.sh "grub-2.14" "i386-pc i386-efi x86_64-efi"
+          bash ainas-2in1/script/install-grub-2.14.sh "grub-2.14" "i386-pc i386-efi x86_64-efi"
 
       - name: Make 2in1 GPT image
         run: |
-          bash ainas2in1/script/2in1_grubmake-gpt.sh "${{ inputs.disk_size }}" "${{ inputs.p6_size_mib }}"
+          bash ainas-2in1/script/2in1_grubmake-gpt.sh "${{ inputs.disk_size }}" "${{ inputs.p6_size_mib }}"
 
       - name: Upload artifact
         if: success() && inputs.push == false
@@ -80,9 +80,9 @@ jobs:
         run: |
           [ -f "grub.img.gz" ] || { echo "[E] grub.img.gz 未生成"; exit 1; }
 
-          mv -f grub.img.gz ainas2in1/img/grub.img.gz
+          mv -f grub.img.gz ainas-2in1/img/grub.img.gz
 
-          cd ainas2in1
+          cd ainas-2in1
           echo "Git push ..."
           git pull
           status=$(git status -s | grep -E 'img/grub.img.gz' | awk '{printf " %s", $2}')

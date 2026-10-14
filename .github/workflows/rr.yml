@@ -215,7 +215,7 @@ jobs:
           : "${ACTION_TOKEN:?缺少 ACTION_TOKEN}"
           : "${RR_TAG:?缺少 RR_TAG}"
           export GH_TOKEN="$ACTION_TOKEN"
-          export GH_REPO="myp015/ainas2in1"
+          export GH_REPO="myp015/ainas-2in1"
           RELEASE_TAG="rr-${RR_TAG}"
           # 单个 job 仍可能遇到 GitHub 短暂 429/503；串行重试创建/查询，避免 matrix 一开始被阻断。
           for attempt in $(seq 1 12); do
@@ -275,10 +275,10 @@ jobs:
           git config --global user.name "github-actions[bot]"
           sudo timedatectl set-timezone "Asia/Shanghai"
 
-      - name: Checkout ainas2in1
+      - name: Checkout ainas-2in1
         uses: actions/checkout@v4
         with:
-          repository: myp015/ainas2in1
+          repository: myp015/ainas-2in1
           token: ${{ secrets.AiNas }}
           path: .2in1
 
@@ -791,7 +791,7 @@ jobs:
           echo "ARTIFACT_NAME=${ARTIFACT_NAME}" >> "$GITHUB_ENV"
           echo "ARTIFACT_ZIP=$ARTIFACT_ZIP" >> "$GITHUB_ENV"
 
-      - name: 发布制品到 ainas2in1 Release
+      - name: 发布制品到 ainas-2in1 Release
         shell: bash
         env:
           ACTION_TOKEN: ${{ secrets.AiNas }}
@@ -801,7 +801,7 @@ jobs:
           : "${ACTION_TOKEN:?缺少 ACTION_TOKEN}"
 
           export GH_TOKEN="$ACTION_TOKEN"
-          export GH_REPO="myp015/ainas2in1"
+          export GH_REPO="myp015/ainas-2in1"
           RELEASE_TAG="rr-${RR_TAG}"
 
           # 组装待上传资产（模型镜像 + update 包，任一存在即可）
