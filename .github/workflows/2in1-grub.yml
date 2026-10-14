@@ -10,8 +10,7 @@
 #   → script/2in1_grubmake-gpt.sh 生成 14.5G GPT 双引导镜像 grub.img.gz
 #   → push 回 myp015/ainas2in1 的 img/grub.img.gz（secrets.AiNas）
 #
-# 说明：2in1_grubmake-gpt.sh 依赖同目录 mdadm-syno，脚本按 cwd 下 ./mdadm-syno 查找，
-#       故先将其复制到工作目录再执行。
+# 说明：2in1_grubmake-gpt.sh 直接使用脚本同目录的 mdadm-syno（<script_dir>/mdadm-syno）。
 #
 
 name: Build 2in1-grub
@@ -65,8 +64,6 @@ jobs:
 
       - name: Make 2in1 GPT image
         run: |
-          cp -f ainas2in1/script/mdadm-syno ./mdadm-syno
-          chmod +x ./mdadm-syno
           bash ainas2in1/script/2in1_grubmake-gpt.sh "${{ inputs.disk_size }}" "${{ inputs.p6_size_mib }}"
 
       - name: Upload artifact
