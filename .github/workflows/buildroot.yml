@@ -129,15 +129,6 @@ jobs:
           echo "${VERSION}" > "VERSION"
           zip -9 ${{ github.workspace }}/buildroot-${VERSION}.zip -j bzImage-rr initrd-rr VERSION
 
-      - name: Upload artifact
-        if: success() && env.VERSION == ''
-        uses: actions/upload-artifact@v7
-        with:
-          name: ainas-buildroot
-          path: |
-            buildroot*.zip
-          retention-days: 5
-
       - name: Release
         if: success() && env.VERSION != ''
         uses: ncipollo/release-action@v1

@@ -96,15 +96,6 @@ jobs:
           echo "${VERSION}" > "VERSION"
           zip -9 ${{ github.workspace }}/addons-${VERSION}.zip -j *.addon VERSION
 
-      - name: Upload to Artifacts
-        if: success() && env.VERSION == ''
-        uses: actions/upload-artifact@v7
-        with:
-          name: addons
-          path: |
-            addons*.zip
-          retention-days: 5
-
       - name: Release
         uses: ncipollo/release-action@v1
         if: success() && env.VERSION != ''

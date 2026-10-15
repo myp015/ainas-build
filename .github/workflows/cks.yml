@@ -432,15 +432,6 @@ jobs:
           echo "${VERSION}" > "output/VERSION"
           zip -9 ainas-cks-${VERSION}.zip -j output/*
 
-      - name: Upload to Artifacts
-        if: success() && env.VERSION == ''
-        uses: actions/upload-artifact@v7
-        with:
-          name: ainas-cks
-          path: |
-            ainas-cks-*.zip
-          retention-days: 5
-
       - name: Extract release to ainas-cks/release and push
         if: success() && env.VERSION != ''
         run: |

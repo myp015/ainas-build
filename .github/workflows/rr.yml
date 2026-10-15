@@ -282,13 +282,18 @@ jobs:
           RR_FILENAME="rr-${RR_TAG}.img.zip"
           echo "[INFO] 正在下载 RR 镜像资源：${RR_FILENAME}"
           curl -fsSL --connect-timeout 10 "$RR_ASSET_URL" -o "$RR_FILENAME"
-          echo "RR_TAG=$RR_TAG" >> "$GITHUB_ENV"
+          # RR_TAG 已由 job env 提供，无需再写 GITHUB_ENV
           echo "RR_FILENAME=$RR_FILENAME" >> "$GITHUB_ENV"
 
       - name: 编译镜像
         shell: bash
         run: |
           set -euo pipefail
+
+          # ── 系统依赖（UPDATE 与主流程互斥，只装一次）──────────────
+          echo "[INFO] 正在安装构建依赖"
+          sudo apt-get update
+          sudo apt-get install -y gettext cpio zstd dosfstools rsync qemu-utils
 
           # ── UPDATE 独立任务：应用 initrd patch 后打包 updateall ──
           if [ "${MODEL}" = "__UPDATE__" ]; then
@@ -298,10 +303,6 @@ jobs:
             : "${RR_FILENAME:?缺少 RR_FILENAME}"
             echo "[INFO] UPDATE 任务：解压 RR 镜像，应用 initrd patch，再打包 updateall"
             unzip "$RR_FILENAME" -d rr rr.img
-
-            # 系统依赖
-            sudo apt-get update
-            sudo apt-get install -y gettext cpio zstd dosfstools rsync qemu-utils
 
             # 挂载 p3，修补 initrd（menu.sh 订单验证 patch 等）
             . "$AINAS2IN1_DIR/script/2in1func.sh"
@@ -384,10 +385,6 @@ jobs:
           fi
           echo "[INFO] 型号=${MODEL} 目标DSM版本=${VERSION} DSM系列=${LINE_REQ} 版本slug=${VER_SLUG}"
 
-          # ── 系统依赖 ──────────────────────────────────────────────
-          echo "[INFO] 正在安装构建依赖"
-          sudo apt-get update
-          sudo apt-get install -y gettext cpio zstd dosfstools rsync qemu-utils
           unzip "$RR_FILENAME" -d rr rr.img
 
           # ── GRUB 修补 ─────────────────────────────────────────────
