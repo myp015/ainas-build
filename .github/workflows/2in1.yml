@@ -240,15 +240,13 @@ jobs:
       matrix:
         model: ${{ fromJson(needs.select-models.outputs.models) }}
     env:
-      FORMAT: vmdk
       LANGUAGE: zh_CN
       KERNEL: official
       ADDONS: acpid,reboottoloader,addincards,cpuinfo,expands,diskcompat,lsiutil,nvmevolume,powersched,remotefs,storagepanel,smartctl,trivial,apppatch,vmtools,resizepart
       ACTION_TOKEN: ${{ secrets.AiNas }}
       RR_ASSET_URL: ${{ needs.resolve-release.outputs.asset_url }}
       RR_TAG: ${{ needs.resolve-release.outputs.tag }}
-      BUILD_UPDATE_ZIP: ${{ inputs.build_update_zip }}
-      DSM_LINE: ${{ inputs.dsm_version }}
+      LINE: ${{ inputs.dsm_version }}
     steps:
       - uses: actions/checkout@main
 
@@ -289,15 +287,16 @@ jobs:
           # ── 目录变量 ──────────────────────────────────────────────
           WORKDIR="$PWD"
           AINAS2IN1_DIR="${WORKDIR}/.2in1"
-          STAGE_HELPER="/tmp/2in1-helper"
+          REPACK_STAGE_DIR="/tmp/repack-stage"
           PAT_XLSX_URL="https://raw.githubusercontent.com/RROrg/rr/main/docs/pats.xlsx"
           PAT_XLSX="/tmp/pats.xlsx"
           DSM_INSTALL_DIR="/tmp/dsm-install"
-          GRUB_MNT="/mnt/p1"
-          SYSTEM_MNT="/mnt/p3"
+          PART1_PATH="/mnt/p1"
+          PART3_PATH="/mnt/p3"
 
-          # 流程函数库（patch_* / docker_* / repack_* / dsm_setup）
-          . "$AINAS2IN1_DIR/script/2in1func.sh"
+          # 流程函数库（patch_* / docker_* / repack_* / dsm_setup / get*）
+          # 传 token：get* 要访问 myp015 的私有 release
+          . "$AINAS2IN1_DIR/script/2in1func.sh" "${AINAS_TOKEN}"
 
           # ── UPDATE 特殊处理 ────────────────────────────────────────
           UPDATE_ONLY="false"
@@ -323,8 +322,8 @@ jobs:
               7.3.2) printf '7.3.2-86009-0'   ;;
               7.4.1)
                 python3 -m pip -q install --user openpyxl
-                DSM_VERSION_74=$(MODEL="${MODEL}" python3 -c "import os,re,urllib.request,openpyxl;url='https://raw.githubusercontent.com/RROrg/rr/main/docs/pats.xlsx';path='/tmp/pats.xlsx';urllib.request.urlretrieve(url,path);wb=openpyxl.load_workbook(path,data_only=True);ws=wb[wb.sheetnames[0]];model=os.environ['MODEL'];line_req='7.4.1';rows=[(('' if r[0] is None else str(r[0]).strip()),('' if len(r)<2 or r[1] is None else str(r[1]).strip()),('' if len(r)<3 or r[2] is None else str(r[2]).strip())) for r in ws.iter_rows(min_row=1,values_only=True)];rows=[t for t in rows if t[0] and t[1] and t[2] and not (t[0].lower()=='model' and t[1].lower().startswith('version'))];cand=[(v,u) for m,v,u in rows if m==model and v.startswith(line_req+'-')];allm=[(v,u) for m,v,u in rows if m==model];sel=cand if cand else allm;sel or (_ for _ in ()).throw(SystemExit(f'no pat found for model={model}'));best=sorted(sel,key=lambda x:[int(t) for t in re.findall(r'\d+',x[0])],reverse=True)[0];print(best[0])")
-                printf '%s' "$DSM_VERSION_74"
+                VERSION_74=$(MODEL="${MODEL}" python3 -c "import os,re,urllib.request,openpyxl;url='https://raw.githubusercontent.com/RROrg/rr/main/docs/pats.xlsx';path='/tmp/pats.xlsx';urllib.request.urlretrieve(url,path);wb=openpyxl.load_workbook(path,data_only=True);ws=wb[wb.sheetnames[0]];model=os.environ['MODEL'];line_req='7.4.1';rows=[(('' if r[0] is None else str(r[0]).strip()),('' if len(r)<2 or r[1] is None else str(r[1]).strip()),('' if len(r)<3 or r[2] is None else str(r[2]).strip())) for r in ws.iter_rows(min_row=1,values_only=True)];rows=[t for t in rows if t[0] and t[1] and t[2] and not (t[0].lower()=='model' and t[1].lower().startswith('version'))];cand=[(v,u) for m,v,u in rows if m==model and v.startswith(line_req+'-')];allm=[(v,u) for m,v,u in rows if m==model];sel=cand if cand else allm;sel or (_ for _ in ()).throw(SystemExit(f'no pat found for model={model}'));best=sorted(sel,key=lambda x:[int(t) for t in re.findall(r'\d+',x[0])],reverse=True)[0];print(best[0])")
+                printf '%s' "$VERSION_74"
                 ;;
               *)
                 printf '[E] 不支持的 DSM 版本: %s' "$line"
@@ -333,33 +332,32 @@ jobs:
             esac
           }
 
-          DSM_LINE_REQ="${DSM_LINE:-7.3.2}"
-          export DSM_LINE_REQ
-          if echo "${MODEL}" | grep -Eq '^(DS925\+|DS425\+)$' && [ "${DSM_LINE_REQ}" = "7.2.1" ]; then
+          LINE_REQ="${LINE:-7.3.2}"
+          export LINE_REQ
+          if echo "${MODEL}" | grep -Eq '^(DS925\+|DS425\+)$' && [ "${LINE_REQ}" = "7.2.1" ]; then
             echo "[INFO] ${MODEL} 不支持 DSM 7.2.1，自动切换到 7.2.2"
-            DSM_LINE_REQ="7.2.2"
+            LINE_REQ="7.2.2"
           fi
 
-          DSM_VERSION="$(pick_dsm_version "${DSM_LINE_REQ}")"
-          DSM_LINE_SHORT="${DSM_LINE_REQ%.*}"
-          export DSM_LINE_SHORT
+          VERSION="$(pick_dsm_version "${LINE_REQ}")"
+          LINE_SHORT="${LINE_REQ%.*}"
+          export LINE_SHORT
 
-          VER_MAIN="${DSM_VERSION%%-*}"
+          VER_MAIN="${VERSION%%-*}"
           VER_MAIN_NODOT="${VER_MAIN//./}"
-          VER_BUILD="${DSM_VERSION#*-}"
+          VER_BUILD="${VERSION#*-}"
           VER_BUILD="${VER_BUILD%%-*}"
-          ARTIFACT_VERSION="${VER_MAIN_NODOT}_${VER_BUILD}"
+          VER_SLUG="${VER_MAIN_NODOT}_${VER_BUILD}"
           SAFE_TAG="${TAG//./_}"
           echo "SAFE_TAG=${SAFE_TAG}" >> "$GITHUB_ENV"
 
-          ARTIFACT="${MODEL}_${ARTIFACT_VERSION}_15g_Ainas2in1_${SAFE_TAG}"
-          echo "[INFO] 型号=${MODEL} 目标DSM版本=${DSM_VERSION} DSM系列=${DSM_LINE_REQ} 制品版本=${ARTIFACT_VERSION}"
+          ARTIFACT="${MODEL}_${VER_SLUG}_15g_Ainas2in1_${SAFE_TAG}"
+          echo "[INFO] 型号=${MODEL} 目标DSM版本=${VERSION} DSM系列=${LINE_REQ} 制品版本=${VER_SLUG}"
 
           # ── 系统依赖 ───────────────────────────────────────────────
           sudo apt-get update
           sudo apt-get install -y gettext cpio zstd dosfstools rsync qemu-utils
           unzip "$FILENAME" -d rr rr.img
-          cp -f rr/rr.img rr/rr.base.img
 
           # ── 改分区 label（改的是分区表属性，与 p1 内容修补无关）───
           GRUB_LOOP=$(sudo losetup -f)
@@ -368,65 +366,56 @@ jobs:
           sudo e2label "${GRUB_LOOP}p2" RDGZ
           sudo e2label "${GRUB_LOOP}p3" RAMDISK
           sudo fatlabel "${GRUB_LOOP}p1" AiNasloader
-          sudo losetup --detach "$GRUB_LOOP" || true
+          sudo losetup --detach "$GRUB_LOOP"
 
           # ── GRUB 修补 ──────────────────────────────────────────────
-          patch_2in1_p1 rr/rr.img "$GRUB_MNT" "$AINAS2IN1_DIR" "$MODEL" "$DSM_LINE_SHORT"
-
-          # ── 早删 rr.base.img 备份，释放约 15G ──
-          rm -f rr/rr.base.img || true
-          echo "[INFO] 已删除 rr.base.img 备份"
-          df -h
-
+          patch_part1 rr/rr.img "$PART1_PATH" 2in1 "$MODEL" "$LINE_SHORT"
 
           # ── 挂载 p3 分区 ───────────────────────────────────────────
           DISK_LOOP=$(sudo losetup -f)
           sudo losetup -P "$DISK_LOOP" rr/rr.img
-          sudo rm -rf "$SYSTEM_MNT"
-          sudo mkdir -p "$SYSTEM_MNT"
-          sudo mount "${DISK_LOOP}p3" "$SYSTEM_MNT"
+          sudo rm -rf "$PART3_PATH"
+          sudo mkdir -p "$PART3_PATH"
+          sudo mount "${DISK_LOOP}p3" "$PART3_PATH"
 
           # ── bzImage 重命名 ─────────────────────────────────────────
-          if [ -f "$SYSTEM_MNT/bzImage-rr" ]; then
-            sudo mv -f "$SYSTEM_MNT/bzImage-rr" "$SYSTEM_MNT/bzImage-ainas"
+          if [ -f "$PART3_PATH/bzImage-rr" ]; then
+            sudo mv -f "$PART3_PATH/bzImage-rr" "$PART3_PATH/bzImage-ainas"
             echo "[INFO] 已将 bzImage-rr 重命名为 bzImage-ainas"
           else
             echo "[INFO] p3 分区中未找到 bzImage-rr，跳过重命名"
           fi
 
           # ── 取 CKs / LKMs / addons / modules ───────────────────────
-          # 仓库地址已直接写在 scripts/func.sh 里，这里不再 sed 替换。
-          # 这些函数会 rm -rf 目标目录，而 p3 内文件属 root，必须以 root 执行；
-          # 顺带让新落盘的文件保持 root 属主，与镜像其余部分一致。
-          sudo env AINAS_TOKEN="${AINAS_TOKEN}" WORKDIR="${WORKDIR}" SYSTEM_MNT="${SYSTEM_MNT}" bash -c '
-            . "${WORKDIR}/scripts/func.sh" "${AINAS_TOKEN}"
-            getCKs     "${SYSTEM_MNT}/cks"     "true"
-            getLKMs    "${SYSTEM_MNT}/lkms"    "true"
-            getAddons  "${SYSTEM_MNT}/addons"  "true"
-            getModules "${SYSTEM_MNT}/modules" "true"
-          '
+          # 调用写法对齐 ainas-rr.yml。p3 属 root，但 get* 内部自带 sudo
+          # （与 patch_cpuinfo 同风格），故这里无需再包一层 sudo bash -c。
+          getCKs     "${PART3_PATH}/cks"     "true"
+          getLKMs    "${PART3_PATH}/lkms"    "true"
+          getAddons  "${PART3_PATH}/addons"  "true"
+          getModules "${PART3_PATH}/modules" "true"
 
-          # ── Addons 处理 + cpuinfo 修补 ─────────────────────────────
-          patch_2in1_addons "$SYSTEM_MNT" "$MODEL" "$AINAS2IN1_DIR"
+          # ── Addons 磁盘驱动修补 + cpuinfo 修补 ─────────────────────
+          patch_addons_disk "$PART3_PATH" "$MODEL"
+          patch_cpuinfo "${PART3_PATH}/addons" "2in1_patch-cpuinfo.py" verify
 
           # ── initrd 修补与重打包 ────────────────────────────────────
-          patch_2in1_ram "$SYSTEM_MNT" "$TAG" "$AINAS2IN1_DIR" "$WORKDIR"
+          patch_ram "$PART3_PATH" 2in1 "$WORKDIR" "$TAG"
 
-          sudo umount "$SYSTEM_MNT" || true
-          sudo rm -rf "$SYSTEM_MNT"
+          sudo umount "$PART3_PATH"
+          sudo rm -rf "$PART3_PATH"
 
 
           # ── 使用 RR Docker 编译镜像（非 UPDATE 模式）─────────────
           if [ "${UPDATE_ONLY}" != "true" ]; then
-            docker_2in1_build "$MODEL" "$DSM_VERSION" "$LANGUAGE" "$ADDONS" "$TAG" \
-              "$AINAS2IN1_DIR" "$STAGE_HELPER" "$WORKDIR"
+            docker_build 2in1 "$MODEL" "$VERSION" "$LANGUAGE" "$ADDONS" "$TAG" \
+              "$WORKDIR" "$REPACK_STAGE_DIR"
           fi
 
           # ── 清理 p3 临时文件 ──────────────────────────────────────
-          sudo mkdir -p "$SYSTEM_MNT"
-          sudo mount "${DISK_LOOP}p3" "$SYSTEM_MNT" || true
-          sudo rm -rf "$SYSTEM_MNT/dl" "$SYSTEM_MNT/auxfiles" "$SYSTEM_MNT/logs" || true
-          sudo umount "$SYSTEM_MNT" || true
+          sudo mkdir -p "$PART3_PATH"
+          sudo mount "${DISK_LOOP}p3" "$PART3_PATH"
+          sudo rm -rf "$PART3_PATH/dl" "$PART3_PATH/auxfiles" "$PART3_PATH/logs"
+          sudo umount "$PART3_PATH"
           sudo losetup --detach "$DISK_LOOP"
 
           # ── UPDATE 包构建 ─────────────────────────────────────────
@@ -435,18 +424,19 @@ jobs:
 
           if [ "${UPDATE_ONLY}" = "true" ]; then
             bash "$AINAS2IN1_DIR/script/2in1_build_update.sh" rr/rr.img "$GITHUB_WORKSPACE" "$UPDATE_FLAVOR"
-            RAW_UPDATE_ZIP="$(ls -1 updateall-*.zip 2>/dev/null | head -n1 || true)"
+            # find 无匹配时返回 0 且输出为空（`ls | head` 在 pipefail 下会因 ls 的退出码中断）
+            RAW_UPDATE_ZIP="$(find . -maxdepth 1 -name 'updateall-*.zip' -print -quit)"
             if [ -n "$RAW_UPDATE_ZIP" ] && [ -f "$RAW_UPDATE_ZIP" ]; then
               # 保持 updateall-*.zip 原名上传，不再重命名
               UPDATE_ZIP="$(basename "$RAW_UPDATE_ZIP")"
             fi
           else
             # ── 2in1 镜像重打包 ───────────────────────────────────
-            repack_2in1 "$WORKDIR" "$STAGE_HELPER"
+            repack_2in1 "$WORKDIR" "$REPACK_STAGE_DIR"
 
             # ── DSM 自动安装（解析 pats.xlsx → 启容器 → 安装 → 停容器）──
-            dsm_setup "$MODEL" "$DSM_LINE_REQ" "$PAT_XLSX_URL" "$DSM_INSTALL_DIR" \
-              "$AINAS2IN1_DIR" "$WORKDIR" \
+            dsm_setup "$MODEL" "$LINE_REQ" "$PAT_XLSX_URL" "$DSM_INSTALL_DIR" \
+              "$WORKDIR" \
               "$AINAS2IN1_DIR/docker/docker-compose.yaml" "$DSM_INSTALL_DIR/docker-compose.yaml" \
               "_15g_Ainas2in1" "$SAFE_TAG" "180" \
               "s#\./rr.img:/rr.img#${WORKDIR}/rr/rr.img:/rr.img#g"
@@ -461,7 +451,7 @@ jobs:
           fi
 
           rm -f "$WORKDIR/2in1func.sh"
-          rm -rf "$AINAS2IN1_DIR" "${STAGE_HELPER:-}"
+          rm -rf "$AINAS2IN1_DIR" "${REPACK_STAGE_DIR:-}"
 
           echo "ARTIFACT=${ARTIFACT}"   >> "$GITHUB_ENV"
           echo "ARTIFACT_ZIP=$ZIP_NAME" >> "$GITHUB_ENV"
@@ -487,7 +477,7 @@ jobs:
             MAX_ASSET=2147483648
             if [ "$ART_SIZE" -ge "$MAX_ASSET" ]; then
               echo "[INFO] 制品过大 (${ART_SIZE} bytes)，拆分为 <=1.9GB 分片"
-              rm -f "${ART_PATH}.part."* || true
+              rm -f "${ART_PATH}.part."*
               split -b 1900m -d -a 3 "$ART_PATH" "${ART_PATH}.part."
               ls -lh "${ART_PATH}.part."*
               for PART in "${ART_PATH}.part."*; do
