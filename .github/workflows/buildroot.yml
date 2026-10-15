@@ -6,7 +6,7 @@
 #
 # RR 原版结构（保持不动），仅仓库地址适配 myp015：
 #   checkout RROrg/buildroot        → myp015/ainas-buildroot（公开，免 RRORG token）
-#   version 查 RROrg/rr-buildroot   → myp015/ainas-buildroot（公开 API 免 token）
+#   version 查 RROrg/rr-buildroot   → myp015/ainas-buildroot（secrets.AiNas，避免匿名限流）
 #   Release 发 RROrg/rr-buildroot   → myp015/ainas-buildroot（GITHUB_TOKEN）
 #
 
@@ -80,7 +80,7 @@ jobs:
           else
             # 自动：查 ainas-buildroot 最新 tag，同月则第 3 段 +1，跨月则 .0
             # （ainas-buildroot 公开仓库，公开 API 免 token）
-            LATEST_TAG="$(curl -skL "https://api.github.com/repos/myp015/ainas-buildroot/releases" | jq -r '.[0].tag_name' 2>/dev/null)"
+            LATEST_TAG="$(curl -skLH "Authorization: Bearer ${{ secrets.AiNas }}" "https://api.github.com/repos/myp015/ainas-buildroot/releases" | jq -r '.[0].tag_name' 2>/dev/null)"
             if [ -n "${LATEST_TAG}" ] && [ "$(echo ${LATEST_TAG} | cut -d '.' -f 1,2)" = "$(date +'%y.%-m')" ]; then
               if [ "$(echo ${LATEST_TAG} | awk -F '.' '{print NF}')" -ge 4 ]; then
                 # 旧格式 4 段 tag（如 26.9.13.1）不参与低增，回退到月份首版
@@ -97,7 +97,7 @@ jobs:
           # 留下 git tag 但无 release 对象 → release-action 422 already_exists。
           # 循环 +1 直到对应 git tag 不存在（最多 20 次防死循环）。
           for i in $(seq 1 20); do
-            if curl -skL \
+            if curl -skLH "Authorization: Bearer ${{ secrets.AiNas }}" \
                  "https://api.github.com/repos/myp015/ainas-buildroot/git/refs/tags/${VERSION}" 2>/dev/null \
                  | grep -q '"ref"'; then
               VERSION="$(echo ${VERSION} | awk -F '.' '{$3=$3+1}1' OFS='.')"
