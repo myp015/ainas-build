@@ -64,13 +64,6 @@ on:
         description: "生成原版 RR 镜像（rr-版本号.img.zip，跳过 Docker 编译）默认开启，可取消"
         type: boolean
         default: true
-      image_size:
-        description: "Image size"
-        type: choice
-        options:
-          - 2.5GB
-          - 4GB
-        default: 2.5GB
       rr_version:
         description: "RR version (可选,留空=latest;示例:26.4.0 或 v26.4.0)"
         type: string
@@ -255,7 +248,6 @@ jobs:
         model: ${{ fromJson(needs.select-models.outputs.models) }}
     env:
       IMAGE_FORMAT: img
-      IMAGE_SIZE: ${{ inputs.image_size }}
       LANGUAGE: zh_CN
       KERNEL: official
       ADDONS: acpid,reboottoloader,addincards,cpuinfo,expands,diskcompat,lsiutil,nvmevolume,powersched,remotefs,storagepanel,smartctl,trivial,apppatch,vmtools
@@ -449,10 +441,11 @@ jobs:
           fi
 
           # ── 提取 user-config.yml + 选择引导镜像 + Repack 镜像 ─────
+          # 镜像大小固定 2.5GB（原 image_size 选项已移除），写法对齐 ova.yml
           if [ "${MODEL}" = "__RR_ORIGINAL__" ]; then
-            repack_rr rr/rr.img "$RR_TAG" "$WORKDIR" "$IMAGE_SIZE" keep
+            repack_rr rr/rr.img "$RR_TAG" "$WORKDIR" "2.5GB" keep
           else
-            repack_rr rr/rr.img "$RR_TAG" "$WORKDIR" "$IMAGE_SIZE"
+            repack_rr rr/rr.img "$RR_TAG" "$WORKDIR" "2.5GB"
           fi
 
           # ── 导出并打包制品 ────────────────────────────────────────
