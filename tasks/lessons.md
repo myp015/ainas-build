@@ -143,3 +143,60 @@ qemu-system-x86_64: -drive file=/rr.img,media=disk,format=raw,if=none,id=rrdisk:
 **顺带确认**：`docker build` 那一段（`docker_build`）虽然也改了签名，但它是靠
 `$1`/`$2` 顺序读参数、没有 `shift`，所以没中招；`ova.yml` 的 `dsm_setup`
 调用点同样受影响，一并随本次修复恢复。
+
+---
+
+## 2026-10-15 — 批量改名：sed 必须长名先于短名，去前缀前要验证裸名未被容器脚本占用
+
+**背景**：三个工作流 + 函数库里的 DSM 版本号变量统一去掉 `DSM_` 前缀
+（`DSM_VERSION`→`VERSION`、`DSM_LINE_REQ`→`LINE_REQ` 等）。
+
+**坑 1 —— sed 规则的顺序**：`DSM_VERSION` 是 `DSM_VERSION_MAIN` / `DSM_VERSION_74`
+的**前缀**。若先跑 `s/\bDSM_VERSION\b/VERSION/g`，`DSM_VERSION_MAIN` 会先被打成
+`VERSION_MAIN`，针对 `DSM_VERSION_MAIN` 的规则**再也匹配不上**。危险在于结果看起来
+"已经改过了"，很容易漏过。
+
+**规则**：多规则批量改名一律**按名字长度降序**排列 sed 的 `-e`。
+
+```bash
+sed -i \
+  -e 's/\bDSM_VERSION_MAIN\b/VER_MAIN/g'    \  # 长名先
+  -e 's/\bDSM_VERSION_BUILD\b/VER_BUILD/g'  \
+  -e 's/\bDSM_VERSION_74\b/VERSION_74/g'    \
+  -e 's/\bDSM_VERSION\b/VERSION/g'          \  # 短名后
+  ...
+```
+
+改完后必须**双保险**：`grep -o '\bDSM_[A-Za-z0-9_]*'` 看残留 + `diff -u` 逐行审查，
+确认每一行都是预期改名（本次 5 个文件、约 60 行 diff 全部人工过了一遍）。
+
+**坑 2 —— 裸名可能已被容器脚本占用**：`DSM_VERSION` 改名后，`VERSION` 会随
+build.sh 注入容器执行。必须先确认镜像脚本（menu.sh 及其 include）没用这个名字：
+
+```bash
+command grep -rEo "(^|[^A-Za-z_0-9])VERSION([^A-Za-z_0-9]|$)" <镜像脚本目录> | wc -l  # 101
+command grep -rnE "(^|[^A-Za-z_])VERSION[[:space:]]*=" <镜像脚本目录> | wc -l         # 0
+```
+
+**出现 101 次、赋值 0 次** → 全是 `${DSM_ROOT}/VERSION` 这类**文件路径**与日志字面量，
+不是 shell 变量。只看"出现次数"会把它误判成高危冲突。
+
+**坑 3 —— 同一个名字有两条独立通路**：`LINE_REQ` 既走 shell 也走 python 环境变量：
+
+1. 工作流 `export LINE_REQ` → `dsm_setup` 形参 `local LINE_REQ="${2}"`
+   （`local` **遮蔽**了环境变量且不重新 export）
+2. python 内联 `os.environ.get('LINE_REQ', '7.3.2')` 读到的是**环境里那一份**
+
+两条通路的值恰好一直相同，所以遮蔽问题从未暴露。改名时漏掉任何一条，
+python 会**静默回退默认值 7.3.2** —— 不报错，只是版本选错。
+
+**规则**：改一个变量的名字前，先 `grep -rn` 全仓库找出它的**所有**消费形态，
+尤其是「字符串形式出现在别的语言里」（`os.environ.get('X')`、`jq -r '.X'`、sed 表达式）。
+
+**最强验证依旧可用**：桩环境（`sudo() { :; }` / `docker() { echo; }`）分别用改名前后的
+函数库生成 build.sh 再 diff。本次结果只有一行差异：
+
+```
+-DSM_VERSION="7.4.1-90080-0"
++VERSION="7.4.1-90080-0"
+```
