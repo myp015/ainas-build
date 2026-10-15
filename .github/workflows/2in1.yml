@@ -424,7 +424,8 @@ jobs:
 
           if [ "${UPDATE_ONLY}" = "true" ]; then
             bash "$AINAS2IN1_DIR/script/2in1_build_update.sh" rr/rr.img "$GITHUB_WORKSPACE" "$UPDATE_FLAVOR"
-            RAW_UPDATE_ZIP="$(ls -1 updateall-*.zip 2>/dev/null | head -n1)"
+            # find 无匹配时返回 0 且输出为空（`ls | head` 在 pipefail 下会因 ls 的退出码中断）
+            RAW_UPDATE_ZIP="$(find . -maxdepth 1 -name 'updateall-*.zip' -print -quit)"
             if [ -n "$RAW_UPDATE_ZIP" ] && [ -f "$RAW_UPDATE_ZIP" ]; then
               # 保持 updateall-*.zip 原名上传，不再重命名
               UPDATE_ZIP="$(basename "$RAW_UPDATE_ZIP")"

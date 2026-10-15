@@ -75,7 +75,9 @@ jobs:
           sudo apt install -y build-essential libtool pkgconf libzstd-dev liblzma-dev libssl-dev  # kmodule dependencies
 
           # Backup the original python3 executable.
-          sudo mv -f "$(realpath $(which python3))/EXTERNALLY-MANAGED" "$(realpath $(which python3))/EXTERNALLY-MANAGED.bak" 2>/dev/null
+          # PEP 668 的 EXTERNALLY-MANAGED 实际在 /usr/lib/python3.x/ 下，/usr/bin/ 里通常没有，
+          # 缺失属正常路径（原写法用 || true 掩盖，这里改成显式判断）
+          [ -f "$(realpath $(which python3))/EXTERNALLY-MANAGED" ] && sudo mv -f "$(realpath $(which python3))/EXTERNALLY-MANAGED" "$(realpath $(which python3))/EXTERNALLY-MANAGED.bak"
           sudo pip3 install -U -r ainas-2in1/script/requirements.txt
 
           . ainas-2in1/script/2in1func.sh

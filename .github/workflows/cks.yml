@@ -172,7 +172,8 @@ jobs:
               [ -z "${D}" ] && [ -f "${OFFICIAL_PATH/hda1/rd}/${1}" ] && D="${OFFICIAL_PATH/hda1/rd}/${1}"
               if [ -n "${D}" ]; then
                 # modinfo "${D}"
-                depends=($(modinfo -F depends "${D}" 2>/dev/null | sed 's/,/ /g'))
+                # 探测型：modinfo 失败时视为无依赖（非构建错误）
+                depends=($(modinfo -F depends "${D}" 2>/dev/null | sed 's/,/ /g' || :))
                 if [ ${#depends[*]} -gt 0 ]; then
                   for k in ${depends[@]}; do
                     { [ -f "${ROOT_PATH}/output/modules/${k}.ko" ] || [ -f "${ROOT_PATH}/output/modules/update/${k}.ko" ]; } && continue # Recursively skip wext-priv and wext-core dependencies on each other.
@@ -318,7 +319,7 @@ jobs:
           echo "get firmware"
           SOURCE=/tmp/linux-firmware
           git clone --depth=1 https://git.kernel.org/pub/scm/linux/kernel/git/firmware/linux-firmware.git ${SOURCE}
-          cp -rf ${SOURCE}/intel/iwlwifi/* ${SOURCE}/ 2>/dev/null # Move intel firmware to top dir for easy search
+          [ -d "${SOURCE}/intel/iwlwifi" ] && cp -rf ${SOURCE}/intel/iwlwifi/* ${SOURCE}/ 2>/dev/null # Move intel firmware to top dir for easy search
           while read L; do
             [ -z "${L}" ] && continue
             if [ -e "${SOURCE}/${L}" ]; then
