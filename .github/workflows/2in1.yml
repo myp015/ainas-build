@@ -294,8 +294,9 @@ jobs:
           PART1_PATH="/mnt/p1"
           PART3_PATH="/mnt/p3"
 
-          # 流程函数库（patch_* / docker_* / repack_* / dsm_setup）
-          . "$AINAS2IN1_DIR/script/2in1func.sh"
+          # 流程函数库（patch_* / docker_* / repack_* / dsm_setup / get*）
+          # 传 token：get* 要访问 myp015 的私有 release
+          . "$AINAS2IN1_DIR/script/2in1func.sh" "${AINAS_TOKEN}"
 
           # ── UPDATE 特殊处理 ────────────────────────────────────────
           UPDATE_ONLY="false"
@@ -357,7 +358,6 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y gettext cpio zstd dosfstools rsync qemu-utils
           unzip "$FILENAME" -d rr rr.img
-          cp -f rr/rr.img rr/rr.base.img
 
           # ── 改分区 label（改的是分区表属性，与 p1 内容修补无关）───
           GRUB_LOOP=$(sudo losetup -f)
@@ -370,12 +370,6 @@ jobs:
 
           # ── GRUB 修补 ──────────────────────────────────────────────
           patch_part1 rr/rr.img "$PART1_PATH" 2in1 "$MODEL" "$LINE_SHORT"
-
-          # ── 早删 rr.base.img 备份，释放约 15G ──
-          rm -f rr/rr.base.img || true
-          echo "[INFO] 已删除 rr.base.img 备份"
-          df -h
-
 
           # ── 挂载 p3 分区 ───────────────────────────────────────────
           DISK_LOOP=$(sudo losetup -f)
@@ -393,16 +387,12 @@ jobs:
           fi
 
           # ── 取 CKs / LKMs / addons / modules ───────────────────────
-          # 函数库与仓库地址适配都在 ainas-2in1 的 script/2in1func.sh 里，这里不再 sed 替换。
-          # 这些函数会 rm -rf 目标目录，而 p3 内文件属 root，必须以 root 执行；
-          # 顺带让新落盘的文件保持 root 属主，与镜像其余部分一致。
-          sudo env AINAS_TOKEN="${AINAS_TOKEN}" AINAS2IN1_DIR="${AINAS2IN1_DIR}" PART3_PATH="${PART3_PATH}" bash -c '
-            . "${AINAS2IN1_DIR}/script/2in1func.sh" "${AINAS_TOKEN}"
-            getCKs     "${PART3_PATH}/cks"     "true"
-            getLKMs    "${PART3_PATH}/lkms"    "true"
-            getAddons  "${PART3_PATH}/addons"  "true"
-            getModules "${PART3_PATH}/modules" "true"
-          '
+          # 调用写法对齐 ainas-rr.yml。p3 属 root，但 get* 内部自带 sudo
+          # （与 patch_cpuinfo 同风格），故这里无需再包一层 sudo bash -c。
+          getCKs     "${PART3_PATH}/cks"     "true"
+          getLKMs    "${PART3_PATH}/lkms"    "true"
+          getAddons  "${PART3_PATH}/addons"  "true"
+          getModules "${PART3_PATH}/modules" "true"
 
           # ── Addons 磁盘驱动修补 + cpuinfo 修补 ─────────────────────
           patch_addons_disk "$PART3_PATH" "$MODEL"

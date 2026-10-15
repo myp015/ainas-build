@@ -397,7 +397,6 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y gettext cpio zstd dosfstools rsync qemu-utils
           unzip "$RR_FILENAME" -d rr rr.img
-          cp -f rr/rr.img rr/rr.base.img
 
           # ── GRUB 修补 ─────────────────────────────────────────────
           # RR 原版镜像任务无型号，MODEL_ENV 置空 → patch 脚本默认 model=Boot DSM
@@ -473,7 +472,7 @@ jobs:
               ;;
           esac
 
-          rm -f rr/rr.img rr/rr.base.img
+          rm -f rr/rr.img
 
           if [ "${MODEL}" = "__RR_ORIGINAL__" ]; then
             # 原版 RR 镜像：官方压缩命令 zip -9，命名 rr-<版本>.img.zip，打包 rr.img + exe（不含 user-config.yml）

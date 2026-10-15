@@ -327,7 +327,6 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y gettext cpio zstd dosfstools rsync qemu-utils
           unzip "$FILENAME" -d rr rr.img
-          cp -f rr/rr.img rr/rr.base.img
 
           # ── GRUB 修补 ──────────────────────────────────────────────
           patch_part1 rr/rr.img "$PART1_PATH" rr "$MODEL"
@@ -378,7 +377,6 @@ jobs:
           # ── 导出 OVA 制品 ─────────────────────────────────────────
           repack_ova "$WORKDIR" "$ARTIFACT"
 
-          rm -f rr/rr.base.img
           rm -f "$WORKDIR/2in1func.sh"
           rm -rf "$AINAS2IN1_DIR"
 

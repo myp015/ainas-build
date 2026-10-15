@@ -6,8 +6,9 @@
 #
 # RR 原版结构（保持不动），仅仓库地址适配 myp015：
 #   checkout RROrg/rr      → myp015/ainas-rr（secrets.AiNas）
-#   func.sh get* 仓库适配   → myp015/{ainas-buildroot,ainas-cks,ainas-lkm,ainas-addons,syno-modules}
-#                            （适配写在各自仓库的 scripts/func.sh 里，工作流不再 sed 替换）
+#   函数库                  → myp015/ainas-2in1 的 script/2in1func.sh（全量单一来源，
+#                            含 get* 仓库适配与 draft 过滤，工作流不再 sed 替换、不再 source
+#                            myp015/ainas-rr 自带的 scripts/func.sh）
 #   Release 发 RROrg/rr     → myp015/ainas-rr（secrets.AiNas）
 #   移除 rr-misc/docker     → myp015 无 rr-misc，myp015/ainas-rr 无 Dockerfile
 #   get* 过滤草稿           → select(.draft==false)，避免残留草稿 release 被 sort 误选为最新
@@ -45,8 +46,16 @@ jobs:
           token: ${{ secrets.AiNas }}
           path: rr
 
-      # 仓库地址适配直接写在 myp015/ainas-rr 的 scripts/func.sh 里，本工作流不再 sed 替换
-      # 待办：该文件的 getBuildroot 仍指向 myp015/buildroot，需同步改为 myp015/ainas-buildroot
+      - name: Checkout ainas-2in1
+        uses: actions/checkout@main
+        with:
+          repository: myp015/ainas-2in1
+          token: ${{ secrets.AiNas }}
+          path: ainas-2in1
+
+      # 函数库统一走 ainas-2in1/script/2in1func.sh，本工作流不再 source rr/scripts/func.sh。
+      # 同名函数保留双模兼容（repackInitrd overlay/direct、convertova 2/3 参、
+      # resizeImg parted/fdisk、createvmx 按有无 data 盘选 VMX 档），故下方调用点无需改动。
 
       # Install dependencies
       - name: Install dependencies
@@ -128,7 +137,7 @@ jobs:
       # Convert po2mo, Get exts
       - name: Convert po2mo, Get extractor, LKMs, addons and Modules
         run: |
-          . rr/scripts/func.sh "${{ secrets.AiNas }}"
+          . ainas-2in1/script/2in1func.sh "${{ secrets.AiNas }}"
 
           echo "Get extractor"
           getCKs "rr/files/mnt/p3/cks" "true"
@@ -146,7 +155,7 @@ jobs:
       - name: Build image
         run: |
           cd rr
-          . scripts/func.sh "${{ secrets.AiNas }}"
+          . "$GITHUB_WORKSPACE/ainas-2in1/script/2in1func.sh" "${{ secrets.AiNas }}"
 
           echo "Create RR image"
           gzip -dc "files/initrd/opt/rr/grub.img.gz" >"grub.img"
