@@ -294,3 +294,62 @@ TAG=26.10.12; Status=200
   （这里是"资产列表只有一个匹配项"），否则测试是自我安慰。
   验证手法：把缺陷版本还原到临时副本，跑同一套测试，**必须看到它 FAIL**，
   否则断言等于没写。
+
+---
+
+## 2026-10-16 — 跑 lkms.yml 验证必须显式钉 `lkm_ref`，默认 `main` 是陈旧分支
+
+**症状**：C4 改完后触发 `Build lkms`（`38728686915` @ `9bf1d756`），
+`setup` job 成功、63 个 build job 名字全对，但唯一跑完的
+`build (7.1, broadwellnk)` 编译失败，其余 62 个被 fail-fast 取消：
+
+```
+[INFO] makelkms: platform=broadwellnk kver=4.4.180 ver=7.1
+include/linux/wait.h:188:39: error: 'TASK_NORMAL' undeclared
+include/linux/wait.h:260:37: error: 'TASK_UNINTERRUPTIBLE' undeclared
+.../source/internal/intercept_driver_register.c:191:9: note: in expansion of macro 'wake_up_all'
+```
+
+复跑一次，换了个平台照样挂：`build (7.2, broadwell)`，`kver=4.4.302`，
+同一个源文件、同一类错误 → **所有 4.x 平台全挂**。
+
+**排查过程（走了弯路，值得记住）**：先怀疑 runner 镜像升级
+（`20261004.327` → `20261012.334`）、再怀疑 KSRC/toolchain 被上游重发
+（两个 txz 体积都逐字节相同：106M / 490M）、又怀疑矩阵被 C4 改坏了
+（矩阵与 HEAD 内联块逐项等值，且 63 个 job 名字全对）。全都不是。
+
+**真正的一行证据**：对比成功/失败 job 日志里的 `Checking out the ref`：
+
+| run | ainas-lkm 实际 checkout |
+|---|---|
+| `38405442331` 10-13 成功 | `fix/partition-guard-20261011` |
+| `38728686915` 10-15 失败 | `main` |
+
+10-13 的成功是**显式传了** `-f lkm_ref=fix/partition-guard-20261011`；
+我这次没传，落到了 `default: main`。
+
+**根因**：`myp015/ainas-lkm` 的 `main` 停在 `5fd69cc8`（2026-10-11 那次
+PR 合并点），而 `fix/partition-guard-20261011` 已领先 **55 个提交**。
+`main` 上的 `intercept_driver_register.c` 是**尚未回退的自研版本**
+（自带 `DECLARE_WAIT_QUEUE_HEAD` / `wait_event` / `wake_up_all`，
+却只 include `linux/wait.h`，没 include `linux/sched.h`）；
+分支上的 `a993e33 对齐 RR：回退 4.x/5.x 自研偏离` 已把这套机制整个删掉，
+所以分支能编、`main` 编不过。
+
+**规则（要记住的）**：
+- 跑 `lkms.yml` 验证时**一律带 `-f lkm_ref=<已知良好 ref>`**：
+
+  ```bash
+  gh workflow run lkms.yml --ref <workflow分支> -f lkm_ref=fix/partition-guard-20261011
+  ```
+
+  不传就是 `main`，等于拿一个 55 提交前的旧树跑全平台。
+- **`gh run view --json inputs` 返回 `null` 时不要就此认定"用的默认值、和上次一样"**。
+  `workflow_dispatch` 的 inputs 在 API 里经常是 null，默认值与非默认值**看起来完全一样**。
+  要看**实际 checkout 的 ref**：日志里搜 `Checking out the ref`，
+  或者 `Syncing repository: <owner>/<repo>` 后面那条 fetch 命令里的 refspec。
+- 跨仓库的 CI 失败，先问"这次跑的到底是哪个 commit"，
+  再去查环境/上游 —— 后者往往查半天全是死胡同。
+
+**待办**：`ainas-lkm` 的 `main` 需要把 `fix/partition-guard-20261011`
+合并/快进过去，否则 `lkms.yml` 的默认值一直指向编不过的树。
