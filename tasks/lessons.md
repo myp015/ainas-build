@@ -250,3 +250,106 @@ python 会**静默回退默认值 7.3.2** —— 不报错，只是版本选错�
 - ainas-rr：`getExtractor ... begin/end`、`repackInitrd: 模式 overlay`、`resizeImg: 扩容策略 parted`、`TAG=...; Status=200`
 - 2in1 / ova：`5000 端口已就绪 (attempt=0)`、`repackInitrd: 模式 direct`、`安装完成`
 - 产物量级同基线（2in1 img.gz ≈2.47 G、ova.gz ≈2.32 G、rr-26.9.0.img.zip 1538 MB）
+
+---
+
+## 2026-10-15 — 「抽取公共代码块」会把 `&&` 列表**变成**函数末条，返回码就此泄漏
+
+**症状**：把 5 个 `get*` 里那段 14 行的 release 下载块抽成 `fetchReleaseAsset()` 后，
+2in1 的 `build (DS918+)` 在**下载成功之后**当场失败：
+
+```
+TAG=26.10.12; Status=200
+##[error]Process completed with exit code 1.
+```
+
+`Status=200` 说明资产取到了，函数却返回了 1。rr.yml 同一提交**全绿** —— 失败与否
+取决于 release 里资产的**排列顺序**。
+
+**根因**：块内最后一条是 `[ "${STATUS:-0}" -ne 200 ] && exit 1`。条件为假时
+`&&` 列表整体返回 1，于是：
+
+- 循环体末条 = 该 `&&` 列表 → `while` 的退出状态 = 1
+- `while` 又正好是抽取后 `fetchReleaseAsset()` 的**最后一条** → 函数返回 1
+- 调用方开着 `set -e` → 直接退出
+
+抽取前这段后面还跟着 `unzip` 等语句，函数返回码取自它们，所以一直没暴露。
+**同一个 `&&`，在原位置无害，被抽出来就成了函数末条。**
+
+**为什么 rr.yml 没炸**：资产列表里若有**不匹配的条目**排在匹配项之后，
+那条 `|| continue` 会把状态刷成 0，函数侥幸返回 0。rr 与 2in1 拿到的资产数不同，
+于是只有一边翻车 —— 这类"看数据排列决定生死"的缺陷，本地静态检查是查不出来的。
+
+**修复**：`[ ... ] && exit 1` → `if [ ... ]; then exit 1; fi`（`if` 条件为假时返回 0）。
+
+**模式（要记住的规则）**：
+- 上一节记的「`&&` 作为函数体最后一条要改成 `if`」不够用 —— 真正的判据是
+  **这个 `&&` 所在的外层构造（函数体 / 循环体 / `if` 体）是不是函数或脚本的最后一条**。
+  抽取代码时外层构造会变，必须**重新判一遍**，不能只看改动行本身。
+- 抽取后的自查：扫「函数体末条」**和**「循环体末条」，两者都要看。
+  现成脚本见本次会话的 Python 片段（按 `^function ` 到列 0 `}` 划函数体，
+  再在体内找 `while|for` 到 `done`）。
+- **本地单测通过 ≠ 没这个 bug**：这次桩测试全绿是因为桩恰好返回了「匹配项 + 不匹配项」
+  两个资产，形状掩盖了缺陷。写回归断言时必须复刻**触发缺陷的那种数据形状**
+  （这里是"资产列表只有一个匹配项"），否则测试是自我安慰。
+  验证手法：把缺陷版本还原到临时副本，跑同一套测试，**必须看到它 FAIL**，
+  否则断言等于没写。
+
+---
+
+## 2026-10-16 — 跑 lkms.yml 验证必须显式钉 `lkm_ref`，默认 `main` 是陈旧分支
+
+**症状**：C4 改完后触发 `Build lkms`（`38728686915` @ `9bf1d756`），
+`setup` job 成功、63 个 build job 名字全对，但唯一跑完的
+`build (7.1, broadwellnk)` 编译失败，其余 62 个被 fail-fast 取消：
+
+```
+[INFO] makelkms: platform=broadwellnk kver=4.4.180 ver=7.1
+include/linux/wait.h:188:39: error: 'TASK_NORMAL' undeclared
+include/linux/wait.h:260:37: error: 'TASK_UNINTERRUPTIBLE' undeclared
+.../source/internal/intercept_driver_register.c:191:9: note: in expansion of macro 'wake_up_all'
+```
+
+复跑一次，换了个平台照样挂：`build (7.2, broadwell)`，`kver=4.4.302`，
+同一个源文件、同一类错误 → **所有 4.x 平台全挂**。
+
+**排查过程（走了弯路，值得记住）**：先怀疑 runner 镜像升级
+（`20261004.327` → `20261012.334`）、再怀疑 KSRC/toolchain 被上游重发
+（两个 txz 体积都逐字节相同：106M / 490M）、又怀疑矩阵被 C4 改坏了
+（矩阵与 HEAD 内联块逐项等值，且 63 个 job 名字全对）。全都不是。
+
+**真正的一行证据**：对比成功/失败 job 日志里的 `Checking out the ref`：
+
+| run | ainas-lkm 实际 checkout |
+|---|---|
+| `38405442331` 10-13 成功 | `fix/partition-guard-20261011` |
+| `38728686915` 10-15 失败 | `main` |
+
+10-13 的成功是**显式传了** `-f lkm_ref=fix/partition-guard-20261011`；
+我这次没传，落到了 `default: main`。
+
+**根因**：`myp015/ainas-lkm` 的 `main` 停在 `5fd69cc8`（2026-10-11 那次
+PR 合并点），而 `fix/partition-guard-20261011` 已领先 **55 个提交**。
+`main` 上的 `intercept_driver_register.c` 是**尚未回退的自研版本**
+（自带 `DECLARE_WAIT_QUEUE_HEAD` / `wait_event` / `wake_up_all`，
+却只 include `linux/wait.h`，没 include `linux/sched.h`）；
+分支上的 `a993e33 对齐 RR：回退 4.x/5.x 自研偏离` 已把这套机制整个删掉，
+所以分支能编、`main` 编不过。
+
+**规则（要记住的）**：
+- 跑 `lkms.yml` 验证时**一律带 `-f lkm_ref=<已知良好 ref>`**：
+
+  ```bash
+  gh workflow run lkms.yml --ref <workflow分支> -f lkm_ref=fix/partition-guard-20261011
+  ```
+
+  不传就是 `main`，等于拿一个 55 提交前的旧树跑全平台。
+- **`gh run view --json inputs` 返回 `null` 时不要就此认定"用的默认值、和上次一样"**。
+  `workflow_dispatch` 的 inputs 在 API 里经常是 null，默认值与非默认值**看起来完全一样**。
+  要看**实际 checkout 的 ref**：日志里搜 `Checking out the ref`，
+  或者 `Syncing repository: <owner>/<repo>` 后面那条 fetch 命令里的 refspec。
+- 跨仓库的 CI 失败，先问"这次跑的到底是哪个 commit"，
+  再去查环境/上游 —— 后者往往查半天全是死胡同。
+
+**待办**：`ainas-lkm` 的 `main` 需要把 `fix/partition-guard-20261011`
+合并/快进过去，否则 `lkms.yml` 的默认值一直指向编不过的树。

@@ -94,12 +94,13 @@ jobs:
           REQ_TAG="${REQ_TAG%.img.zip}"
           REQ_TAG="${REQ_TAG#v}"
 
+          # 必须带凭据：runner 是共享出口 IP，匿名调用只有 60 次/小时，实测撞过 403
           fetch_latest() {
-            curl -fsSL --connect-timeout 10 "https://api.github.com/repos/RROrg/rr/releases/latest"
+            curl -fsSL --connect-timeout 10 -H "Authorization: Bearer ${{ secrets.AiNas }}" "https://api.github.com/repos/RROrg/rr/releases/latest"
           }
           fetch_tag() {
             local t="$1"
-            curl -fsSL --connect-timeout 10 "https://api.github.com/repos/RROrg/rr/releases/tags/${t}"
+            curl -fsSL --connect-timeout 10 -H "Authorization: Bearer ${{ secrets.AiNas }}" "https://api.github.com/repos/RROrg/rr/releases/tags/${t}"
           }
 
           if [ -z "$REQ_TAG" ] || [ "$REQ_TAG" = "latest" ]; then
@@ -311,26 +312,7 @@ jobs:
             MODEL="DS918+"
           fi
 
-          # ── 版本映射 ───────────────────────────────────────────────
-          pick_dsm_version() {
-            local line="$1"
-            case "$line" in
-              7.2.1) printf '7.2.1-69057-1'   ;;
-              7.2.2) printf '7.2.2-72806-0'   ;;
-              7.3.0) printf '7.3.0-81180-0'   ;;
-              7.3.1) printf '7.3.1-86003-0'   ;;
-              7.3.2) printf '7.3.2-86009-0'   ;;
-              7.4.1)
-                python3 -m pip -q install --user openpyxl
-                VERSION_74=$(MODEL="${MODEL}" python3 -c "import os,re,urllib.request,openpyxl;url='https://raw.githubusercontent.com/RROrg/rr/main/docs/pats.xlsx';path='/tmp/pats.xlsx';urllib.request.urlretrieve(url,path);wb=openpyxl.load_workbook(path,data_only=True);ws=wb[wb.sheetnames[0]];model=os.environ['MODEL'];line_req='7.4.1';rows=[(('' if r[0] is None else str(r[0]).strip()),('' if len(r)<2 or r[1] is None else str(r[1]).strip()),('' if len(r)<3 or r[2] is None else str(r[2]).strip())) for r in ws.iter_rows(min_row=1,values_only=True)];rows=[t for t in rows if t[0] and t[1] and t[2] and not (t[0].lower()=='model' and t[1].lower().startswith('version'))];cand=[(v,u) for m,v,u in rows if m==model and v.startswith(line_req+'-')];allm=[(v,u) for m,v,u in rows if m==model];sel=cand if cand else allm;sel or (_ for _ in ()).throw(SystemExit(f'no pat found for model={model}'));best=sorted(sel,key=lambda x:[int(t) for t in re.findall(r'\d+',x[0])],reverse=True)[0];print(best[0])")
-                printf '%s' "$VERSION_74"
-                ;;
-              *)
-                printf '[E] 不支持的 DSM 版本: %s' "$line"
-                return 1
-                ;;
-            esac
-          }
+          # DSM 版本映射由上面 source 的 2in1func.sh 提供（pick_dsm_version）
 
           LINE_REQ="${LINE:-7.3.2}"
           export LINE_REQ
@@ -470,75 +452,10 @@ jobs:
           export GH_REPO="myp015/ainas-2in1"
           RELEASE_TAG="AiNas2in1_${TAG}"
 
-          ASSETS=()
-          if [ -n "${ARTIFACT_ZIP:-}" ] && [ -f "$GITHUB_WORKSPACE/$ARTIFACT_ZIP" ]; then
-            ART_PATH="$GITHUB_WORKSPACE/$ARTIFACT_ZIP"
-            ART_SIZE=$(stat -c%s "$ART_PATH")
-            MAX_ASSET=2147483648
-            if [ "$ART_SIZE" -ge "$MAX_ASSET" ]; then
-              echo "[INFO] 制品过大 (${ART_SIZE} bytes)，拆分为 <=1.9GB 分片"
-              rm -f "${ART_PATH}.part."*
-              split -b 1900m -d -a 3 "$ART_PATH" "${ART_PATH}.part."
-              ls -lh "${ART_PATH}.part."*
-              for PART in "${ART_PATH}.part."*; do
-                ASSETS+=("$PART")
-              done
-            else
-              ASSETS+=("$ART_PATH")
-            fi
-          fi
-          if [ -n "${UPDATE_ZIP:-}" ] && [ -f "$GITHUB_WORKSPACE/$UPDATE_ZIP" ]; then
-            ASSETS+=("$GITHUB_WORKSPACE/$UPDATE_ZIP")
-          fi
-          if [ ${#ASSETS[@]} -eq 0 ]; then
-            echo "[E] 没有可上传的 Release 资产"
-            exit 1
-          fi
+          # 分卷、Release 自愈、退避重试统一在 .github/scripts/release_publish.sh 里
+          ASSET_ARGS=()
+          [ -n "${ARTIFACT_ZIP:-}" ] && ASSET_ARGS+=("$GITHUB_WORKSPACE/$ARTIFACT_ZIP")
+          [ -n "${UPDATE_ZIP:-}" ] && ASSET_ARGS+=("$GITHUB_WORKSPACE/$UPDATE_ZIP")
 
-          # Release 已由 ensure-release 串行 job 创建确认；matrix 任务只上传自身资产。
-          # 确认 Release 存在（不存在则重建），避免 build 后“release not found”。
-          ensure_release() {
-            local create_out create_rc
-            if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
-              return 0
-            fi
-            echo "[INFO] Release ${RELEASE_TAG} 不存在，重建..."
-            set +e
-            create_out=$(gh release create "$RELEASE_TAG" \
-              --title "$RELEASE_TAG" \
-              --notes "RR build artifacts for ${TAG}" \
-              --latest=false 2>&1)
-            create_rc=$?
-            set -e
-            if [ "$create_rc" -ne 0 ]; then
-              echo "$create_out"
-              echo "$create_out" | grep -qiE 'already exists|already_exists|HTTP 429|HTTP 502|HTTP 503|HTTP 504|rate limit|secondary rate' || return "$create_rc"
-            fi
-            gh release view "$RELEASE_TAG" >/dev/null 2>&1 && return 0
-            return 1
-          }
-
-          upload_assets() {
-            local ATTEMPT
-            for ATTEMPT in 1 2 3 4 5; do
-              ensure_release
-              echo "[INFO] 上传资产 attempt ${ATTEMPT}: ${ASSETS[*]}"
-              set +e
-              UPLOAD_OUT=$(gh release upload "$RELEASE_TAG" "${ASSETS[@]}" --clobber 2>&1)
-              UPLOAD_RC=$?
-              set -e
-              if [ "$UPLOAD_RC" -eq 0 ]; then
-                return 0
-              fi
-              echo "$UPLOAD_OUT"
-              if echo "$UPLOAD_OUT" | grep -qiE 'HTTP 404|HTTP 422|already exists|409|HTTP 429|HTTP 502|HTTP 503|HTTP 504|rate limit|secondary rate'; then
-                echo "[INFO] 上传暂时失败，${ATTEMPT}0s 后重试"
-                sleep "${ATTEMPT}0"
-                continue
-              fi
-              return "$UPLOAD_RC"
-            done
-            return 1
-          }
-
-          upload_assets
+          bash "$GITHUB_WORKSPACE/.github/scripts/release_publish.sh" \
+            "$RELEASE_TAG" "RR build artifacts for ${TAG}" "${ASSET_ARGS[@]}"

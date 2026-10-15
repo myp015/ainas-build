@@ -97,12 +97,13 @@ jobs:
           REQ_TAG="${REQ_TAG%.img.zip}"
           REQ_TAG="${REQ_TAG#v}"
 
+          # 必须带凭据：runner 是共享出口 IP，匿名调用只有 60 次/小时，实测撞过 403
           fetch_latest() {
-            curl -fsSL --connect-timeout 10 "https://api.github.com/repos/RROrg/rr/releases/latest"
+            curl -fsSL --connect-timeout 10 -H "Authorization: Bearer ${{ secrets.AiNas }}" "https://api.github.com/repos/RROrg/rr/releases/latest"
           }
           fetch_tag() {
             local t="$1"
-            curl -fsSL --connect-timeout 10 "https://api.github.com/repos/RROrg/rr/releases/tags/${t}"
+            curl -fsSL --connect-timeout 10 -H "Authorization: Bearer ${{ secrets.AiNas }}" "https://api.github.com/repos/RROrg/rr/releases/tags/${t}"
           }
 
           if [ -z "$REQ_TAG" ] || [ "$REQ_TAG" = "latest" ]; then
@@ -282,13 +283,18 @@ jobs:
           RR_FILENAME="rr-${RR_TAG}.img.zip"
           echo "[INFO] 正在下载 RR 镜像资源：${RR_FILENAME}"
           curl -fsSL --connect-timeout 10 "$RR_ASSET_URL" -o "$RR_FILENAME"
-          echo "RR_TAG=$RR_TAG" >> "$GITHUB_ENV"
+          # RR_TAG 已由 job env 提供，无需再写 GITHUB_ENV
           echo "RR_FILENAME=$RR_FILENAME" >> "$GITHUB_ENV"
 
       - name: 编译镜像
         shell: bash
         run: |
           set -euo pipefail
+
+          # ── 系统依赖（UPDATE 与主流程互斥，只装一次）──────────────
+          echo "[INFO] 正在安装构建依赖"
+          sudo apt-get update
+          sudo apt-get install -y gettext cpio zstd dosfstools rsync qemu-utils
 
           # ── UPDATE 独立任务：应用 initrd patch 后打包 updateall ──
           if [ "${MODEL}" = "__UPDATE__" ]; then
@@ -298,10 +304,6 @@ jobs:
             : "${RR_FILENAME:?缺少 RR_FILENAME}"
             echo "[INFO] UPDATE 任务：解压 RR 镜像，应用 initrd patch，再打包 updateall"
             unzip "$RR_FILENAME" -d rr rr.img
-
-            # 系统依赖
-            sudo apt-get update
-            sudo apt-get install -y gettext cpio zstd dosfstools rsync qemu-utils
 
             # 挂载 p3，修补 initrd（menu.sh 订单验证 patch 等）
             . "$AINAS2IN1_DIR/script/2in1func.sh"
@@ -343,26 +345,7 @@ jobs:
           # 流程函数库（patch_* / docker_* / repack_*）
           . "$AINAS2IN1_DIR/script/2in1func.sh"
 
-          # ── DSM 版本映射（版本编号来自 pats.xlsx，仅 >= 7.2.1）──────
-          pick_dsm_version() {
-            local line="$1"
-            case "$line" in
-              7.2.1) printf '7.2.1-69057-1'   ;;
-              7.2.2) printf '7.2.2-72806-0'   ;;
-              7.3.0) printf '7.3.0-81180-0'   ;;
-              7.3.1) printf '7.3.1-86003-0'   ;;
-              7.3.2) printf '7.3.2-86009-0'   ;;
-              7.4.1)
-                python3 -m pip -q install --user openpyxl
-                VERSION_74=$(MODEL="${MODEL}" python3 -c "import os,re,urllib.request,openpyxl;url='https://raw.githubusercontent.com/RROrg/rr/main/docs/pats.xlsx';path='/tmp/pats.xlsx';urllib.request.urlretrieve(url,path);wb=openpyxl.load_workbook(path,data_only=True);ws=wb[wb.sheetnames[0]];model=os.environ['MODEL'];line_req='7.4.1';rows=[(('' if r[0] is None else str(r[0]).strip()),('' if len(r)<2 or r[1] is None else str(r[1]).strip()),('' if len(r)<3 or r[2] is None else str(r[2]).strip())) for r in ws.iter_rows(min_row=1,values_only=True)];rows=[t for t in rows if t[0] and t[1] and t[2] and not (t[0].lower()=='model' and t[1].lower().startswith('version'))];cand=[(v,u) for m,v,u in rows if m==model and v.startswith(line_req+'-')];allm=[(v,u) for m,v,u in rows if m==model];sel=cand if cand else allm;sel or (_ for _ in ()).throw(SystemExit(f'no pat found for model={model}'));best=sorted(sel,key=lambda x:[int(t) for t in re.findall(r'\d+',x[0])],reverse=True)[0];print(best[0])")
-                printf '%s' "$VERSION_74"
-                ;;
-              *)
-                echo "[E] 不支持的 DSM 版本: $line" >&2
-                return 1
-                ;;
-            esac
-          }
+          # DSM 版本映射由上面 source 的 2in1func.sh 提供（pick_dsm_version）
 
           LINE_REQ="${LINE:-7.2.1}"
           if echo "${MODEL}" | grep -Eq '^(DS925\+|DS425\+)$' && [ "${LINE_REQ}" = "7.2.1" ]; then
@@ -384,10 +367,6 @@ jobs:
           fi
           echo "[INFO] 型号=${MODEL} 目标DSM版本=${VERSION} DSM系列=${LINE_REQ} 版本slug=${VER_SLUG}"
 
-          # ── 系统依赖 ──────────────────────────────────────────────
-          echo "[INFO] 正在安装构建依赖"
-          sudo apt-get update
-          sudo apt-get install -y gettext cpio zstd dosfstools rsync qemu-utils
           unzip "$RR_FILENAME" -d rr rr.img
 
           # ── GRUB 修补 ─────────────────────────────────────────────
@@ -506,81 +485,10 @@ jobs:
           export GH_REPO="myp015/ainas-2in1"
           RELEASE_TAG="rr-${RR_TAG}"
 
-          # 组装待上传资产（模型镜像 + update 包，任一存在即可）
-          # GitHub 单文件上限 2GB，超过则 split 分卷上传（.part1/.part2/...）
-          MAX_ASSET_BYTES=2147483648
-          SPLIT_SIZE_MB=1900
-          add_asset_with_split() {
-            local f="$1"
-            local sz
-            sz=$(stat -c%s "$f")
-            if [ "$sz" -gt "$MAX_ASSET_BYTES" ]; then
-              echo "[INFO] ${f##*/} 大小 ${sz} 超过 2GB 限制，split 分卷 (${SPLIT_SIZE_MB}MB/卷)"
-              local base="${f%.zip}"
-              split -b "${SPLIT_SIZE_MB}M" -d -a 2 "$f" "${base}.part"
-              local p
-              for p in "${base}".part*; do
-                ASSETS+=("$p")
-                echo "  -> ${p##*/} ($(stat -c%s "$p") 字节)"
-              done
-            else
-              ASSETS+=("$f")
-            fi
-          }
-          ASSETS=()
-          if [ -n "${ARTIFACT_ZIP:-}" ] && [ -f "$GITHUB_WORKSPACE/$ARTIFACT_ZIP" ]; then
-            add_asset_with_split "$GITHUB_WORKSPACE/$ARTIFACT_ZIP"
-          fi
-          if [ -n "${UPDATE_ZIP:-}" ] && [ -f "$GITHUB_WORKSPACE/$UPDATE_ZIP" ]; then
-            add_asset_with_split "$GITHUB_WORKSPACE/$UPDATE_ZIP"
-          fi
-          if [ ${#ASSETS[@]} -eq 0 ]; then
-            echo "[E] 没有可上传的资产"
-            exit 1
-          fi
+          # 分卷、Release 自愈、退避重试统一在 .github/scripts/release_publish.sh 里
+          ASSET_ARGS=()
+          [ -n "${ARTIFACT_ZIP:-}" ] && ASSET_ARGS+=("$GITHUB_WORKSPACE/$ARTIFACT_ZIP")
+          [ -n "${UPDATE_ZIP:-}" ] && ASSET_ARGS+=("$GITHUB_WORKSPACE/$UPDATE_ZIP")
 
-          # Release 通常由 ensure-release 创建；但 build 后可能出现“release not found”
-          #（空 Release 被删/API 不一致）。上传前再次确认并重试，不存在则重建。
-          ensure_release() {
-            local create_out create_rc
-            if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
-              return 0
-            fi
-            echo "[INFO] Release ${RELEASE_TAG} 不存在，重建..."
-            set +e
-            create_out=$(gh release create "$RELEASE_TAG" \
-              --title "$RELEASE_TAG" \
-              --notes "RR build artifacts for ${RR_TAG}" \
-              --latest=false 2>&1)
-            create_rc=$?
-            set -e
-            if [ "$create_rc" -ne 0 ]; then
-              echo "$create_out"
-              echo "$create_out" | grep -qiE 'already exists|already_exists|HTTP 429|HTTP 502|HTTP 503|HTTP 504|rate limit|secondary rate' || return "$create_rc"
-            fi
-            gh release view "$RELEASE_TAG" >/dev/null 2>&1 && return 0
-            return 1
-          }
-
-          upload_with_retry() {
-            local attempt out rc
-            for attempt in 1 2 3 4 5; do
-              ensure_release
-              echo "[INFO] 上传制品尝试 ${attempt}/5 -> ${RELEASE_TAG}"
-              set +e
-              out=$(gh release upload "$RELEASE_TAG" "${ASSETS[@]}" --clobber 2>&1)
-              rc=$?
-              set -e
-              if [ "$rc" -eq 0 ]; then
-                return 0
-              fi
-              echo "$out"
-              if echo "$out" | grep -qiE 'HTTP 422|already exists|409|rate limit|secondary rate|HTTP 429|HTTP 502|HTTP 503|HTTP 504'; then
-                sleep $((attempt * 5)); continue
-              fi
-              return "$rc"
-            done
-            return 1
-          }
-
-          upload_with_retry
+          bash "$GITHUB_WORKSPACE/.github/scripts/release_publish.sh" \
+            "$RELEASE_TAG" "RR build artifacts for ${RR_TAG}" "${ASSET_ARGS[@]}"
