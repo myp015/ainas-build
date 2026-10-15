@@ -256,15 +256,14 @@ jobs:
     env:
       IMAGE_FORMAT: img
       IMAGE_SIZE: ${{ inputs.image_size }}
-      BUILD_UPDATE_ZIP: ${{ inputs.build_update_zip }}
       LANGUAGE: zh_CN
-      BUILD_KERNEL: official
+      KERNEL: official
       ADDONS: acpid,reboottoloader,addincards,cpuinfo,expands,diskcompat,lsiutil,nvmevolume,powersched,remotefs,storagepanel,smartctl,trivial,apppatch,vmtools
       ACTION_TOKEN: ${{ secrets.AiNas }}
       RR_ASSET_URL: ${{ needs.resolve-release.outputs.rr_asset_url }}
       RR_TAG: ${{ needs.resolve-release.outputs.rr_tag }}
       MODEL: ${{ matrix.model }}
-      DSM_LINE: ${{ inputs.dsm_version }}
+      LINE: ${{ inputs.dsm_version }}
     steps:
       - name: Checkout main repo
         uses: actions/checkout@main
@@ -363,8 +362,8 @@ jobs:
               7.3.2) printf '7.3.2-86009-0'   ;;
               7.4.1)
                 python3 -m pip -q install --user openpyxl
-                DSM_VERSION_74=$(MODEL="${MODEL}" python3 -c "import os,re,urllib.request,openpyxl;url='https://raw.githubusercontent.com/RROrg/rr/main/docs/pats.xlsx';path='/tmp/pats.xlsx';urllib.request.urlretrieve(url,path);wb=openpyxl.load_workbook(path,data_only=True);ws=wb[wb.sheetnames[0]];model=os.environ['MODEL'];line_req='7.4.1';rows=[(('' if r[0] is None else str(r[0]).strip()),('' if len(r)<2 or r[1] is None else str(r[1]).strip()),('' if len(r)<3 or r[2] is None else str(r[2]).strip())) for r in ws.iter_rows(min_row=1,values_only=True)];rows=[t for t in rows if t[0] and t[1] and t[2] and not (t[0].lower()=='model' and t[1].lower().startswith('version'))];cand=[(v,u) for m,v,u in rows if m==model and v.startswith(line_req+'-')];allm=[(v,u) for m,v,u in rows if m==model];sel=cand if cand else allm;sel or (_ for _ in ()).throw(SystemExit(f'no pat found for model={model}'));best=sorted(sel,key=lambda x:[int(t) for t in re.findall(r'\d+',x[0])],reverse=True)[0];print(best[0])")
-                printf '%s' "$DSM_VERSION_74"
+                VERSION_74=$(MODEL="${MODEL}" python3 -c "import os,re,urllib.request,openpyxl;url='https://raw.githubusercontent.com/RROrg/rr/main/docs/pats.xlsx';path='/tmp/pats.xlsx';urllib.request.urlretrieve(url,path);wb=openpyxl.load_workbook(path,data_only=True);ws=wb[wb.sheetnames[0]];model=os.environ['MODEL'];line_req='7.4.1';rows=[(('' if r[0] is None else str(r[0]).strip()),('' if len(r)<2 or r[1] is None else str(r[1]).strip()),('' if len(r)<3 or r[2] is None else str(r[2]).strip())) for r in ws.iter_rows(min_row=1,values_only=True)];rows=[t for t in rows if t[0] and t[1] and t[2] and not (t[0].lower()=='model' and t[1].lower().startswith('version'))];cand=[(v,u) for m,v,u in rows if m==model and v.startswith(line_req+'-')];allm=[(v,u) for m,v,u in rows if m==model];sel=cand if cand else allm;sel or (_ for _ in ()).throw(SystemExit(f'no pat found for model={model}'));best=sorted(sel,key=lambda x:[int(t) for t in re.findall(r'\d+',x[0])],reverse=True)[0];print(best[0])")
+                printf '%s' "$VERSION_74"
                 ;;
               *)
                 echo "[E] 不支持的 DSM 版本: $line" >&2
@@ -373,24 +372,25 @@ jobs:
             esac
           }
 
-          DSM_LINE_REQ="${DSM_LINE:-7.2.1}"
-          if echo "${MODEL}" | grep -Eq '^(DS925\+|DS425\+)$' && [ "${DSM_LINE_REQ}" = "7.2.1" ]; then
+          LINE_REQ="${LINE:-7.2.1}"
+          if echo "${MODEL}" | grep -Eq '^(DS925\+|DS425\+)$' && [ "${LINE_REQ}" = "7.2.1" ]; then
             echo "[INFO] ${MODEL} 不支持 DSM 7.2.1，自动切换到 7.2.2"
-            DSM_LINE_REQ="7.2.2"
+            LINE_REQ="7.2.2"
           fi
 
-          DSM_VERSION="$(pick_dsm_version "${DSM_LINE_REQ}")"
-          DSM_VERSION_MAIN="${DSM_VERSION%%-*}"
-          DSM_VERSION_BUILD="${DSM_VERSION#*-}"
-          DSM_VERSION_BUILD="${DSM_VERSION_BUILD%%-*}"
-          DSM_VERSION_SLUG="${DSM_VERSION_MAIN//./}_${DSM_VERSION_BUILD}"
+          VERSION="$(pick_dsm_version "${LINE_REQ}")"
+          VER_MAIN="${VERSION%%-*}"
+          VER_MAIN_NODOT="${VER_MAIN//./}"
+          VER_BUILD="${VERSION#*-}"
+          VER_BUILD="${VER_BUILD%%-*}"
+          VER_SLUG="${VER_MAIN_NODOT}_${VER_BUILD}"
           if [ "${MODEL}" = "__RR_ORIGINAL__" ]; then
             ARTIFACT_NAME="rr-${RR_TAG}"
             echo "[INFO] 原版 RR 镜像任务：ARTIFACT_NAME=${ARTIFACT_NAME}"
           else
-            ARTIFACT_NAME="${MODEL}_${DSM_VERSION_SLUG}_rr"
+            ARTIFACT_NAME="${MODEL}_${VER_SLUG}_rr"
           fi
-          echo "[INFO] 型号=${MODEL} 目标DSM版本=${DSM_VERSION} DSM系列=${DSM_LINE_REQ} 版本slug=${DSM_VERSION_SLUG}"
+          echo "[INFO] 型号=${MODEL} 目标DSM版本=${VERSION} DSM系列=${LINE_REQ} 版本slug=${VER_SLUG}"
 
           # ── 系统依赖 ──────────────────────────────────────────────
           echo "[INFO] 正在安装构建依赖"
@@ -410,7 +410,7 @@ jobs:
             GRUB_MODEL_ENV="$MODEL"
             GRUB_LOCALE=""
           fi
-          patch_p1 rr/rr.img "$PART1_PATH" rr "$GRUB_MODEL_ENV" "$GRUB_LOCALE"
+          patch_part1 rr/rr.img "$PART1_PATH" rr "$GRUB_MODEL_ENV" "$GRUB_LOCALE"
 
           # ── 挂载 p3 分区 ──────────────────────────────────────────
           DISK_LOOP=$(sudo losetup -f)
@@ -436,7 +436,7 @@ jobs:
           # ── RR 原版镜像任务：跳过 Docker 编译 ──────────────
           if [ "${MODEL}" != "__RR_ORIGINAL__" ]; then
           # ── 使用 RR Docker 编译镜像 ───────────────────────────────
-          docker_build rr "$MODEL" "$DSM_VERSION" "$LANGUAGE" "$ADDONS" "$RR_TAG" \
+          docker_build rr "$MODEL" "$VERSION" "$LANGUAGE" "$ADDONS" "$RR_TAG" \
             "$WORKDIR"
 
           # ── 清理 p3 临时文件 ──────────────────────────────────────

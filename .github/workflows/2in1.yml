@@ -240,15 +240,13 @@ jobs:
       matrix:
         model: ${{ fromJson(needs.select-models.outputs.models) }}
     env:
-      FORMAT: vmdk
       LANGUAGE: zh_CN
       KERNEL: official
       ADDONS: acpid,reboottoloader,addincards,cpuinfo,expands,diskcompat,lsiutil,nvmevolume,powersched,remotefs,storagepanel,smartctl,trivial,apppatch,vmtools,resizepart
       ACTION_TOKEN: ${{ secrets.AiNas }}
       RR_ASSET_URL: ${{ needs.resolve-release.outputs.asset_url }}
       RR_TAG: ${{ needs.resolve-release.outputs.tag }}
-      BUILD_UPDATE_ZIP: ${{ inputs.build_update_zip }}
-      DSM_LINE: ${{ inputs.dsm_version }}
+      LINE: ${{ inputs.dsm_version }}
     steps:
       - uses: actions/checkout@main
 
@@ -289,7 +287,7 @@ jobs:
           # ── 目录变量 ──────────────────────────────────────────────
           WORKDIR="$PWD"
           AINAS2IN1_DIR="${WORKDIR}/.2in1"
-          STAGE_HELPER="/tmp/2in1-helper"
+          REPACK_STAGE_DIR="/tmp/repack-stage"
           PAT_XLSX_URL="https://raw.githubusercontent.com/RROrg/rr/main/docs/pats.xlsx"
           PAT_XLSX="/tmp/pats.xlsx"
           DSM_INSTALL_DIR="/tmp/dsm-install"
@@ -323,8 +321,8 @@ jobs:
               7.3.2) printf '7.3.2-86009-0'   ;;
               7.4.1)
                 python3 -m pip -q install --user openpyxl
-                DSM_VERSION_74=$(MODEL="${MODEL}" python3 -c "import os,re,urllib.request,openpyxl;url='https://raw.githubusercontent.com/RROrg/rr/main/docs/pats.xlsx';path='/tmp/pats.xlsx';urllib.request.urlretrieve(url,path);wb=openpyxl.load_workbook(path,data_only=True);ws=wb[wb.sheetnames[0]];model=os.environ['MODEL'];line_req='7.4.1';rows=[(('' if r[0] is None else str(r[0]).strip()),('' if len(r)<2 or r[1] is None else str(r[1]).strip()),('' if len(r)<3 or r[2] is None else str(r[2]).strip())) for r in ws.iter_rows(min_row=1,values_only=True)];rows=[t for t in rows if t[0] and t[1] and t[2] and not (t[0].lower()=='model' and t[1].lower().startswith('version'))];cand=[(v,u) for m,v,u in rows if m==model and v.startswith(line_req+'-')];allm=[(v,u) for m,v,u in rows if m==model];sel=cand if cand else allm;sel or (_ for _ in ()).throw(SystemExit(f'no pat found for model={model}'));best=sorted(sel,key=lambda x:[int(t) for t in re.findall(r'\d+',x[0])],reverse=True)[0];print(best[0])")
-                printf '%s' "$DSM_VERSION_74"
+                VERSION_74=$(MODEL="${MODEL}" python3 -c "import os,re,urllib.request,openpyxl;url='https://raw.githubusercontent.com/RROrg/rr/main/docs/pats.xlsx';path='/tmp/pats.xlsx';urllib.request.urlretrieve(url,path);wb=openpyxl.load_workbook(path,data_only=True);ws=wb[wb.sheetnames[0]];model=os.environ['MODEL'];line_req='7.4.1';rows=[(('' if r[0] is None else str(r[0]).strip()),('' if len(r)<2 or r[1] is None else str(r[1]).strip()),('' if len(r)<3 or r[2] is None else str(r[2]).strip())) for r in ws.iter_rows(min_row=1,values_only=True)];rows=[t for t in rows if t[0] and t[1] and t[2] and not (t[0].lower()=='model' and t[1].lower().startswith('version'))];cand=[(v,u) for m,v,u in rows if m==model and v.startswith(line_req+'-')];allm=[(v,u) for m,v,u in rows if m==model];sel=cand if cand else allm;sel or (_ for _ in ()).throw(SystemExit(f'no pat found for model={model}'));best=sorted(sel,key=lambda x:[int(t) for t in re.findall(r'\d+',x[0])],reverse=True)[0];print(best[0])")
+                printf '%s' "$VERSION_74"
                 ;;
               *)
                 printf '[E] 不支持的 DSM 版本: %s' "$line"
@@ -333,27 +331,27 @@ jobs:
             esac
           }
 
-          DSM_LINE_REQ="${DSM_LINE:-7.3.2}"
-          export DSM_LINE_REQ
-          if echo "${MODEL}" | grep -Eq '^(DS925\+|DS425\+)$' && [ "${DSM_LINE_REQ}" = "7.2.1" ]; then
+          LINE_REQ="${LINE:-7.3.2}"
+          export LINE_REQ
+          if echo "${MODEL}" | grep -Eq '^(DS925\+|DS425\+)$' && [ "${LINE_REQ}" = "7.2.1" ]; then
             echo "[INFO] ${MODEL} 不支持 DSM 7.2.1，自动切换到 7.2.2"
-            DSM_LINE_REQ="7.2.2"
+            LINE_REQ="7.2.2"
           fi
 
-          DSM_VERSION="$(pick_dsm_version "${DSM_LINE_REQ}")"
-          DSM_LINE_SHORT="${DSM_LINE_REQ%.*}"
-          export DSM_LINE_SHORT
+          VERSION="$(pick_dsm_version "${LINE_REQ}")"
+          LINE_SHORT="${LINE_REQ%.*}"
+          export LINE_SHORT
 
-          VER_MAIN="${DSM_VERSION%%-*}"
+          VER_MAIN="${VERSION%%-*}"
           VER_MAIN_NODOT="${VER_MAIN//./}"
-          VER_BUILD="${DSM_VERSION#*-}"
+          VER_BUILD="${VERSION#*-}"
           VER_BUILD="${VER_BUILD%%-*}"
-          ARTIFACT_VERSION="${VER_MAIN_NODOT}_${VER_BUILD}"
+          VER_SLUG="${VER_MAIN_NODOT}_${VER_BUILD}"
           SAFE_TAG="${TAG//./_}"
           echo "SAFE_TAG=${SAFE_TAG}" >> "$GITHUB_ENV"
 
-          ARTIFACT="${MODEL}_${ARTIFACT_VERSION}_15g_Ainas2in1_${SAFE_TAG}"
-          echo "[INFO] 型号=${MODEL} 目标DSM版本=${DSM_VERSION} DSM系列=${DSM_LINE_REQ} 制品版本=${ARTIFACT_VERSION}"
+          ARTIFACT="${MODEL}_${VER_SLUG}_15g_Ainas2in1_${SAFE_TAG}"
+          echo "[INFO] 型号=${MODEL} 目标DSM版本=${VERSION} DSM系列=${LINE_REQ} 制品版本=${VER_SLUG}"
 
           # ── 系统依赖 ───────────────────────────────────────────────
           sudo apt-get update
@@ -371,7 +369,7 @@ jobs:
           sudo losetup --detach "$GRUB_LOOP" || true
 
           # ── GRUB 修补 ──────────────────────────────────────────────
-          patch_p1 rr/rr.img "$PART1_PATH" 2in1 "$MODEL" "$DSM_LINE_SHORT"
+          patch_part1 rr/rr.img "$PART1_PATH" 2in1 "$MODEL" "$LINE_SHORT"
 
           # ── 早删 rr.base.img 备份，释放约 15G ──
           rm -f rr/rr.base.img || true
@@ -419,8 +417,8 @@ jobs:
 
           # ── 使用 RR Docker 编译镜像（非 UPDATE 模式）─────────────
           if [ "${UPDATE_ONLY}" != "true" ]; then
-            docker_build 2in1 "$MODEL" "$DSM_VERSION" "$LANGUAGE" "$ADDONS" "$TAG" \
-              "$WORKDIR" "$STAGE_HELPER"
+            docker_build 2in1 "$MODEL" "$VERSION" "$LANGUAGE" "$ADDONS" "$TAG" \
+              "$WORKDIR" "$REPACK_STAGE_DIR"
           fi
 
           # ── 清理 p3 临时文件 ──────────────────────────────────────
@@ -443,10 +441,10 @@ jobs:
             fi
           else
             # ── 2in1 镜像重打包 ───────────────────────────────────
-            repack_2in1 "$WORKDIR" "$STAGE_HELPER"
+            repack_2in1 "$WORKDIR" "$REPACK_STAGE_DIR"
 
             # ── DSM 自动安装（解析 pats.xlsx → 启容器 → 安装 → 停容器）──
-            dsm_setup "$MODEL" "$DSM_LINE_REQ" "$PAT_XLSX_URL" "$DSM_INSTALL_DIR" \
+            dsm_setup "$MODEL" "$LINE_REQ" "$PAT_XLSX_URL" "$DSM_INSTALL_DIR" \
               "$WORKDIR" \
               "$AINAS2IN1_DIR/docker/docker-compose.yaml" "$DSM_INSTALL_DIR/docker-compose.yaml" \
               "_15g_Ainas2in1" "$SAFE_TAG" "180" \
@@ -462,7 +460,7 @@ jobs:
           fi
 
           rm -f "$WORKDIR/2in1func.sh"
-          rm -rf "$AINAS2IN1_DIR" "${STAGE_HELPER:-}"
+          rm -rf "$AINAS2IN1_DIR" "${REPACK_STAGE_DIR:-}"
 
           echo "ARTIFACT=${ARTIFACT}"   >> "$GITHUB_ENV"
           echo "ARTIFACT_ZIP=$ZIP_NAME" >> "$GITHUB_ENV"
