@@ -200,3 +200,53 @@ python 会**静默回退默认值 7.3.2** —— 不报错，只是版本选错�
 -DSM_VERSION="7.4.1-90080-0"
 +VERSION="7.4.1-90080-0"
 ```
+
+---
+
+## 2026-10-15 — 批量删 `|| true` 前必须先分类，三类删了当场炸
+
+**背景**：按要求清掉两个仓库全部 143 处 `|| true`（含写进 initrd 的运行时脚本
+字符串字面量），让任何报错都直接让 job 红。清完第一次跑，4 个 run
+（`38692398694` ainas-rr / `38692402516` 2in1 / `38692406503` rr / `38692409896` ova）
+**全部 failure**。
+
+**根因**：有几类 `|| true` 保护的不是构建错误，而是「预期非零」的正常路径。
+一次删干净，等于把这些正常路径也判成了失败。
+
+**判据**：这条命令失败，是否意味着产物（img/ova）不完整？
+- 是 → 保持严格（mount、解包、复制产物、压缩）
+- 否 → 保留容错，但**改写成显式形式**，不要再写裸 `|| true`
+
+**实测删了必炸的 9 类**：
+
+| # | 形态 | 为什么必炸 | 改成 |
+|---|---|---|---|
+| 1 | `timeout N docker logs -f dsm` | timeout 到点必返回 **124**（2in1/ova 的 failure 根因） | `\|\| [ $? -eq 124 ]` |
+| 2 | `cp -f <可选文件> <dst> 2>/dev/null` | 源可能不存在（rr 的 `rr-original` 失败点：p1 无 user-config.yml / .locale） | `if [ -f src ]; then cp; fi` |
+| 3 | **上游本来就带 `\|\| true` 的** | 如 `getExtractor` 的 `(cd ... && xz -dc <"rd.gz" \| cpio -idm)`，cpio 对归档内特殊文件返回非零（ainas-rr exit 2 根因） | 恢复 `\|\| true`，删前先对照上游 |
+| 4 | `docker logs --tail N dsm`（诊断 dump） | 容器可能已退出，失败会**覆盖后面的 `exit 7` / `exit 1`** | `\|\| echo "[WARN] ..." >&2` |
+| 5 | 失败分支里的 `df -h` / `free -h` | 同理覆盖 `return 1` | `\|\| echo "[WARN] ..." >&2` |
+| 6 | `X="$(ls -1 <glob> 2>/dev/null \| head -n1)"` | `set -o pipefail` 下 glob 无匹配时 `ls` 返回 2 → 赋值中断 | `find . -maxdepth 1 -name 'X' -print -quit`（无匹配返回 0） |
+| 7 | `depends=($(modinfo -F depends ... \| sed ...))` | modinfo 探测失败即中断 | `\| \|\| :` |
+| 8 | `cp -rf ${SRC}/intel/iwlwifi/* ${SRC}/` | glob 无匹配即中断 | `[ -d "${SRC}/intel/iwlwifi" ] && cp ...` |
+| 9 | `mv -f .../EXTERNALLY-MANAGED` | PEP 668 标记实际在 `/usr/lib/python3.x/`，`/usr/bin/` 下没有，mv 必然失败 | `[ -f ... ] && mv ...` |
+
+**两个反直觉点**：
+
+- `[ -f x ] && cmd` 删 `|| true` 是**安全**的：`&&` 列表里非末位的命令豁免 errexit。
+  不能凭「有 `&&` 就该保留」一刀切，要看它在不在列表末位。
+- `(( c )) && cmd` 作为**函数体最后一条**必须改写成 `if`，否则条件为假时函数返回 1，
+  调用点在 `set -e` 下被判失败（`dsm_auto_install.sh` 的 `end_bar` 就是这种）。
+
+**模式（要记住的规则）**：
+- 批量删容错前先**分桶**：诊断输出 / 可选文件 / 上游既有容错 / 探测 / 产物操作。
+  只有「产物操作」那一桶能直接删。
+- 对照上游是最快的判据：`gh api repos/<repo>/contents/scripts/func.sh --jq '.content' | base64 -d`
+  拉 `RROrg/rr` 同函数比一比，上游写着 `|| true` 的就别动。
+- 删完立刻用最小矩阵实跑，不要只做静态检查 —— 本次 `bash -n` / YAML 校验 / 单测
+  全绿，照样 4 个 run 全红。
+
+**验证结果**：修完重跑（`5c9ab6c3`），4 个 run 全 success，关键标记齐全：
+- ainas-rr：`getExtractor ... begin/end`、`repackInitrd: 模式 overlay`、`resizeImg: 扩容策略 parted`、`TAG=...; Status=200`
+- 2in1 / ova：`5000 端口已就绪 (attempt=0)`、`repackInitrd: 模式 direct`、`安装完成`
+- 产物量级同基线（2in1 img.gz ≈2.47 G、ova.gz ≈2.32 G、rr-26.9.0.img.zip 1538 MB）
