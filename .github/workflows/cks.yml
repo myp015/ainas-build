@@ -296,45 +296,13 @@ jobs:
 
       - name: firmware
         run: |
-          ROOT_PATH=${{ github.workspace }}
-
-          mkdir -p ${ROOT_PATH}/firmware
-
-          echo "copy 3rd modules"
-          PARTY3RD_PATH="${ROOT_PATH}/ainas-cks/thirdparty/firmware"
-          [ -d "${PARTY3RD_PATH}" ] && cp -rf ${PARTY3RD_PATH}/* ${ROOT_PATH}/firmware/
-
-          echo "copy repo firmware (cks) - Task#188"
-          REPO_FW="${ROOT_PATH}/ainas-modules/firmware"
-          [ -d "${REPO_FW}/cks" ] && cp -rf ${REPO_FW}/cks/* ${ROOT_PATH}/firmware/
-          WL="${REPO_FW}/missing-whitelist-cks.txt"
-
-          echo "extract all modules"
-          for F in output/*.tgz; do
-            echo "${F}"
-            mkdir -p "${F%.tgz}"
-            tar -zxf "${F}" -C "${F%.tgz}" || echo "Failed to extract ${F}"
-          done
-
-          echo "get firmware"
-          SOURCE=/tmp/linux-firmware
-          git clone --depth=1 https://git.kernel.org/pub/scm/linux/kernel/git/firmware/linux-firmware.git ${SOURCE}
-          [ -d "${SOURCE}/intel/iwlwifi" ] && cp -rf ${SOURCE}/intel/iwlwifi/* ${SOURCE}/ 2>/dev/null # Move intel firmware to top dir for easy search
-          while read L; do
-            [ -z "${L}" ] && continue
-            if [ -e "${SOURCE}/${L}" ]; then
-              mkdir -p "$(dirname firmware/${L})"
-              cp -f "${SOURCE}/${L}" "firmware/${L}"
-            elif [ -e "firmware/${L}" ]; then
-              echo "Used thirdparty ${L}"
-            elif awk -v L="${L}" '{if($1==L) f=1} END{exit !f}' "${WL}" 2>/dev/null; then
-              : # 白名单内：静默放行，不输出日志
-            else
-              echo "::warning ::Missing ${L}"
-            fi
-          done <<<$(find output -name \*.ko -exec /sbin/modinfo -F firmware {} 2>/dev/null \;)
-
-          tar -zcf firmware.tgz -C firmware .
+          # 固件汇总逻辑统一在 .github/scripts/collect_firmware.sh（见脚本头部用法）
+          bash "$GITHUB_WORKSPACE/.github/scripts/collect_firmware.sh" \
+            "$GITHUB_WORKSPACE" \
+            "$GITHUB_WORKSPACE/ainas-cks/thirdparty/firmware" \
+            "$GITHUB_WORKSPACE/ainas-modules/firmware" \
+            "cks" \
+            "missing-whitelist-cks.txt"
 
       - name: Upload to Artifacts
         uses: actions/upload-artifact@v7

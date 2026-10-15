@@ -426,51 +426,17 @@ jobs:
 
       - name: firmware
         run: |
-          ROOT_PATH=${{ github.workspace }}
-
-          mkdir -p ${ROOT_PATH}/firmware
-
-          echo "copy 3rd modules"
-          PARTY3RD_PATH="${ROOT_PATH}/syno-modules/thirdparty/firmware"
-          [ -d "${PARTY3RD_PATH}" ] && cp -rf ${PARTY3RD_PATH}/* ${ROOT_PATH}/firmware/
-
-          echo "copy repo firmware (4.x + 5.x) - Task#188"
-          REPO_FW="${ROOT_PATH}/ainas-modules/firmware"
-          [ -d "${REPO_FW}/4.x" ] && cp -rf ${REPO_FW}/4.x/* ${ROOT_PATH}/firmware/
-          [ -d "${REPO_FW}/5.x" ] && cp -rf ${REPO_FW}/5.x/* ${ROOT_PATH}/firmware/
-          WL5="${REPO_FW}/missing-whitelist-5x.txt"
-          WL4="${REPO_FW}/missing-whitelist-4x.txt"
-
-          echo "extract all modules"
-          for F in output/*.tgz; do
-            echo "${F}"
-            mkdir -p "${F%.tgz}"
-            tar -zxf "${F}" -C "${F%.tgz}" || echo "Failed to extract ${F}"
-          done
-
-          echo "get firmware"
-          SOURCE=/tmp/linux-firmware
-          git clone --depth=1 https://git.kernel.org/pub/scm/linux/kernel/git/firmware/linux-firmware.git ${SOURCE}
-          [ -d "${SOURCE}/intel/iwlwifi" ] && cp -rf ${SOURCE}/intel/iwlwifi/* ${SOURCE}/ 2>/dev/null # Move intel firmware to top dir for easy search
-          while read L; do
-            [ -z "${L}" ] && continue
-            if [ -e "${SOURCE}/${L}" ]; then
-              mkdir -p "$(dirname "firmware/${L}")"
-              cp -f "${SOURCE}/${L}" "firmware/${L}"
-            elif [ -e "firmware/${L}" ]; then
-              echo "Used thirdparty ${L}"
-            elif awk -v L="${L}" '{if($1==L) f=1} END{exit !f}' "${WL5}" "${WL4}" 2>/dev/null; then
-              : # 白名单内：静默放行，不输出日志
-            else
-              echo "::warning ::Missing ${L}"
-            fi
-          # Task#188+：release/ = 官方全平台模块全集（含非矩阵平台 + update/ DRM 栈）。
-          # 一并扫描其 modinfo 固件请求，使 firmware.tgz 覆盖所有官方平台。
-          # 本地验证：release/ 全量 842 固件名中相对矩阵产物新增 30 名，全部已被
-          # linux-firmware/仓库源覆盖（新增缺失 0），白名单无需追加。
-          done <<<$(find output ${ROOT_PATH}/syno-modules/release -name \*.ko -exec /sbin/modinfo -F firmware {} 2>/dev/null \;)
-
-          tar -zcf firmware.tgz -C firmware .
+          # 固件汇总逻辑统一在 .github/scripts/collect_firmware.sh
+          # 参数依次为：工作区根、第三方固件目录、仓库固件根、仓库固件子目录、白名单文件
+          # 末尾可变参数 = 额外扫描 *.ko 的根目录（release/ 是官方全平台模块全集，
+          # 一并扫描其 modinfo 固件请求，使 firmware.tgz 覆盖所有官方平台 - Task#188+）
+          bash "$GITHUB_WORKSPACE/.github/scripts/collect_firmware.sh" \
+            "$GITHUB_WORKSPACE" \
+            "$GITHUB_WORKSPACE/syno-modules/thirdparty/firmware" \
+            "$GITHUB_WORKSPACE/ainas-modules/firmware" \
+            "4.x,5.x" \
+            "missing-whitelist-5x.txt,missing-whitelist-4x.txt" \
+            "$GITHUB_WORKSPACE/syno-modules/release"
 
       - name: Upload to Artifacts
         uses: actions/upload-artifact@v7
