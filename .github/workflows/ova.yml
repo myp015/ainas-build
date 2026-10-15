@@ -425,45 +425,10 @@ jobs:
           export GH_REPO="myp015/ainas-2in1"
           RELEASE_TAG="OVA_rr${TAG}"
 
-          ASSETS=()
-          if [ -n "${ARTIFACT_ZIP:-}" ] && [ -f "$GITHUB_WORKSPACE/$ARTIFACT_ZIP" ]; then
-            ART_PATH="$GITHUB_WORKSPACE/$ARTIFACT_ZIP"
-            ART_SIZE=$(stat -c%s "$ART_PATH")
-            MAX_ASSET=2147483648
-            if [ "$ART_SIZE" -ge "$MAX_ASSET" ]; then
-              echo "[INFO] 制品过大 (${ART_SIZE} bytes)，拆分为 <=1.9GB 分片"
-              rm -f "${ART_PATH}.part."*
-              split -b 1900m -d -a 3 "$ART_PATH" "${ART_PATH}.part."
-              ls -lh "${ART_PATH}.part."*
-              for PART in "${ART_PATH}.part."*; do
-                ASSETS+=("$PART")
-              done
-            else
-              ASSETS+=("$ART_PATH")
-            fi
-          fi
-          if [ ${#ASSETS[@]} -eq 0 ]; then
-            echo "[E] 没有可上传的 Release 资产"
-            exit 1
-          fi
+          # 分卷、Release 自愈、退避重试统一在 .github/scripts/release_publish.sh 里
+          ASSET_ARGS=()
+          [ -n "${ARTIFACT_ZIP:-}" ] && ASSET_ARGS+=("$GITHUB_WORKSPACE/$ARTIFACT_ZIP")
 
-          # Release 已由串行 ensure-release job 创建；当前 matrix job 只负责上传自身资产。
-          for ATTEMPT in 1 2 3 4 5; do
-            echo "[INFO] 上传资产 attempt ${ATTEMPT}: ${ASSETS[*]}"
-            set +e
-            UPLOAD_OUT=$(gh release upload "$RELEASE_TAG" "${ASSETS[@]}" --clobber 2>&1)
-            UPLOAD_RC=$?
-            set -e
-            if [ "$UPLOAD_RC" -eq 0 ]; then
-              exit 0
-            fi
-            echo "$UPLOAD_OUT"
-            if echo "$UPLOAD_OUT" | grep -qiE 'HTTP 404|HTTP 422|already exists|409|HTTP 429|HTTP 502|HTTP 503|HTTP 504|rate limit|secondary rate'; then
-              echo "[INFO] 上传暂时失败，${ATTEMPT}0s 后重试"
-              sleep $((ATTEMPT * 10))
-              continue
-            fi
-            exit "$UPLOAD_RC"
-          done
-          exit 1
-          
+          bash "$GITHUB_WORKSPACE/.github/scripts/release_publish.sh" \
+            "$RELEASE_TAG" "OVA build artifacts for ${RR_TAG}" "${ASSET_ARGS[@]}"
+
