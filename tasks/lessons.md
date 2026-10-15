@@ -351,5 +351,11 @@ PR 合并点），而 `fix/partition-guard-20261011` 已领先 **55 个提交**�
 - 跨仓库的 CI 失败，先问"这次跑的到底是哪个 commit"，
   再去查环境/上游 —— 后者往往查半天全是死胡同。
 
-**待办**：`ainas-lkm` 的 `main` 需要把 `fix/partition-guard-20261011`
-合并/快进过去，否则 `lkms.yml` 的默认值一直指向编不过的树。
+**已处理**：`myp015/ainas-lkm` 的 `main` 已通过 PR #2 合并
+`fix/partition-guard-20261011`（`main` = `a4fe2e3d`），默认 ref 不再是编不过的树。
+验证：按**默认 `lkm_ref=main`** 触发 `Build lkms`（run `38815958625` @ `main`），
+**65/65 job 全 success** —— 与钉分支那次（`38766622176`，64/64）一致。
+
+**顺带记住的判断手法**：判断「这个默认值还能不能用」，看
+`gh api repos/<owner>/<repo>/compare/main...<branch>` 的 `ahead_by`：
+`ahead_by` 很大说明 main 长期没跟上，默认值多半已经指向陈旧树。
