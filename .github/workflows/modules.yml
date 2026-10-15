@@ -20,207 +20,31 @@ on:
         type: boolean
 
 jobs:
+  # 平台×版本矩阵的单一来源：.github/matrix/build.json
+  # （modules.yml / lkms.yml 原本各自内联了 195 行逐字节相同的 include 块）
+  setup:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.gen.outputs.matrix }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@main
+        with:
+          token: ${{ secrets.AiNas }}
+      - name: Generate matrix
+        id: gen
+        run: |
+          echo "matrix=$(jq -c '{include: .include}' .github/matrix/build.json)" >>"$GITHUB_OUTPUT"
+          echo "生效 $(jq '.include | length' .github/matrix/build.json) 项；" \
+               "已禁用 $(jq '.disabled | length' .github/matrix/build.json) 项；" \
+               "不支持 $(jq '.unsupported | length' .github/matrix/build.json) 项"
   build:
+    needs: setup
     strategy:
       # 单个平台失败（如 toolchain 下载瞬时网络错误）不取消其余 job，
       # 避免一次网络抖动让全量验收整体取消（2026-09-23 epyc7003-7.4 教训）
       fail-fast: false
-      matrix:
-        include:
-          #- version: 6.2
-          #  platform: apollolake
-          ##- version: 6.2
-          ##  platform: braswell
-          #- version: 6.2
-          #  platform: broadwell
-          #- version: 6.2
-          #  platform: broadwellnk
-          ##- version: 6.2
-          ##  platform: bromolow
-          #- version: 6.2
-          #  platform: denverton
-          #- version: 6.2
-          #  platform: geminilake
-          ##- version: 6.2
-          ##  platform: grantley
-          ##- version: 6.2
-          ##  platform: kvmx64
-          #- version: 6.2
-          #  platform: purley
-          #- version: 6.2
-          #  platform: v1000
-
-          - version: "7.0"
-            platform: apollolake
-          #- version: "7.0"
-          #  platform: braswell
-          - version: "7.0"
-            platform: broadwell
-          - version: "7.0"
-            platform: broadwellnk
-          #- version: "7.0"
-          #  platform: bromolow
-          - version: "7.0"
-            platform: denverton
-          - version: "7.0"
-            platform: geminilake
-          #- version: "7.0"
-          #  platform: grantley
-          #- version: "7.0"
-          #  platform: kvmx64
-          - version: "7.0"
-            platform: purley
-          - version: "7.0"
-            platform: v1000
-
-          - version: 7.1
-            platform: apollolake
-          #- version: 7.1
-          #  platform: braswell
-          - version: 7.1
-            platform: broadwell
-          - version: 7.1
-            platform: broadwellnk
-          - version: 7.1
-            platform: broadwellnkv2
-          - version: 7.1
-            platform: broadwellntbap
-          #- version: 7.1
-          #  platform: bromolow
-          - version: 7.1
-            platform: denverton
-          - version: 7.1
-            platform: epyc7002
-          - version: 7.1
-            platform: geminilake
-          #- version: 7.1
-          #  platform: grantley
-          #- version: 7.1
-          #  platform: kvmx64
-          - version: 7.1
-            platform: purley
-          - version: 7.1
-            platform: r1000
-          - version: 7.1
-            platform: v1000
-
-          - version: 7.2
-            platform: apollolake
-          #- version: 7.2
-          #  platform: braswell
-          - version: 7.2
-            platform: broadwell
-          - version: 7.2
-            platform: broadwellnk
-          - version: 7.2
-            platform: broadwellnkv2
-          - version: 7.2
-            platform: broadwellntbap
-          #- version: 7.2
-          #  platform: bromolow
-          - version: 7.2
-            platform: denverton
-          - version: 7.2
-            platform: epyc7002
-          - version: 7.2
-            platform: geminilake
-          - version: 7.2
-            platform: geminilakenk
-          #- version: 7.2
-          #  platform: grantley
-          #- version: 7.2
-          #  platform: kvmx64
-          - version: 7.2
-            platform: purley
-          - version: 7.2
-            platform: r1000
-          - version: 7.2
-            platform: r1000nk
-          - version: 7.2
-            platform: v1000
-          - version: 7.2
-            platform: v1000nk
-
-          - version: 7.3
-            platform: apollolake
-          #- version: 7.3
-          #  platform: braswell
-          - version: 7.3
-            platform: broadwell
-          - version: 7.3
-            platform: broadwellnk
-          - version: 7.3
-            platform: broadwellnkv2
-          - version: 7.3
-            platform: broadwellntbap
-          #- version: 7.3
-          #  platform: bromolow
-          - version: 7.3
-            platform: denverton
-          - version: 7.3
-            platform: epyc7002
-          - version: 7.3
-            platform: geminilake
-          - version: 7.3
-            platform: geminilakenk
-          #- version: 7.3
-          #  platform: grantley
-          #- version: 7.3
-          #  platform: kvmx64
-          - version: 7.3
-            platform: purley
-          - version: 7.3
-            platform: r1000
-          - version: 7.3
-            platform: r1000nk
-          - version: 7.3
-            platform: v1000
-          - version: 7.3
-            platform: v1000nk
-
-          - version: 7.4
-            platform: apollolake
-          #- version: 7.4
-          #  platform: braswell
-          - version: 7.4
-            platform: broadwell
-          - version: 7.4
-            platform: broadwellnk
-          - version: 7.4
-            platform: broadwellnkv2
-          - version: 7.4
-            platform: broadwellntbap
-          #- version: 7.4
-          #  platform: bromolow
-          - version: 7.4
-            platform: denverton
-          - version: 7.4
-            platform: epyc7002
-          - version: 7.4
-            platform: epyc7003
-          - version: 7.4
-            platform: epyc7003ntb
-          - version: 7.4
-            platform: geminilake
-          - version: 7.4
-            platform: geminilakenk
-          #- version: 7.4
-          #  platform: grantley
-          - version: 7.4
-            platform: icelaked
-          #- version: 7.4
-          #  platform: kvmx64
-          - version: 7.4
-            platform: purley
-          - version: 7.4
-            platform: r1000
-          - version: 7.4
-            platform: r1000nk
-          - version: 7.4
-            platform: v1000
-          - version: 7.4
-            platform: v1000nk
-
+      matrix: ${{ fromJson(needs.setup.outputs.matrix) }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
