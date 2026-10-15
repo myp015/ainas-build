@@ -75,7 +75,7 @@ jobs:
           sudo apt install -y build-essential libtool pkgconf libzstd-dev liblzma-dev libssl-dev  # kmodule dependencies
 
           # Backup the original python3 executable.
-          sudo mv -f "$(realpath $(which python3))/EXTERNALLY-MANAGED" "$(realpath $(which python3))/EXTERNALLY-MANAGED.bak" 2>/dev/null || true
+          sudo mv -f "$(realpath $(which python3))/EXTERNALLY-MANAGED" "$(realpath $(which python3))/EXTERNALLY-MANAGED.bak" 2>/dev/null
           sudo pip3 install -U -r ainas-2in1/script/requirements.txt
 
           . ainas-2in1/script/2in1func.sh

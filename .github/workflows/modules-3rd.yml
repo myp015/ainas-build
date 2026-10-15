@@ -181,7 +181,7 @@ jobs:
           SOURCE="${ROOT_PATH}/linux-firmware"
           DEST="${OUT_MODULES}/firmware"
           git clone --depth 1 https://git.kernel.org/pub/scm/linux/kernel/git/firmware/linux-firmware.git ${SOURCE}
-          cp -rf ${SOURCE}/intel/iwlwifi/* ${SOURCE}/ 2>/dev/null || true # Move intel firmware to top dir for easy search
+          cp -rf ${SOURCE}/intel/iwlwifi/* ${SOURCE}/ 2>/dev/null # Move intel firmware to top dir for easy search
           while read L; do
             [ -z "${L}" ] && continue
             if [ -e "${SOURCE}/${L}" ]; then

@@ -345,7 +345,7 @@ jobs:
           patch_ram "$PART3_PATH" rr "$WORKDIR"
 
 
-          sudo umount "$PART3_PATH" || true
+          sudo umount "$PART3_PATH"
           sudo rm -rf "$PART3_PATH"
 
           # ── 使用 RR Docker 编译镜像 ───────────────────────────────
@@ -354,9 +354,9 @@ jobs:
 
           # ── 清理 p3 临时文件 ──────────────────────────────────────
           sudo mkdir -p "$PART3_PATH"
-          sudo mount "${DISK_LOOP}p3" "$PART3_PATH" || true
-          sudo rm -rf "$PART3_PATH/dl" "$PART3_PATH/auxfiles" "$PART3_PATH/logs" || true
-          sudo umount "$PART3_PATH" || true
+          sudo mount "${DISK_LOOP}p3" "$PART3_PATH"
+          sudo rm -rf "$PART3_PATH/dl" "$PART3_PATH/auxfiles" "$PART3_PATH/logs"
+          sudo umount "$PART3_PATH"
           sudo losetup --detach "$DISK_LOOP"
           rm -f "$WORKDIR/2in1func.sh"
 
@@ -396,14 +396,14 @@ jobs:
 
           # ① 先停掉可能仍在运行、占用 rr.img 的 dsm 容器
           if [ -f "$WORKDIR/rr/docker-compose.yaml" ]; then
-            ( cd "$WORKDIR/rr" && docker compose -f docker-compose.yaml down -v ) || true
+            ( cd "$WORKDIR/rr" && docker compose -f docker-compose.yaml down -v )
           fi
-          docker rm -f dsm >/dev/null 2>&1 || true
+          docker rm -f dsm >/dev/null 2>&1
 
           # ② 卸载可能残留的挂载点，摘除 loop 设备，避免读到不一致镜像
-          sudo umount /mnt/p1 /mnt/p3 2>/dev/null || true
+          sudo umount /mnt/p1 /mnt/p3 2>/dev/null
           for L in $(losetup -j "$WORKDIR/rr/rr.img" 2>/dev/null | cut -d: -f1); do
-            sudo losetup --detach "$L" || true
+            sudo losetup --detach "$L"
           done
           sudo sync
 
@@ -450,7 +450,7 @@ jobs:
             MAX_ASSET=2147483648
             if [ "$ART_SIZE" -ge "$MAX_ASSET" ]; then
               echo "[INFO] 制品过大 (${ART_SIZE} bytes)，拆分为 <=1.9GB 分片"
-              rm -f "${ART_PATH}.part."* || true
+              rm -f "${ART_PATH}.part."*
               split -b 1900m -d -a 3 "$ART_PATH" "${ART_PATH}.part."
               ls -lh "${ART_PATH}.part."*
               for PART in "${ART_PATH}.part."*; do

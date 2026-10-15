@@ -366,7 +366,7 @@ jobs:
           sudo e2label "${GRUB_LOOP}p2" RDGZ
           sudo e2label "${GRUB_LOOP}p3" RAMDISK
           sudo fatlabel "${GRUB_LOOP}p1" AiNasloader
-          sudo losetup --detach "$GRUB_LOOP" || true
+          sudo losetup --detach "$GRUB_LOOP"
 
           # ── GRUB 修补 ──────────────────────────────────────────────
           patch_part1 rr/rr.img "$PART1_PATH" 2in1 "$MODEL" "$LINE_SHORT"
@@ -401,7 +401,7 @@ jobs:
           # ── initrd 修补与重打包 ────────────────────────────────────
           patch_ram "$PART3_PATH" 2in1 "$WORKDIR" "$TAG"
 
-          sudo umount "$PART3_PATH" || true
+          sudo umount "$PART3_PATH"
           sudo rm -rf "$PART3_PATH"
 
 
@@ -413,9 +413,9 @@ jobs:
 
           # ── 清理 p3 临时文件 ──────────────────────────────────────
           sudo mkdir -p "$PART3_PATH"
-          sudo mount "${DISK_LOOP}p3" "$PART3_PATH" || true
-          sudo rm -rf "$PART3_PATH/dl" "$PART3_PATH/auxfiles" "$PART3_PATH/logs" || true
-          sudo umount "$PART3_PATH" || true
+          sudo mount "${DISK_LOOP}p3" "$PART3_PATH"
+          sudo rm -rf "$PART3_PATH/dl" "$PART3_PATH/auxfiles" "$PART3_PATH/logs"
+          sudo umount "$PART3_PATH"
           sudo losetup --detach "$DISK_LOOP"
 
           # ── UPDATE 包构建 ─────────────────────────────────────────
@@ -424,7 +424,7 @@ jobs:
 
           if [ "${UPDATE_ONLY}" = "true" ]; then
             bash "$AINAS2IN1_DIR/script/2in1_build_update.sh" rr/rr.img "$GITHUB_WORKSPACE" "$UPDATE_FLAVOR"
-            RAW_UPDATE_ZIP="$(ls -1 updateall-*.zip 2>/dev/null | head -n1 || true)"
+            RAW_UPDATE_ZIP="$(ls -1 updateall-*.zip 2>/dev/null | head -n1)"
             if [ -n "$RAW_UPDATE_ZIP" ] && [ -f "$RAW_UPDATE_ZIP" ]; then
               # 保持 updateall-*.zip 原名上传，不再重命名
               UPDATE_ZIP="$(basename "$RAW_UPDATE_ZIP")"
@@ -476,7 +476,7 @@ jobs:
             MAX_ASSET=2147483648
             if [ "$ART_SIZE" -ge "$MAX_ASSET" ]; then
               echo "[INFO] 制品过大 (${ART_SIZE} bytes)，拆分为 <=1.9GB 分片"
-              rm -f "${ART_PATH}.part."* || true
+              rm -f "${ART_PATH}.part."*
               split -b 1900m -d -a 3 "$ART_PATH" "${ART_PATH}.part."
               ls -lh "${ART_PATH}.part."*
               for PART in "${ART_PATH}.part."*; do
