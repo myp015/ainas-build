@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# 计算按月低增的发布版本号（<YY.M.N>），并写入 $GITHUB_ENV。
+# 计算按月低增的发布版本号（<YY.M.N>）：stdout 输出纯值，并写入 $GITHUB_ENV。
 # modules / lkms / cks / addons / buildroot / ainas-rr 六个工作流的
 # 「Calculate version」步骤共用。
 #
@@ -88,5 +88,9 @@ for _ in $(seq 1 20); do
   fi
 done
 
-echo "VERSION: ${VERSION}"
+# stdout 输出纯版本号：GITHUB_ENV 只对后续步骤生效，同一步骤内要立刻用到
+# （如 ainas-rr.yml 改 consts.sh）的调用方需用 $(...) 捕获此处输出。
+# 人类可读日志走 stderr，避免污染命令替换的结果。
+echo "VERSION: ${VERSION}" >&2
+echo "${VERSION}"
 echo "VERSION=${VERSION}" >> "${GITHUB_ENV}"

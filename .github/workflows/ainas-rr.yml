@@ -83,7 +83,9 @@ jobs:
           # 修复后空输入也走自动计算并发布）
           TAGDATE="$(date +'%Y%m%d%H%M')"
 
-          bash "$GITHUB_WORKSPACE/.github/scripts/calc_version.sh" "myp015/ainas-rr" "${{ inputs.version }}"
+          # calc_version.sh 的 stdout 即版本号；本步骤内要立刻用它改 consts.sh，
+          # 故在此捕获（写入 GITHUB_ENV 的 VERSION 要到后续步骤才可见）。
+          VERSION="$(bash "$GITHUB_WORKSPACE/.github/scripts/calc_version.sh" "myp015/ainas-rr" "${{ inputs.version }}")"
 
           echo "TAGDATE: ${TAGDATE}"
           echo "TAGDATE=${TAGDATE}" >>$GITHUB_ENV
