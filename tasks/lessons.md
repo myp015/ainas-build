@@ -359,3 +359,37 @@ PR 合并点），而 `fix/partition-guard-20261011` 已领先 **55 个提交**�
 **顺带记住的判断手法**：判断「这个默认值还能不能用」，看
 `gh api repos/<owner>/<repo>/compare/main...<branch>` 的 `ahead_by`：
 `ahead_by` 很大说明 main 长期没跟上，默认值多半已经指向陈旧树。
+
+## 2026-10-16 — 抽取内联 shell 到共享脚本：`$GITHUB_ENV` 只对后续步骤生效，同步骤内用的中间变量会丢成空
+
+**症状**：`ainas-rr.yml` 打包出的镜像里 `consts.sh` 的 `RR_VERSION=""`、
+`VERSION` 文件为空 —— 版本号没写进去。
+
+> 别把 `RR_RELEASE=""` 一起当 bug：它的用途是 `${RR_RELEASE:+(${RR_RELEASE})}`
+> （非空才展开后缀），空 = 正式版；`prerelease=true` 时才是 `pre`。
+
+**根因**：`6cc27d2e` 把六份「Calculate version」内联块收敛成 `calc_version.sh`。
+原内联版在**同一个 shell** 里算出 `VERSION`，紧接着**同一步骤**就用它 `sed` 改 `consts.sh`；
+抽成 `bash calc_version.sh`（子进程）后，脚本只把 `VERSION` 写 `$GITHUB_ENV`，
+而 **`$GITHUB_ENV` 只对后续步骤生效、对当前步骤无效** → 同步骤的 `${VERSION}` 变空。
+其余 5 个工作流都是「脚本在独立步骤、VERSION 在后续步骤用 `${{ env.VERSION }}`」，
+所以只有 `ainas-rr.yml` 中招。
+
+**铁证（不用看产物就能定位）**：`if [ -n "${VERSION}" ]` 为假会**跳过 `git push`**，
+所以 `ainas-rr` 仓库的 `consts.sh` 长期停在旧值，最后成功 push 的时间早于抽取提交。
+「修复前那次 run 虽 success 却没有任何 push 提交」即可坐实。
+
+**规则（要记住的）**：
+- **把内联 shell 抽成共享脚本前，先问：原代码有没有在「同一步骤内」用到中间变量？**
+  有 → 要么让脚本把结果打到 **stdout** 供 `$(...)` 捕获，要么把使用点挪到后续步骤；
+  只写 `$GITHUB_ENV` 不够。
+- **`$GITHUB_ENV` / `$GITHUB_OUTPUT` 的可见范围是「后续步骤」**，不是当前步骤 ——
+  GitHub Actions 最容易踩的时序坑之一。
+- 判断「值到底有没有传下去」，别看脚本自己的 `echo`（那只是它自己的 stdout），
+  要看**依赖该值的副作用**有没有发生（这里是 `consts.sh` 的 push）。
+
+**已处理**：`calc_version.sh` 把纯版本号打到 stdout（人类日志改走 stderr），
+`ainas-rr.yml` 用 `VERSION="$(bash ... )"` 捕获；`$GITHUB_ENV` 写入不变，
+其余 5 个调用方不受影响。
+验证：run `38850658666` @ `main` success —— `ainas-rr` 的 `consts.sh` 从 `26.10.13`
+更新为 `26.10.15`（push 提交 `d37ffd05`），Release `26.10.15` 创建。
