@@ -1,5 +1,7 @@
 !.gitkeep
 .vscode
+# 本地 Claude Code 配置（个人权限偏好，不入库）
+.claude/
 /rr
 /rr.env
 rr*.img
