@@ -18,21 +18,27 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # ============ Task#126 F1 + Task#191 F5/F6 验证矩阵（5.10.55 树）============
-          # F1 判据：产物 mpt3sas.ko/megaraid_sas.ko/ib_core.ko/mlx4_ib.ko/mlx5_ib.ko
-          # 的 nm UND 中 irq_poll_* 应为 —— n 侧 0 个、y 侧保留（5/5/4/2/2）。
-          # F5 判据：nf_socket_ipv4.ko/nf_tproxy_ipv4.ko 的 nm UND 应无
-          # udp4_lib_lookup（改为 __udp4_lib_lookup + udp_table，两平台内核均不导出前者）。
-          # F6 判据：geminilakenk page_pool.ko 的 nm UND 应无 __tracepoint_page_pool_* /
-          # __SCK__tp_func_* / __SCT__tp_func_*（12 个），对齐 RR 24 UND 基础符号面。
-          # 官方内核 IRQ_POLL=n 平台（不导出 irq_poll_* → 必须编译排除）
+          # ============ Task#191 F8/F9/F10 验证矩阵（4.x 树）============
+          # 5.x 侧 F1/F5/F6 已由 run 39043563163 验证通过（三 job 全绿：F5 产物
+          # nm UND 与 RR 逐符号一致 __udp4_lib_lookup+udp_table；F6 page_pool
+          # tracepoint 元符号 12→0，UND 26）。
+          # F8 判据：nf_conntrack.ko 的 nm UND 应无 __siphash_aligned，改为
+          # __siphash_unaligned（官方 4.4 导出面只含后者）。
+          # F9 判据：sdhci-pci.ko 的 nm UND 应无 sdhci_pci_spt_drive_strength
+          # （302 树改为编进 sdhci-pci.ko 自身；180 树保持独立 sdhci-pci-data.ko）。
+          # F10 判据：broadwell 的 sdhci-pci.ko/sdhci-acpi.ko UND 应无 iosf_mbi_*；
+          # apollolake 仍应保留（其 defines 开 CONFIG_IOSF_MBI=m、有 iosf_mbi.ko，
+          # RR 同平台 sdhci 依赖确实含 iosf_mbi）。
+          # 302 树：F8+F9+F10 三族同验（broadwell 非 apollolake → 应无 iosf_mbi）
           - version: "7.4"
-            platform: r1000nk
+            platform: broadwell
+          # 302 树：F10 正向对照（apollolake 应保留 iosf_mbi 依赖）
           - version: "7.4"
-            platform: geminilakenk
-          # 官方内核 IRQ_POLL=y 平台（导出 irq_poll_* → 保留路径，无功能降级）
-          - version: "7.4"
-            platform: epyc7002
+            platform: apollolake
+          # 180 树：F8 同步改动 + F9/F10 回归（180 走独立 sdhci-pci-data.ko 分支，
+          # 且 kconfig-flags 本无 IOSF 注入 → 应保持既有行为不变）
+          - version: "7.0"
+            platform: broadwell
 
     runs-on: ubuntu-latest
     steps:
