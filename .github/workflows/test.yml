@@ -18,9 +18,13 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # ============ Task#126 F1 irq_poll 门控验证矩阵（5.10.55 树）============
-          # 判据：产物 mpt3sas.ko/megaraid_sas.ko/ib_core.ko/mlx4_ib.ko/mlx5_ib.ko
+          # ============ Task#126 F1 + Task#191 F5/F6 验证矩阵（5.10.55 树）============
+          # F1 判据：产物 mpt3sas.ko/megaraid_sas.ko/ib_core.ko/mlx4_ib.ko/mlx5_ib.ko
           # 的 nm UND 中 irq_poll_* 应为 —— n 侧 0 个、y 侧保留（5/5/4/2/2）。
+          # F5 判据：nf_socket_ipv4.ko/nf_tproxy_ipv4.ko 的 nm UND 应无
+          # udp4_lib_lookup（改为 __udp4_lib_lookup + udp_table，两平台内核均不导出前者）。
+          # F6 判据：geminilakenk page_pool.ko 的 nm UND 应无 __tracepoint_page_pool_* /
+          # __SCK__tp_func_* / __SCT__tp_func_*（12 个），对齐 RR 24 UND 基础符号面。
           # 官方内核 IRQ_POLL=n 平台（不导出 irq_poll_* → 必须编译排除）
           - version: "7.4"
             platform: r1000nk
