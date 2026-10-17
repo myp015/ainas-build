@@ -18,24 +18,17 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # ============ 常规五平台矩阵（Task#156，已恢复）：覆盖三种主流程树 ============
-          # 7.1 老平台 × 3 → 4.4.180 树（binder 内建，无模块）
-          - version: "7.1"
-            platform: geminilake
-          - version: "7.1"
-            platform: purley
-          - version: "7.1"
-            platform: v1000
-          # 7.4 apollolake → 4.4.302 树（binder/ashmem 移植验证基准平台）
-          - version: "7.4"
-            platform: apollolake
-          # 7.4 geminilakenk → 5.10.55 树（devlink.c GPL license 修复验证平台，Task#188）
-          - version: "7.4"
-            platform: geminilakenk
-          # 7.4 r1000nk → 5.10.55 树（补齐主流程 ixgbe 驱动验证平台，Task#188；
-          # devlink 官方内建=y 不动，ixgbe 靠内建解析，规避 devlink 模块化坑）
+          # ============ Task#126 F1 irq_poll 门控验证矩阵（5.10.55 树）============
+          # 判据：产物 mpt3sas.ko/megaraid_sas.ko/ib_core.ko/mlx4_ib.ko/mlx5_ib.ko
+          # 的 nm UND 中 irq_poll_* 应为 —— n 侧 0 个、y 侧保留（5/5/4/2/2）。
+          # 官方内核 IRQ_POLL=n 平台（不导出 irq_poll_* → 必须编译排除）
           - version: "7.4"
             platform: r1000nk
+          - version: "7.4"
+            platform: geminilakenk
+          # 官方内核 IRQ_POLL=y 平台（导出 irq_poll_* → 保留路径，无功能降级）
+          - version: "7.4"
+            platform: epyc7002
 
     runs-on: ubuntu-latest
     steps:
