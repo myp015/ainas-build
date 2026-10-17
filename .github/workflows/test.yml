@@ -18,27 +18,26 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # ============ Task#191 F8/F9/F10 验证矩阵（4.x 树）============
-          # 5.x 侧 F1/F5/F6 已由 run 39043563163 验证通过（三 job 全绿：F5 产物
-          # nm UND 与 RR 逐符号一致 __udp4_lib_lookup+udp_table；F6 page_pool
-          # tracepoint 元符号 12→0，UND 26）。
-          # F8 判据：nf_conntrack.ko 的 nm UND 应无 __siphash_aligned，改为
-          # __siphash_unaligned（官方 4.4 导出面只含后者）。
-          # F9 判据：sdhci-pci.ko 的 nm UND 应无 sdhci_pci_spt_drive_strength
-          # （302 树改为编进 sdhci-pci.ko 自身；180 树保持独立 sdhci-pci-data.ko）。
-          # F10 判据：broadwell 的 sdhci-pci.ko/sdhci-acpi.ko UND 应无 iosf_mbi_*；
-          # apollolake 仍应保留（其 defines 开 CONFIG_IOSF_MBI=m、有 iosf_mbi.ko，
-          # RR 同平台 sdhci 依赖确实含 iosf_mbi）。
-          # 302 树：F8+F9+F10 三族同验（broadwell 非 apollolake → 应无 iosf_mbi）
+          # ============ Task#191 F2 验证矩阵（5.x 树）============
+          # 4.x 侧 F8/F9/F10 已由 run 39045196240 验证通过（三 job 全绿，产物 nm
+          # UND 逐项与 RR 对齐：F8 改用 __siphash_unaligned；F9 spt_drive 自包含
+          # 无 U；F10 broadwell 无 iosf_mbi_*、apollolake 正向保留）。
+          # 5.x 侧 F1/F5/F6 已由 run 39043563163 验证通过。
+          # F2 判据：binder_linux.ko 的 nm UND 应无
+          #   __close_fd_get_file can_nice mmput_async task_work_add zap_page_range
+          #   security_binder_{set_context_mgr,transaction,transfer_binder,transfer_file}
+          # （epyc7002 另有 put_ipc_ns / init_ipc_ns），这些符号改为模块内 T
+          # （同名转发层，链接期接管 U 引用）；新增 UND 仅 register_kprobe /
+          # unregister_kprobe。对照 RR 同平台 binder_linux.ko 应逐符号一致。
+          # epyc7002：覆盖 binderfs 路径（defines 开 CONFIG_ANDROID_BINDERFS=m
+          # 且 KSRC IPC_NS=y → 需 put_ipc_ns 转发 + init_ipc_ns getter）
           - version: "7.4"
-            platform: broadwell
-          # 302 树：F10 正向对照（apollolake 应保留 iosf_mbi 依赖）
+            platform: epyc7002
+          # geminilakenk / r1000nk：无 binderfs 路径，顺带回归 F1 irq_poll 门控
           - version: "7.4"
-            platform: apollolake
-          # 180 树：F8 同步改动 + F9/F10 回归（180 走独立 sdhci-pci-data.ko 分支，
-          # 且 kconfig-flags 本无 IOSF 注入 → 应保持既有行为不变）
-          - version: "7.0"
-            platform: broadwell
+            platform: geminilakenk
+          - version: "7.4"
+            platform: r1000nk
 
     runs-on: ubuntu-latest
     steps:
