@@ -135,6 +135,14 @@ jobs:
           gzip -dc "files/initrd/opt/rr/grub.img.gz" >"grub.img"
           resizeImg "grub.img" "+2048M" "rr.img"
           fdisk -l "rr.img"
+
+          # 默认语言设为中文：官方 p1 无 .locale 时 gettext 会回退原始 msgid，
+          # 显式写入 zh_CN.UTF-8 以确保 zh_CN/rr.mo 里的中文文案生效。
+          # 做法对齐 2in1func.sh 的 patch_part1 rr 变体（向 p1 写 .locale）；
+          # 此处 p1 内容直接来自 files/mnt/p1/，由下方 repackImg 拷入分区，
+          # 故无需像 patch_part1 那样挂载镜像。
+          printf '%s\n' "zh_CN.UTF-8" >files/mnt/p1/.locale
+
           repackImg files "rr.img"
 
           echo "Create RR ova"
