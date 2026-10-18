@@ -18,22 +18,17 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # ============ Task#191 F2 验证矩阵（5.x 树）============
-          # 4.x 侧 F8/F9/F10 已由 run 39045196240 验证通过（三 job 全绿，产物 nm
-          # UND 逐项与 RR 对齐：F8 改用 __siphash_unaligned；F9 spt_drive 自包含
-          # 无 U；F10 broadwell 无 iosf_mbi_*、apollolake 正向保留）。
-          # 5.x 侧 F1/F5/F6 已由 run 39043563163 验证通过。
-          # F2 判据：binder_linux.ko 的 nm UND 应无
-          #   __close_fd_get_file can_nice mmput_async task_work_add zap_page_range
-          #   security_binder_{set_context_mgr,transaction,transfer_binder,transfer_file}
-          # （epyc7002 另有 put_ipc_ns / init_ipc_ns），这些符号改为模块内 T
-          # （同名转发层，链接期接管 U 引用）；新增 UND 仅 register_kprobe /
-          # unregister_kprobe。对照 RR 同平台 binder_linux.ko 应逐符号一致。
-          # epyc7002：覆盖 binderfs 路径（defines 开 CONFIG_ANDROID_BINDERFS=m
-          # 且 KSRC IPC_NS=y → 需 put_ipc_ns 转发 + init_ipc_ns getter）
+          # ============ Task#191 F3/F4 验证矩阵（5.x 树）============
+          # 已闭环：F1/F5/F6（run 39043563163）、F2（run 39071641854）、
+          # F8/F9/F10（run 39045196240），均产物级 nm UND 与 RR 逐项对齐。
+          # F3 判据：ashmem_linux.ko 的 nm UND 应无 shmem_zero_setup（改为模块内 T
+          # 同名转发层），新增 UND 仅 register_kprobe / unregister_kprobe；对照 RR
+          # 同平台 ashmem_linux.ko（RR 也是 T shmem_zero_setup + 同样两个 kprobe U）。
+          # F4 判据：rtw_8723d.ko 的 nm UND 应无 rtw8723x_common，改为模块内定义
+          # （rtw8723x.o 并入；RR 同平台 rtw_8723d.ko 无此外部依赖）。
+          # 三平台覆盖：epyc7002（含 binderfs 回归）/ geminilakenk / r1000nk
           - version: "7.4"
             platform: epyc7002
-          # geminilakenk / r1000nk：无 binderfs 路径，顺带回归 F1 irq_poll 门控
           - version: "7.4"
             platform: geminilakenk
           - version: "7.4"
