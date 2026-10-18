@@ -18,50 +18,40 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # ============ Task#192 官方内核导出面核对（26.10.9 产物）三族修复验证 ====
-          # 用 syno 官方内核导出面（/www/tmp/official-zimage/exports_<plat>_74.txt）
-          # 核对 modules/ 自编产物，40 个不可解析符号中 5 个为我方独有（RR 可解析），
-          # 收敛为三族真缺陷，本矩阵逐族产物级验证：
+          # ============ Task#193 与 RR 同样不可加载的模块修复验证 ====
+          # 背景：Task#192 把 4.x 残余 35 个不可解析符号判为"与 RR 同样的生态状态、
+          # 不修"。本轮复核后只剩两族真缺陷（另 2 个符号 amd_e400_c1e_detected /
+          # sk_receive_skb 只在 4.4.180 target 上出现，是"拿 4.4.302 导出面核对
+          # 4.4.180"造成的假阳性——官方 7.1 模块自己就引用它们），本矩阵逐族产物级
+          # 验证：
           #
-          # 族1 mlx5e_init/mlx5e_cleanup（37 target = 4.4 八平台 × 版本）：
-          #   CONFIG_MLX5_CORE_EN 是 bool，defines 却写 =m → 4.4 kbuild 的
-          #   multi-used-m（scripts/Makefile.lib:51）不认 -m，`mlx5_core-$(CONFIG_
-          #   MLX5_CORE_EN) += en_*.o` 的子对象全被丢弃；而 C 层由 kconfig-flags
-          #   注入 -DCONFIG_MLX5_CORE_EN=1 仍编译引用 → UND。修复=16 个 defines
-          #   改 =y。判据：mlx5_core.ko 应出现 T mlx5e_init/mlx5e_cleanup
-          #   （对齐 RR 4.x mlx5_core.ko）。
-          # 族2 genphy_config_init（9 target = r1000/v1000 × 4 版本）：
-          #   v1000/r1000 的 defines 使 phy/Makefile 注入 -DMY_DEF_HERE，厂商原版把
-          #   EXPORT_SYMBOL(genphy_config_init) 放在该宏的 #else 分支内 → 两平台
-          #   libphy.ko 不导出该符号，而自编 realtek.ko 依赖它（官方 4.4 内核全平台
-          #   亦不导出）→ realtek.ko 无法加载。修复=EXPORT 移到函数定义之后（两树）。
-          #   判据：libphy.ko 含 __ksymtab_genphy_config_init，且 realtek.ko 的
-          #   U genphy_config_init 有提供者。
-          # 族3 sync_file_create/sync_file_get_fence（1 target = icelaked-7.4）：
-          #   官方 icelaked 内核导出面不含主线 sync_file_*（backport 栈用
-          #   dmabufbkpt_*），dev txz auto.conf 亦未设置 → sync_file.o 未链入自编
-          #   dmabuf.ko；而自编 root drm.ko 经 defines_cfg.h 的 CONFIG_SYNC_FILE=1
-          #   编译出引用 → drm.ko 加载失败。修复=defines.icelaked 加
-          #   CONFIG_SYNC_FILE=y。判据：dmabuf.ko 导出面 61→63（含 2 符号），
-          #   与 geminilakenk 逐符号一致。
+          # 族1 dib* 28 符号（消费者 dvb-usb-dib0700.ko，4.x 全平台）：
+          #   我们 src 树 dvb-frontends/Makefile 的 dib 行（30-34、68-69）被官方裁剪
+          #   注释，defines 只开了 CONFIG_DVB_USB_DIB0700=m 没开任何 demod/tuner →
+          #   28 个直接引用无提供者，模块永不加载。修复=取消 Makefile 注释 + 20 个
+          #   4.x defines 加 7 个 CONFIG_DVB_DIB*/TUNER_DIB* 键。
+          #   判据：新增 8 个 .ko（dib3000mc/dib7000m/dib7000p/dib8000/dib9000/
+          #   dib0070/dib0090/dibx000_common），且 dvb-usb-dib0700.ko 的 dib* UND
+          #   全部可解析（本 target 全部 .ko 导出面 ∪ 官方导出面）。
           #
-          # 平台覆盖：4.4 两树 × MY_DEF_HERE 两平台（r1000/v1000）+ mlx5 非 Realtek
-          # 平台 broadwell（两树）；5.x icelaked。前序 Task#191 矩阵（5.x HBA
-          # syno_sdev_info_enum）已闭环，见 ainas-modules tasks/todo.md。
-          - version: "7.1"
-            platform: r1000
-          - version: "7.1"
-            platform: v1000
-          - version: "7.4"
-            platform: r1000
-          - version: "7.4"
-            platform: v1000
+          # 族2 syno_libata_* 5 符号（消费者 sata_sil.ko，4.x 全平台）：
+          #   KSRC include/linux/libata.h 的 SYNO_* 宏（MY_ABC_HERE）把 5 个回调塞进
+          #   ATA_BASE_SHT，官方 4.4 内核只导出 syno_libata_index_get 且仅 r1000/v1000
+          #   → sata_sil.ko 全平台 Unknown symbol。修复=sata_sil.c 里 #undef/#define
+          #   这两个宏：只留 .syno_port_type = SYNO_PORT_TYPE_SATA，去掉 5 个回调。
+          #   判据：sata_sil.ko 无任何 syno_libata_* UND，其余 UND 全在官方导出面内。
+          #
+          # 平台覆盖：4.4 两树 × MY_DEF_HERE 平台（v1000/r1000，index_get 被官方
+          # 导出的那类）+ 非 MY_DEF_HERE 平台 broadwell（index_get 不导出）。其余
+          # 4.x 平台改动同形，由下一次 modules.yml 全量发布构建复核。
           - version: "7.1"
             platform: broadwell
           - version: "7.4"
             platform: broadwell
+          - version: "7.1"
+            platform: v1000
           - version: "7.4"
-            platform: icelaked
+            platform: r1000
 
     runs-on: ubuntu-latest
     steps:
