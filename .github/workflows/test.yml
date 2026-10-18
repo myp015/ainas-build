@@ -18,22 +18,18 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # ============ Task#191 F11 验证矩阵（4.4 双树）============
-          # 已闭环：F1/F5/F6（run 39043563163）、F2（39071641854）、F8/F9/F10
-          # （39045196240）、F3/F4（39083162441），均产物级 nm UND 与 RR 逐项对齐。
-          # F11 判据：自编 qedr.ko 的 nm UND 应含 qede_rdma_register_driver /
-          # qede_rdma_unregister_driver / qed_get_rdma_ops（不再有 qede_roce_*），
-          # 且全部 UND 落在官方导出面 ∪ qed.ko/qede.ko 导出面内。
-          # 对照 RR：/www/project/rr-modules/extracted/broadwell-7.4-4.4.302/qedr.ko
-          # （83 UND，含同三符号）—— RR 直接用官方 hda1 qedr.ko。
-          # 双树覆盖：broadwell-7.4（4.4.302 树）/ broadwell-7.1（4.4.180 树）；
-          # 另带 epyc7002-7.4 作 5.x binderfs 回归。
-          - version: "7.4"
-            platform: broadwell
-          - version: "7.1"
-            platform: broadwell
+          # ============ Task#191 syno_sdev_info_enum 移植验证矩阵（5.x 主流程树）====
+          # 前序 F11 闭环记录见 ainas-modules tasks/todo.md（run 39085595222 3/3）。
+          # 判据：15 个 HBA 模板（14 文件）+ virtio_scsi 的 .syno_sdev_info_enum 生效 ——
+          #   产物级 nm 各 .ko 应出现对应 syno_*_info_enum（LOCAL FUNC），
+          #   且 .ko 的 UND 含 syno_pciepath_dts_pattern_get（官方 vmlinux 导出面命中）。
+          # 平台覆盖：epyc7002（IRQ_POLL=y）/ r1000nk、geminilakenk（IRQ_POLL=n）。
           - version: "7.4"
             platform: epyc7002
+          - version: "7.4"
+            platform: r1000nk
+          - version: "7.4"
+            platform: geminilakenk
 
     runs-on: ubuntu-latest
     steps:
