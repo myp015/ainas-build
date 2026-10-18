@@ -18,23 +18,50 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # ============ Task#191 syno_sdev_info_enum 移植验证矩阵（5.x 主流程树）====
-          # 前序 F11 闭环记录见 ainas-modules tasks/todo.md（run 39085595222 3/3）。
-          # 判据：15 个 HBA 模板（14 文件）+ virtio_scsi 的 .syno_sdev_info_enum 生效 ——
-          #   产物级 nm 各 .ko 应出现对应 syno_*_info_enum（LOCAL FUNC），
-          #   且 .ko 的 UND 含 syno_pciepath_dts_pattern_get（官方 vmlinux 导出面命中）。
-          # 平台覆盖：epyc7002（IRQ_POLL=y）/ r1000nk、geminilakenk（IRQ_POLL=n）。
-          # 7.2/epyc7002 单列：该版本官方 KSRC 的 struct scsi_device 无
-          # syno_block_info_rwlock 字段（cks CI run 39090482914 实证），用于覆盖
-          # 回调代码不含锁后的该头变体（cks 树同项见 cks.yml 全矩阵）。
+          # ============ Task#192 官方内核导出面核对（26.10.9 产物）三族修复验证 ====
+          # 用 syno 官方内核导出面（/www/tmp/official-zimage/exports_<plat>_74.txt）
+          # 核对 modules/ 自编产物，40 个不可解析符号中 5 个为我方独有（RR 可解析），
+          # 收敛为三族真缺陷，本矩阵逐族产物级验证：
+          #
+          # 族1 mlx5e_init/mlx5e_cleanup（37 target = 4.4 八平台 × 版本）：
+          #   CONFIG_MLX5_CORE_EN 是 bool，defines 却写 =m → 4.4 kbuild 的
+          #   multi-used-m（scripts/Makefile.lib:51）不认 -m，`mlx5_core-$(CONFIG_
+          #   MLX5_CORE_EN) += en_*.o` 的子对象全被丢弃；而 C 层由 kconfig-flags
+          #   注入 -DCONFIG_MLX5_CORE_EN=1 仍编译引用 → UND。修复=16 个 defines
+          #   改 =y。判据：mlx5_core.ko 应出现 T mlx5e_init/mlx5e_cleanup
+          #   （对齐 RR 4.x mlx5_core.ko）。
+          # 族2 genphy_config_init（9 target = r1000/v1000 × 4 版本）：
+          #   v1000/r1000 的 defines 使 phy/Makefile 注入 -DMY_DEF_HERE，厂商原版把
+          #   EXPORT_SYMBOL(genphy_config_init) 放在该宏的 #else 分支内 → 两平台
+          #   libphy.ko 不导出该符号，而自编 realtek.ko 依赖它（官方 4.4 内核全平台
+          #   亦不导出）→ realtek.ko 无法加载。修复=EXPORT 移到函数定义之后（两树）。
+          #   判据：libphy.ko 含 __ksymtab_genphy_config_init，且 realtek.ko 的
+          #   U genphy_config_init 有提供者。
+          # 族3 sync_file_create/sync_file_get_fence（1 target = icelaked-7.4）：
+          #   官方 icelaked 内核导出面不含主线 sync_file_*（backport 栈用
+          #   dmabufbkpt_*），dev txz auto.conf 亦未设置 → sync_file.o 未链入自编
+          #   dmabuf.ko；而自编 root drm.ko 经 defines_cfg.h 的 CONFIG_SYNC_FILE=1
+          #   编译出引用 → drm.ko 加载失败。修复=defines.icelaked 加
+          #   CONFIG_SYNC_FILE=y。判据：dmabuf.ko 导出面 61→63（含 2 符号），
+          #   与 geminilakenk 逐符号一致。
+          #
+          # 平台覆盖：4.4 两树 × MY_DEF_HERE 两平台（r1000/v1000）+ mlx5 非 Realtek
+          # 平台 broadwell（两树）；5.x icelaked。前序 Task#191 矩阵（5.x HBA
+          # syno_sdev_info_enum）已闭环，见 ainas-modules tasks/todo.md。
+          - version: "7.1"
+            platform: r1000
+          - version: "7.1"
+            platform: v1000
           - version: "7.4"
-            platform: epyc7002
-          - version: "7.2"
-            platform: epyc7002
+            platform: r1000
           - version: "7.4"
-            platform: r1000nk
+            platform: v1000
+          - version: "7.1"
+            platform: broadwell
           - version: "7.4"
-            platform: geminilakenk
+            platform: broadwell
+          - version: "7.4"
+            platform: icelaked
 
     runs-on: ubuntu-latest
     steps:
