@@ -88,6 +88,31 @@ jobs:
           cp -f "${ROOT_PATH}/ainas-modules/src/${KVER}/defines.${PLATFORM}" "${ROOT_PATH}/ainas-modules/src/${KVER}/defines"
           makemodules "${ROOT_PATH}" "${VERSION}" "${PLATFORM}" "${ROOT_PATH}/ainas-modules/src/${KVER}" "${ROOT_PATH}/output"
 
+      - name: ABI probe
+        # 工具②：在同一个 KSRC 上编两路探针（A = KSRC 原生 = 官方内核条件；
+        # B = KSRC + 本次实际生效的 KCFLAGS），pahole dump 后差分。两路只要有一处
+        # 字段偏移不同，就说明**我们的宏注入改变了官方结构体布局** —— 这类缺陷
+        # 符号层面完全干净（模块能加载），只在运行期崩，符号级门禁抓不到。
+        # KCFLAGS 由 compile.sh 落盘到 output/.kbuild-flags（单一真相源，不在此重推导）。
+        run: |
+          ROOT_PATH=${{ github.workspace }}
+          VERSION=${{ matrix.version }}
+          PLATFORM=${{ matrix.platform }}
+
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq dwarves
+
+          bash "${ROOT_PATH}/ainas-modules/scripts/abi-probe/run_probe.sh" \
+            "${ROOT_PATH}" "${VERSION}" "${PLATFORM}" \
+            "${ROOT_PATH}/abi-${PLATFORM}-${VERSION}.txt"
+
+      - name: Upload ABI probe
+        uses: actions/upload-artifact@v7
+        with:
+          name: abi-${{ matrix.version }}-${{ matrix.platform }}
+          path: |
+            abi-*.txt
+
       - name: Tar to Artifacts
         run: |
           ROOT_PATH=${{ github.workspace }}
@@ -106,8 +131,9 @@ jobs:
           #   output_all/   = 编译 + 官方 + 第三方（合集）   -> 给 release/
           # =====================================================================
 
-          # 纯编译产物 tgz（给 modules/）
-          tar -zcf ${ROOT_PATH}/${PLATFORM}-${VERSION}-${KVER}.tgz -C ${ROOT_PATH}/output .
+          # 纯编译产物 tgz（给 modules/）。排除 .kbuild-flags：它是 compile.sh 落盘的
+          # 构建元数据（供 ABI 探针回放 KCFLAGS），不属于发布产物。
+          tar -zcf ${ROOT_PATH}/${PLATFORM}-${VERSION}-${KVER}.tgz --exclude=./.kbuild-flags -C ${ROOT_PATH}/output .
 
           # 建合集目录：先复制编译产物，再追加官方/第三方
           mkdir -p ${ROOT_PATH}/output_all
@@ -284,6 +310,14 @@ jobs:
           repository: myp015/syno-modules
           token: ${{ secrets.AiNas }}
           path: syno-modules
+      - name: Checkout ainas-modules
+        # 发布门禁脚本（gate_release.py 与 scripts/abi-probe/）随 ainas-modules 仓库发布，
+        # 与 build job 编译用的是同一个 commit（同仓库同 ref）。
+        uses: actions/checkout@main
+        with:
+          repository: myp015/ainas-modules
+          token: ${{ secrets.AiNas }}
+          path: ainas-modules
 
       - name: Init Env
         run: |
@@ -321,6 +355,40 @@ jobs:
           pattern: firmware
           merge-multiple: true
 
+      - name: download to artifacts (abi probe)
+        # 工具② 的 ABI 偏移指纹 dump（每个 target 几 KB）
+        uses: actions/download-artifact@v4
+        with:
+          path: abi_out
+          pattern: abi-*
+          merge-multiple: true
+
+      - name: Release gate
+        # 发布门禁（工具① G1-G4 + 工具② G5）。**硬阻断**：本 job 无 continue-on-error，
+        # 且后续 push 与建 Release 步骤全带 `if: success() && env.VERSION != ''` →
+        # 本步骤非零退出即天然中止整条发布链（不 push syno-modules、不建 Release）。
+        # 此刻 syno-modules 工作区仍是上一版发布状态，故可直接作为"产物不缩水"的基线。
+        run: |
+          ROOT_PATH=${{ github.workspace }}
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq dwarves
+          python3 "${ROOT_PATH}/ainas-modules/scripts/gate_release.py" \
+            --output "${ROOT_PATH}/output" \
+            --official "${ROOT_PATH}/syno-modules/official" \
+            --thirdparty "${ROOT_PATH}/syno-modules/thirdparty" \
+            --prev "${ROOT_PATH}/syno-modules/modules" \
+            --abi "${ROOT_PATH}/abi_out" \
+            --report "${ROOT_PATH}/gate_report.txt"
+
+      - name: Upload gate report
+        # 无论门禁成败都留档：失败时报告明确指出是哪条判据、哪个 target、哪个符号。
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: gate-report
+          path: gate_report.txt
+          if-no-files-found: ignore
+
       - name: delete-artifact
         # 仅 download 成功才删（if: success()）：download 失败时保留 artifacts，
         # 否则编译产物被无条件删除后无法重跑 Extract/手动下载验证。
@@ -330,6 +398,7 @@ jobs:
           name: |
             modules-*
             all-*
+            abi-*
             firmware
 
       - name: Zip modules
