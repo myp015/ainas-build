@@ -24,7 +24,12 @@ jobs:
           #   产物级 nm 各 .ko 应出现对应 syno_*_info_enum（LOCAL FUNC），
           #   且 .ko 的 UND 含 syno_pciepath_dts_pattern_get（官方 vmlinux 导出面命中）。
           # 平台覆盖：epyc7002（IRQ_POLL=y）/ r1000nk、geminilakenk（IRQ_POLL=n）。
+          # 7.2/epyc7002 单列：该版本官方 KSRC 的 struct scsi_device 无
+          # syno_block_info_rwlock 字段（cks CI run 39090482914 实证），用于覆盖
+          # 回调代码不含锁后的该头变体（cks 树同项见 cks.yml 全矩阵）。
           - version: "7.4"
+            platform: epyc7002
+          - version: "7.2"
             platform: epyc7002
           - version: "7.4"
             platform: r1000nk
