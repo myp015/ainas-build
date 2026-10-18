@@ -18,21 +18,22 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # ============ Task#191 F3/F4 验证矩阵（5.x 树）============
-          # 已闭环：F1/F5/F6（run 39043563163）、F2（run 39071641854）、
-          # F8/F9/F10（run 39045196240），均产物级 nm UND 与 RR 逐项对齐。
-          # F3 判据：ashmem_linux.ko 的 nm UND 应无 shmem_zero_setup（改为模块内 T
-          # 同名转发层），新增 UND 仅 register_kprobe / unregister_kprobe；对照 RR
-          # 同平台 ashmem_linux.ko（RR 也是 T shmem_zero_setup + 同样两个 kprobe U）。
-          # F4 判据：rtw_8723d.ko 的 nm UND 应无 rtw8723x_common，改为模块内定义
-          # （rtw8723x.o 并入；RR 同平台 rtw_8723d.ko 无此外部依赖）。
-          # 三平台覆盖：epyc7002（含 binderfs 回归）/ geminilakenk / r1000nk
+          # ============ Task#191 F11 验证矩阵（4.4 双树）============
+          # 已闭环：F1/F5/F6（run 39043563163）、F2（39071641854）、F8/F9/F10
+          # （39045196240）、F3/F4（39083162441），均产物级 nm UND 与 RR 逐项对齐。
+          # F11 判据：自编 qedr.ko 的 nm UND 应含 qede_rdma_register_driver /
+          # qede_rdma_unregister_driver / qed_get_rdma_ops（不再有 qede_roce_*），
+          # 且全部 UND 落在官方导出面 ∪ qed.ko/qede.ko 导出面内。
+          # 对照 RR：/www/project/rr-modules/extracted/broadwell-7.4-4.4.302/qedr.ko
+          # （83 UND，含同三符号）—— RR 直接用官方 hda1 qedr.ko。
+          # 双树覆盖：broadwell-7.4（4.4.302 树）/ broadwell-7.1（4.4.180 树）；
+          # 另带 epyc7002-7.4 作 5.x binderfs 回归。
+          - version: "7.4"
+            platform: broadwell
+          - version: "7.1"
+            platform: broadwell
           - version: "7.4"
             platform: epyc7002
-          - version: "7.4"
-            platform: geminilakenk
-          - version: "7.4"
-            platform: r1000nk
 
     runs-on: ubuntu-latest
     steps:
