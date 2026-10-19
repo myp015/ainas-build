@@ -213,7 +213,7 @@ jobs:
             echo "[INFO] 创建或确认 Release: $RELEASE_TAG (${attempt}/12)"
             set +e
             create_out=$(gh release create "$RELEASE_TAG" \
-              --title "2in1-${TAG}" \
+              --title "2in1_${TAG}" \
               --notes "RR build artifacts for ${TAG}" \
               --latest=false 2>&1)
             create_rc=$?
@@ -451,6 +451,7 @@ jobs:
           export GH_TOKEN="$ACTION_TOKEN"
           export GH_REPO="myp015/ainas-2in1"
           RELEASE_TAG="AiNas2in1_${TAG}"
+          export RELEASE_TITLE="2in1_${TAG}"
 
           # 分卷、Release 自愈、退避重试统一在 .github/scripts/release_publish.sh 里
           ASSET_ARGS=()

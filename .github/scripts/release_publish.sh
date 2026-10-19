@@ -8,6 +8,7 @@
 # 依赖环境变量:
 #   GH_TOKEN   gh 的凭据（调用方从 secrets.AiNas 导出）
 #   GH_REPO    目标仓库，如 myp015/ainas-2in1
+#   RELEASE_TITLE  Release 标题（可选，默认等于 release_tag）
 #
 # 行为:
 #   - 资产文件不存在则跳过；一个都不剩则失败
@@ -29,6 +30,10 @@ RELEASE_TAG="${1}"
 RELEASE_NOTES="${2}"
 shift 2
 
+# Release 标题可与 tag 不同（如 tag 为 rr-<版本>、标题为 rr_<版本>）。
+# 调用方可 export RELEASE_TITLE 覆盖；未指定时沿用 tag，保持既有行为。
+RELEASE_TITLE="${RELEASE_TITLE:-${RELEASE_TAG}}"
+
 ensure_release() {
   local out rc
   if gh release view "${RELEASE_TAG}" >/dev/null 2>&1; then
@@ -37,7 +42,7 @@ ensure_release() {
   echo "[INFO] Release ${RELEASE_TAG} 不存在，重建..."
   set +e
   out=$(gh release create "${RELEASE_TAG}" \
-    --title "${RELEASE_TAG}" \
+    --title "${RELEASE_TITLE}" \
     --notes "${RELEASE_NOTES}" \
     --latest=false 2>&1)
   rc=$?
