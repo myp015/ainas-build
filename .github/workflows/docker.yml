@@ -1,9 +1,4 @@
 # GitHub Actions workflow for building and pushing Kodi Docker image
-# 对齐 RROrg/rr-build/.github/workflows/docker.yml，仅保留本仓库必需的适配：
-#   - matrix 只保留 rr（myp015/dockers 目前只有 rr 的 Dockerfile）
-#   - dockers 仓库改为 myp015/dockers
-#   - 增加 ainas-rr initrd 准备步骤（镜像 rootfs 取自 ainas-rr）
-#   - rr 的 initrd 是 x86_64，platforms 只构建 amd64
 name: Build and Push Docker Image
 
 on:
@@ -18,9 +13,7 @@ jobs:
   build:
     strategy:
       matrix:
-        # 上游：["kmscon", "kodi", "chromium-desktop", "ubuntu-desktop"]
-        # 本仓库目前只维护 rr：复刻 wjz304/rr 的构建镜像，rootfs 取自 ainas-rr。
-        app: ["rr"]
+        app: ["kmscon", "kodi", "chromium-desktop", "ubuntu-desktop"]
 
     runs-on: ubuntu-latest
     steps:
@@ -33,41 +26,6 @@ jobs:
           repository: myp015/dockers
           token: ${{ secrets.AiNas }}
           path: dockers
-
-      - name: Checkout ainas-2in1
-        if: matrix.app == 'rr'
-        uses: actions/checkout@v6
-        with:
-          repository: myp015/ainas-2in1
-          token: ${{ secrets.AiNas }}
-          path: ainas-2in1
-
-      - name: Prepare rr initrd
-        if: matrix.app == 'rr'
-        shell: bash
-        env:
-          ACTION_TOKEN: ${{ secrets.AiNas }}
-          APP: ${{ matrix.app }}
-        run: |
-          set -euo pipefail
-          export GH_TOKEN="$ACTION_TOKEN"
-
-          # 与官方 rr-build 的 docker 段一致：镜像 rootfs 就是 RR 的 initrd。
-          # ainas-rr 的 updateall Release 资产里包含最终的 initrd-rr。
-          mkdir -p /tmp/rr-initrd
-          gh release download --repo myp015/ainas-rr \
-            --pattern 'updateall-*.zip' --dir /tmp/rr-initrd --clobber
-          unzip -o /tmp/rr-initrd/updateall-*.zip 'initrd-rr' -d /tmp/rr-initrd
-
-          # unpackInitrd 来自共享函数库
-          . ./ainas-2in1/script/2in1func.sh
-          mkdir -p "dockers/${APP}/initrd"
-          unpackInitrd /tmp/rr-initrd/initrd-rr "dockers/${APP}/initrd"
-
-          # unpackInitrd 用 sudo cpio 解包，部分目录（如 etc/wireguard）是 root 0700。
-          # buildx 以 runner 身份读取构建上下文，不交还属主会 permission denied；
-          # COPY 进镜像时仍会归 root，不影响最终镜像权限。
-          sudo chown -R "$(id -u):$(id -g)" "dockers/${APP}/initrd"
 
       - name: Init Env
         run: |
@@ -115,8 +73,7 @@ jobs:
         with:
           context: ./dockers/${{ matrix.app }}
           file: ./dockers/${{ matrix.app }}/Dockerfile
-          # rr 的 rootfs 是 x86_64 的 initrd，只构建 amd64
-          platforms: ${{ matrix.app == 'rr' && 'linux/amd64' || 'linux/amd64,linux/arm64' }}
+          platforms: linux/amd64,linux/arm64
           push: true
           tags: |
             ${{ secrets.DOCKERHUB_USERNAME }}/${{ matrix.app }}:${{ steps.version.outputs.version }}
