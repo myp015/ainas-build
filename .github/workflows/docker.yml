@@ -61,6 +61,11 @@ jobs:
           mkdir -p "dockers/${APP}/initrd"
           unpackInitrd /tmp/rr-initrd/initrd-rr "dockers/${APP}/initrd"
 
+          # unpackInitrd 用 sudo cpio 解包，部分目录（如 etc/wireguard）是 root 0700。
+          # buildx 以 runner 身份读取构建上下文，不交还属主会 permission denied；
+          # COPY 进镜像时仍会归 root，不影响最终镜像权限。
+          sudo chown -R "$(id -u):$(id -g)" "dockers/${APP}/initrd"
+
       - name: Init Env
         run: |
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
