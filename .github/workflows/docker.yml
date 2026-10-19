@@ -30,6 +30,25 @@ jobs:
           token: ${{ secrets.AiNas }}
           path: dockers
 
+      - name: Install dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y gettext jq curl unzip cpio xz-utils lz4 lzma bzip2 gzip zstd file
+
+      - name: Prepare rr initrd
+        run: |
+          # 与 rr.yml 的 docker 段一致：buildroot 基础 initrd 覆盖 files/initrd 后，
+          # 解包到 Dockerfile 所在目录（镜像 rootfs 就是 initrd）。
+          . scripts/func.sh "${{ secrets.AiNas }}"
+
+          getBuildroot "files/mnt/p3" "true"
+          convertpo2mo "files/initrd/opt/rr/lang"
+          repackInitrd "files/mnt/p3/initrd-rr" "files/initrd"
+          unpackInitrd "files/mnt/p3/initrd-rr" "dockers/rr/initrd"
+
+          # unpackInitrd 用 sudo cpio 解包，部分目录为 root 0700；buildx 以 runner 身份读 context。
+          sudo chown -R "$(id -u):$(id -g)" "dockers/rr/initrd"
+
       - name: Init Env
         run: |
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
@@ -76,7 +95,8 @@ jobs:
         with:
           context: ./dockers/${{ matrix.app }}
           file: ./dockers/${{ matrix.app }}/Dockerfile
-          platforms: linux/amd64,linux/arm64
+          # rr 的 initrd 是 x86_64，只构建 amd64
+          platforms: linux/amd64
           push: true
           tags: |
             ${{ secrets.DOCKERHUB_USERNAME }}/${{ matrix.app }}:${{ steps.version.outputs.version }}
