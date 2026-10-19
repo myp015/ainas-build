@@ -14,7 +14,7 @@
 #   get* 过滤草稿           → select(.draft==false)，避免残留草稿 release 被 sort 误选为最新
 #
 
-name: Build ainas-rr-origina
+name: Build ainas-rr-original
 
 on:
   workflow_dispatch:
