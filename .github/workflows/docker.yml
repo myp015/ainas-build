@@ -19,11 +19,14 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
+        with:
+          repository: myp015/ainas-rr
+          token: ${{ secrets.AiNas }}
 
       - name: Checkout
         uses: actions/checkout@main
         with:
-          repository: myp015/ainas-rr
+          repository: myp015/dockers
           token: ${{ secrets.AiNas }}
           path: dockers
 
