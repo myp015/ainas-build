@@ -121,6 +121,53 @@ jobs:
           mkdir -p "${ROOT_PATH}/output/modules"
           cp -rf "${ROOT_PATH}/modules/"* "${ROOT_PATH}/output/modules/"
 
+      - name: Kernel symvers
+        # 自编内核的权威导出面 → release job 发布门禁 G1 的口径（Module.symvers 第 3 列
+        # == vmlinux 的行才是内核本体导出；=m 模块提供的符号不算，因为那些模块是我们自己
+        # 的产物、已计入"我们自己的导出面"）。makekernel 已在 Make modules 步内完成，
+        # dsm_linux/Module.symvers 天然存在，此前从未被打包。
+        run: |
+          ROOT_PATH=${{ github.workspace }}
+          VERSION=${{ matrix.version }}
+          PLATFORM=${{ matrix.platform }}
+
+          . ${ROOT_PATH}/ainas-modules/compile-ck.sh
+          KVER="$(getKver "${ROOT_PATH}" "${VERSION}" "${PLATFORM}")"
+
+          SRC="${ROOT_PATH}/dsm_linux/Module.symvers"
+          DST="${ROOT_PATH}/symvers-${PLATFORM}-${VERSION}-${KVER}.txt"
+          test -s "${SRC}"
+          cp -f "${SRC}" "${DST}"
+          echo "[I] ${DST}: $(wc -l < "${DST}") 行"
+
+      - name: ABI probe
+        # A 路 = KSRC（自编内核整树）原生编译条件；B 路 = 同一 KSRC + 本次编译**实际生效**的
+        # -D（由 compile-ck.sh 落盘的 output/.kbuild-flags 读取，单一真相源）。两路 pahole
+        # 差分非空 = 我们的宏注入改变了内核结构体布局 = 模块能加载但运行期崩的那类故障。
+        run: |
+          ROOT_PATH=${{ github.workspace }}
+          VERSION=${{ matrix.version }}
+          PLATFORM=${{ matrix.platform }}
+
+          . ${ROOT_PATH}/ainas-modules/compile-ck.sh
+          KVER="$(getKver "${ROOT_PATH}" "${VERSION}" "${PLATFORM}")"
+
+          bash "${ROOT_PATH}/ainas-modules/scripts/abi-probe/run_probe.sh" \
+            "${ROOT_PATH}" "${VERSION}" "${PLATFORM}" \
+            "${ROOT_PATH}/abi-${PLATFORM}-${VERSION}-${KVER}.txt" \
+            "${ROOT_PATH}/dsm_linux" compile-ck.sh
+
+      - name: Upload kernel symvers
+        uses: actions/upload-artifact@v7
+        with:
+          name: ckssym-${{ matrix.version }}-${{ matrix.platform }}
+          path: symvers-*.txt
+
+      - name: Upload ABI probe
+        uses: actions/upload-artifact@v7
+        with:
+          name: abi-${{ matrix.version }}-${{ matrix.platform }}
+          path: abi-*.txt
 
       - name: Tar to Artifacts
         run: |
@@ -325,6 +372,14 @@ jobs:
           repository: myp015/ainas-cks
           token: ${{ secrets.AiNas }}
           path: ainas-cks
+      - name: Checkout ainas-modules
+        # 发布门禁（gate_release.py）与 ABI 基线（scripts/ref/abi-baseline-cks.json）都在
+        # ainas-modules 仓库里，release job 此前没 checkout 它 → 必须补上，否则门禁脚本不在场。
+        uses: actions/checkout@main
+        with:
+          repository: myp015/ainas-modules
+          token: ${{ secrets.AiNas }}
+          path: ainas-modules
 
       - name: Init Env
         run: |
@@ -346,6 +401,44 @@ jobs:
           path: output
           pattern: ainas-cks-*
           merge-multiple: true
+
+      - name: download kernel symvers
+        uses: actions/download-artifact@v4
+        with:
+          path: symvers
+          pattern: ckssym-*
+          merge-multiple: true
+
+      - name: download ABI dumps
+        uses: actions/download-artifact@v4
+        with:
+          path: abi
+          pattern: abi-*
+          merge-multiple: true
+
+      - name: Release gate
+        # 发布门禁（G1 符号可加载 / G2 depends 闭包 / G3 产物不缩水 / G5 ABI 指纹；G4 走本地）。
+        # 硬阻断不需要额外机制：后续 Extract/push 与 Release 都带 if: success() && env.VERSION != ''，
+        # 本步非零退出即中止发布；且 delete-artifact 也带 if: success() → 失败时所有 artifact
+        # 全保留（取证 + ABI 基线补种都靠它）。
+        # 内核面口径 = --symvers（自编内核 Module.symvers），不再需要官方/第三方白名单：
+        # 整棵内核 + 整套模块都是我们自己的。
+        run: |
+          python3 -I ainas-modules/scripts/gate_release.py \
+            --output output \
+            --name-prefix modules- \
+            --symvers symvers \
+            --prev ainas-cks/release \
+            --abi abi \
+            --abi-baseline ainas-modules/scripts/ref/abi-baseline-cks.json \
+            --report gate_report.txt
+
+      - name: Upload gate report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: cks-gate-report
+          path: gate_report.txt
 
       - name: delete-artifact
         # 仅 download 成功才删（if: success()）：download 失败时保留 artifacts，
