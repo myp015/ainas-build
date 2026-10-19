@@ -36,7 +36,7 @@ jobs:
         with:
           repository: myp015/ainas-addons
           token: ${{ secrets.AiNas }}
-          path: rr-addons
+          path: ainas-addons
 
       - name: Checkout
         uses: actions/checkout@main
@@ -76,7 +76,7 @@ jobs:
           if [ -n "$(ls ${ROOT_PATH}/spksrc/packages/rr-misc_${MAKE_ARCH}_*.spk 2>/dev/null)" ]; then
             mkdir -p ${ROOT_PATH}/spk
             tar -xf ${ROOT_PATH}/spksrc/packages/rr-misc_${MAKE_ARCH}_*.spk -C ${ROOT_PATH}/spk
-            tar -zxf ${ROOT_PATH}/spk/package.tgz -C rr-addons/misc/all/usr
+            tar -zxf ${ROOT_PATH}/spk/package.tgz -C ainas-addons/misc/all/usr
             rm -rf ${ROOT_PATH}/spk
           fi
           echo "######## build rr-misc end ########"
@@ -86,7 +86,7 @@ jobs:
           if [ -n "$(ls ${ROOT_PATH}/spksrc/packages/rr-eudev_${MAKE_ARCH}_*.spk 2>/dev/null)" ]; then
             mkdir -p ${ROOT_PATH}/spk
             tar -xf ${ROOT_PATH}/spksrc/packages/rr-eudev_${MAKE_ARCH}_*.spk -C ${ROOT_PATH}/spk
-            cp -vf ${ROOT_PATH}/spk/package.tgz rr-addons/eudev/all/addons/eudev-$(echo ${MAKE_ARCH} | cut -d- -f2).tgz
+            cp -vf ${ROOT_PATH}/spk/package.tgz ainas-addons/eudev/all/addons/eudev-$(echo ${MAKE_ARCH} | cut -d- -f2).tgz
             rm -rf ${ROOT_PATH}/spk
           fi
           echo "######## build rr-eudev end ########"
@@ -96,7 +96,7 @@ jobs:
           if [ -n "$(ls ${ROOT_PATH}/spksrc/packages/rr-acpid_${MAKE_ARCH}_*.spk 2>/dev/null)" ]; then
             mkdir -p ${ROOT_PATH}/spk
             tar -xf ${ROOT_PATH}/spksrc/packages/rr-acpid_${MAKE_ARCH}_*.spk -C ${ROOT_PATH}/spk
-            cp -vf ${ROOT_PATH}/spk/package.tgz rr-addons/acpid/all/addons/acpid-$(echo ${MAKE_ARCH} | cut -d- -f2).tgz
+            cp -vf ${ROOT_PATH}/spk/package.tgz ainas-addons/acpid/all/addons/acpid-$(echo ${MAKE_ARCH} | cut -d- -f2).tgz
             rm -rf ${ROOT_PATH}/spk
           fi
           echo "######## build rr-acpid end ########"
@@ -106,7 +106,7 @@ jobs:
           if [ -n "$(ls ${ROOT_PATH}/spksrc/packages/rr-sensors_${MAKE_ARCH}_*.spk 2>/dev/null)" ]; then
             mkdir -p ${ROOT_PATH}/spk
             tar -xf ${ROOT_PATH}/spksrc/packages/rr-sensors_${MAKE_ARCH}_*.spk -C ${ROOT_PATH}/spk
-            cp -vf ${ROOT_PATH}/spk/package.tgz rr-addons/sensors/all/addons/sensors-$(echo ${MAKE_ARCH} | cut -d- -f2).tgz
+            cp -vf ${ROOT_PATH}/spk/package.tgz ainas-addons/sensors/all/addons/sensors-$(echo ${MAKE_ARCH} | cut -d- -f2).tgz
             rm -rf ${ROOT_PATH}/spk
           fi
           echo "######## build rr-sensors end ########"
@@ -116,7 +116,7 @@ jobs:
           if [ -n "$(ls ${ROOT_PATH}/spksrc/packages/rr-console_${MAKE_ARCH}_*.spk 2>/dev/null)" ]; then
             mkdir -p ${ROOT_PATH}/spk
             tar -xf ${ROOT_PATH}/spksrc/packages/rr-console_${MAKE_ARCH}_*.spk -C ${ROOT_PATH}/spk
-            cp -vf ${ROOT_PATH}/spk/package.tgz rr-addons/console/all/addons/console-$(echo ${MAKE_ARCH} | cut -d- -f2).tgz
+            cp -vf ${ROOT_PATH}/spk/package.tgz ainas-addons/console/all/addons/console-$(echo ${MAKE_ARCH} | cut -d- -f2).tgz
             rm -rf ${ROOT_PATH}/spk
           fi
           echo "######## build rr-console end ########"
@@ -126,7 +126,7 @@ jobs:
           if [ -n "$(ls ${ROOT_PATH}/spksrc/packages/rr-vmtools_${MAKE_ARCH}_*.spk 2>/dev/null)" ]; then
             mkdir -p ${ROOT_PATH}/spk
             tar -xf ${ROOT_PATH}/spksrc/packages/rr-vmtools_${MAKE_ARCH}_*.spk -C ${ROOT_PATH}/spk
-            cp -vf ${ROOT_PATH}/spk/package.tgz rr-addons/vmtools/all/addons/vmtools-$(echo ${MAKE_ARCH} | cut -d- -f2).tgz
+            cp -vf ${ROOT_PATH}/spk/package.tgz ainas-addons/vmtools/all/addons/vmtools-$(echo ${MAKE_ARCH} | cut -d- -f2).tgz
             rm -rf ${ROOT_PATH}/spk
           fi
           echo "######## build rr-vmtools end ########"
@@ -136,7 +136,7 @@ jobs:
           if [ -n "$(ls ${ROOT_PATH}/spksrc/packages/rr-wireless_${MAKE_ARCH}_*.spk 2>/dev/null)" ]; then
             mkdir -p ${ROOT_PATH}/spk
             tar -xf ${ROOT_PATH}/spksrc/packages/rr-wireless_${MAKE_ARCH}_*.spk -C ${ROOT_PATH}/spk
-            cp -vf ${ROOT_PATH}/spk/package.tgz rr-addons/wireless/all/addons/wireless-$(echo ${MAKE_ARCH} | cut -d- -f2).tgz
+            cp -vf ${ROOT_PATH}/spk/package.tgz ainas-addons/wireless/all/addons/wireless-$(echo ${MAKE_ARCH} | cut -d- -f2).tgz
             rm -rf ${ROOT_PATH}/spk
           fi
           echo "######## build rr-wireless end ########"
@@ -146,7 +146,7 @@ jobs:
           if [ -n "$(ls ${ROOT_PATH}/spksrc/packages/rr-mountloader_${MAKE_ARCH}_*.spk 2>/dev/null)" ]; then
             mkdir -p ${ROOT_PATH}/spk
             tar -xf ${ROOT_PATH}/spksrc/packages/rr-mountloader_${MAKE_ARCH}_*.spk -C ${ROOT_PATH}/spk
-            cp -vf ${ROOT_PATH}/spk/package.tgz rr-addons/mountloader/all/addons/mountloader-$(echo ${MAKE_ARCH} | cut -d- -f2).tgz
+            cp -vf ${ROOT_PATH}/spk/package.tgz ainas-addons/mountloader/all/addons/mountloader-$(echo ${MAKE_ARCH} | cut -d- -f2).tgz
             rm -rf ${ROOT_PATH}/spk
           fi
           echo "######## build rr-mountloader end ########"
@@ -156,7 +156,7 @@ jobs:
           if [ -n "$(ls ${ROOT_PATH}/spksrc/packages/rr-monitor_${MAKE_ARCH}_*.spk 2>/dev/null)" ]; then
             mkdir -p ${ROOT_PATH}/spk
             tar -xf ${ROOT_PATH}/spksrc/packages/rr-monitor_${MAKE_ARCH}_*.spk -C ${ROOT_PATH}/spk
-            cp -vf ${ROOT_PATH}/spk/package.tgz rr-addons/monitor/all/addons/monitor-$(echo ${MAKE_ARCH} | cut -d- -f2).tgz
+            cp -vf ${ROOT_PATH}/spk/package.tgz ainas-addons/monitor/all/addons/monitor-$(echo ${MAKE_ARCH} | cut -d- -f2).tgz
             rm -rf ${ROOT_PATH}/spk
           fi
           echo "######## build rr-monitor end ########"
@@ -166,28 +166,28 @@ jobs:
           echo "######## build powersched begin ########"
           docker run -v ${ROOT_PATH}/spksrc:/spksrc -w /spksrc/cross/powersched ghcr.io/synocommunity/spksrc make "arch-${MAKE_ARCH}"
           if [ -f "${ROOT_PATH}/spksrc/cross/powersched/work-${MAKE_ARCH}/install/usr/local/powersched/sbin/powersched" ]; then
-            cp -vpf "${ROOT_PATH}/spksrc/cross/powersched/work-${MAKE_ARCH}/install/usr/local/powersched/sbin/powersched" rr-addons/powersched/all/usr/sbin
+            cp -vpf "${ROOT_PATH}/spksrc/cross/powersched/work-${MAKE_ARCH}/install/usr/local/powersched/sbin/powersched" ainas-addons/powersched/all/usr/sbin
           fi
           echo "######## build powersched end ########"
 
           echo "######## build synoscgiproxy begin ########"
           docker run -v ${ROOT_PATH}/spksrc:/spksrc -w /spksrc/cross/synoscgiproxy ghcr.io/synocommunity/spksrc make "arch-${MAKE_ARCH}"
           if [ -f "${ROOT_PATH}/spksrc/cross/synoscgiproxy/work-${MAKE_ARCH}/install/usr/local/synoscgiproxy/sbin/synoscgiproxy" ]; then
-            cp -vpf "${ROOT_PATH}/spksrc/cross/synoscgiproxy/work-${MAKE_ARCH}/install/usr/local/synoscgiproxy/sbin/synoscgiproxy" rr-addons/cpuinfo/all/usr/sbin
+            cp -vpf "${ROOT_PATH}/spksrc/cross/synoscgiproxy/work-${MAKE_ARCH}/install/usr/local/synoscgiproxy/sbin/synoscgiproxy" ainas-addons/cpuinfo/all/usr/sbin
           fi
           echo "######## build synoscgiproxy end ########"
 
           echo "######## build openssh begin ########"
           docker run -v ${ROOT_PATH}/spksrc:/spksrc -w /spksrc/cross/openssh ghcr.io/synocommunity/spksrc make "arch-${MAKE_ARCH}"
           if [ -f "${ROOT_PATH}/spksrc/cross/openssh/work-${MAKE_ARCH}/install/usr/local/openssh/libexec/sftp-server" ]; then
-            cp -vpf "${ROOT_PATH}/spksrc/cross/openssh/work-${MAKE_ARCH}/install/usr/local/openssh/libexec/sftp-server" rr-addons/setrootpw/all/usr/lib/openssh/sftp-server
+            cp -vpf "${ROOT_PATH}/spksrc/cross/openssh/work-${MAKE_ARCH}/install/usr/local/openssh/libexec/sftp-server" ainas-addons/setrootpw/all/usr/lib/openssh/sftp-server
           fi
           echo "######## build openssh end ########"
 
           echo "######## build grub begin ########"
           docker run -v ${ROOT_PATH}/spksrc:/spksrc -w /spksrc/cross/grub ghcr.io/synocommunity/spksrc make "arch-${MAKE_ARCH}"
           if [ -f "${ROOT_PATH}/spksrc/cross/grub/work-${MAKE_ARCH}/install/usr/local/grub/bin/grub-editenv" ]; then
-            cp -vpf "${ROOT_PATH}/spksrc/cross/grub/work-${MAKE_ARCH}/install/usr/local/grub/bin/grub-editenv" rr-addons/reboottoloader/all/usr/bin/grub-editenv
+            cp -vpf "${ROOT_PATH}/spksrc/cross/grub/work-${MAKE_ARCH}/install/usr/local/grub/bin/grub-editenv" ainas-addons/reboottoloader/all/usr/bin/grub-editenv
           fi
           echo "######## build grub end ########"
 
@@ -203,7 +203,7 @@ jobs:
       - name: Check and Push
         if: success() && inputs.push == true
         run: |
-          cd rr-addons
+          cd ainas-addons
           echo "Git push ..."
           git pull
           status=$(git status -s | grep -E 'all/' | awk '{printf " %s", $2}')

@@ -37,7 +37,7 @@ jobs:
         with:
           repository: myp015/ainas-addons
           token: ${{ secrets.AiNas }}
-          path: rr-addons
+          path: ainas-addons
 
       - name: Init Env
         run: |
@@ -56,7 +56,7 @@ jobs:
           VERSION="${{ env.VERSION }}"
           VERSION="${VERSION:-"test"}"
 
-          cd rr-addons
+          cd ainas-addons
           sed -i "s/version:.*$/version: ${VERSION}/g" */manifest.yml
           . ./compile.sh
 
