@@ -11,7 +11,8 @@
 #   GH_TOKEN    访问 api.github.com 的凭据（调用方从 secrets.AiNas 传入）
 #   GITHUB_ENV  GitHub Actions 注入的变量文件，VERSION 追加于此
 #
-# 规则:
+# 规则（与 rr-build 的 rr.yml 一致）:
+#   0. requested_version 为空 → VERSION 为空，调用方据此跳过 git push / Docker push / Release
 #   1. requested_version 非空、且前两段等于当前年月（%y.%-m）→ 直接采用
 #   2. 否则查 <repo> 的 releases[0].tag_name：
 #        - 同月且 3 段 → 第 3 段 +1
@@ -63,7 +64,10 @@ bump() { echo "${1}" | awk -F '.' '{$3=$3+1}1' OFS='.'; }
 
 MONTH="$(date +'%y.%-m')"
 
-if [ -n "${REQUESTED}" ] && [ "$(echo "${REQUESTED}" | cut -d '.' -f 1,2)" = "${MONTH}" ]; then
+if [ -z "${REQUESTED}" ]; then
+  # 与 rr.yml 一致：未指定版本 → 空版本号，不 push、不建 Release
+  VERSION=""
+elif [ "$(echo "${REQUESTED}" | cut -d '.' -f 1,2)" = "${MONTH}" ]; then
   VERSION="${REQUESTED}"
 else
   # 自动：查最新 tag，同月则第 3 段 +1，跨月则 .0
@@ -79,14 +83,16 @@ else
   fi
 fi
 
-# 防残留 tag 冲突
-for _ in $(seq 1 20); do
-  if tag_exists "${VERSION}"; then
-    VERSION="$(bump "${VERSION}")"
-  else
-    break
-  fi
-done
+# 防残留 tag 冲突（空版本号不查 tag）
+if [ -n "${VERSION}" ]; then
+  for _ in $(seq 1 20); do
+    if tag_exists "${VERSION}"; then
+      VERSION="$(bump "${VERSION}")"
+    else
+      break
+    fi
+  done
+fi
 
 # stdout 输出纯版本号：GITHUB_ENV 只对后续步骤生效，同一步骤内要立刻用到
 # （如 ainas-rr.yml 改 consts.sh）的调用方需用 $(...) 捕获此处输出。

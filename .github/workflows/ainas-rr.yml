@@ -78,9 +78,8 @@ jobs:
           GH_TOKEN: ${{ secrets.AiNas }}
         run: |
           # 按月低增版本号（26.10.0 / 26.10.1 ...），同月重复发布第 3 段 +1
-          # 显式传入 version 且格式匹配当前年月时，以传入为准；否则自动计算
-          # （对齐 cks.yml：原逻辑空输入时 VERSION 保持空 → 不发布 GitHub Release；
-          # 修复后空输入也走自动计算并发布）
+          # 显式传入 version 且格式匹配当前年月时，以传入为准；否则按最新 Release 低增。
+          # 与 rr.yml 一致：空输入 → VERSION 为空，不写回仓库、不建 Release，产物用 TAGDATE 命名。
           TAGDATE="$(date +'%Y%m%d%H%M')"
 
           # calc_version.sh 的 stdout 即版本号；本步骤内要立刻用它改 consts.sh，
@@ -93,10 +92,11 @@ jobs:
           cd rr
           [ "${{ inputs.prerelease }}" = "true" ] && RELEASE="pre" || RELEASE=""
           sed -i "s/^RR_RELEASE=.*$/RR_RELEASE=\"${RELEASE}\"/" files/initrd/opt/rr/include/consts.sh
-          echo "${VERSION}" >VERSION
-          echo "${VERSION}" >files/mnt/p1/RR_VERSION
-          sed -i "s/^RR_VERSION=.*$/RR_VERSION=\"${VERSION}\"/" files/initrd/opt/rr/include/consts.sh
           if [ -n "${VERSION}" ]; then
+            echo "${VERSION}" >VERSION
+            echo "${VERSION}" >files/mnt/p1/RR_VERSION
+            sed -i "s/^RR_VERSION=.*$/RR_VERSION=\"${VERSION}\"/" files/initrd/opt/rr/include/consts.sh
+
             git checkout main
             git pull
             status=$(git status -s | awk '{printf " %s", $2}')
@@ -105,6 +105,10 @@ jobs:
               git commit -m "update $(date +%Y-%m-%d" "%H:%M:%S)"
               git push -f
             fi
+          else
+            echo "${TAGDATE}" >VERSION
+            echo "${TAGDATE}" >files/mnt/p1/RR_VERSION
+            sed -i "s/^RR_VERSION=.*$/RR_VERSION=\"${TAGDATE}\"/" files/initrd/opt/rr/include/consts.sh
           fi
           cd -
 

@@ -72,6 +72,7 @@ jobs:
         run: |
           # Calculate version
           version=""
+          # 与 rr.yml 一致：空输入 → 版本号为空，后续不构建、不推送
           if [ -n "${{ inputs.version }}" ]; then
             if [ "$(echo ${{ inputs.version }} | cut -d '.' -f 1,2)" = "$(date +'%y.%-m')" ]; then
               version="${{ inputs.version }}"
@@ -83,14 +84,13 @@ jobs:
                 version="$(date +'%y.%-m').0"
               fi
             fi
-          else
-            version="$(date +'%Y%m%d%H%M')"
           fi
 
           echo "version: ${version}"
           echo "version=${version}" >> $GITHUB_OUTPUT
 
       - name: Build and push Docker image
+        if: steps.version.outputs.version != ''
         uses: docker/build-push-action@v7
         with:
           context: ./dockers/${{ matrix.app }}
