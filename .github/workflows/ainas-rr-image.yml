@@ -1,0 +1,501 @@
+#
+# Copyright (C) 2022 Ing <https://github.com/wjz304>
+#
+# This is free software, licensed under the MIT License.
+# See /LICENSE for more information.
+#
+
+# 本工作流是 rr.yml 的独立副本，唯一差异：
+#   RR 镜像来源 RROrg/rr → myp015/ainas-rr（自建的 ainas-rr Release）
+#   Release tag  rr-<版本> → ainas-rr-<版本>（与 rr.yml 的 rr-<版本> 区分）
+# 其余步骤、输入、产物命名与 rr.yml 完全一致。
+name: Build ainas-rr Image
+on:
+  workflow_dispatch:
+    inputs:
+      all_models:
+        description: "编译模式"
+        type: choice
+        options:
+          - 自选
+          - 全选
+        default: 全选
+      model_ds918p:
+        description: "DS918+"
+        type: boolean
+        default: false
+      model_ds920p:
+        description: "DS920+"
+        type: boolean
+        default: false
+      model_ds923p:
+        description: "DS923+"
+        type: boolean
+        default: false
+      model_ds925p:
+        description: "DS925+"
+        type: boolean
+        default: false
+      model_ds3622xsp:
+        description: "DS3622xs+"
+        type: boolean
+        default: false
+      model_sa6400:
+        description: "SA6400"
+        type: boolean
+        default: false
+      model_ds425p:
+        description: "DS425+"
+        type: boolean
+        default: false
+      model_dva3221:
+        description: "DVA3221"
+        type: boolean
+        default: false
+      model_dva1622:
+        description: "DVA1622"
+        type: boolean
+        default: false
+      custom_models:
+        description: "自定义型号(工作流未列出的,多个用逗号分隔,如 DS1621+,RS4021xs+)"
+        type: string
+        default: ""      
+      build_update_zip:
+        description: "编译升级包（updateall-*.zip）默认开启，可取消"
+        type: boolean
+        default: true
+      build_rr_original:
+        description: "生成原版 RR 镜像（rr-版本号.img.zip，跳过 Docker 编译）默认开启，可取消"
+        type: boolean
+        default: true
+      rr_version:
+        description: "RR version (可选,留空=latest;示例:26.4.0 或 v26.4.0)"
+        type: string
+        default: ""
+      dsm_version:
+        description: "DSM 版本编号（从 pats.xlsx 获取，选择 >= 7.2.1 的所有版本）"
+        type: choice
+        options:
+          - "7.2.1"
+          - "7.2.2"
+          - "7.3.0"
+          - "7.3.1"
+          - "7.3.2"
+          - "7.4.1"
+        default: "7.2.1"
+
+jobs:
+  resolve-release:
+    runs-on: ubuntu-latest
+    outputs:
+      rr_tag: ${{ steps.pick.outputs.rr_tag }}
+      rr_asset_url: ${{ steps.pick.outputs.rr_asset_url }}
+    steps:
+      - id: pick
+        shell: bash
+        run: |
+          set -euo pipefail
+          REQ_RAW="${{ inputs.rr_version }}"
+          REQ_TAG="$(printf '%s' "$REQ_RAW" | tr -d '[:space:]')"
+          REQ_TAG="${REQ_TAG#rr-}"
+          REQ_TAG="${REQ_TAG%.img.zip}"
+          REQ_TAG="${REQ_TAG#v}"
+
+          # 必须带凭据：runner 是共享出口 IP，匿名调用只有 60 次/小时，实测撞过 403
+          fetch_latest() {
+            curl -fsSL --connect-timeout 10 -H "Authorization: Bearer ${{ secrets.AiNas }}" "https://api.github.com/repos/myp015/ainas-rr/releases/latest"
+          }
+          fetch_tag() {
+            local t="$1"
+            curl -fsSL --connect-timeout 10 -H "Authorization: Bearer ${{ secrets.AiNas }}" "https://api.github.com/repos/myp015/ainas-rr/releases/tags/${t}"
+          }
+
+          if [ -z "$REQ_TAG" ] || [ "$REQ_TAG" = "latest" ]; then
+            echo "[INFO] 未填写 rr_version，自动使用 latest"
+            RELEASE_JSON="$(fetch_latest)"
+          else
+            if ! RELEASE_JSON="$(fetch_tag "$REQ_TAG" 2>/dev/null)"; then
+              echo "[INFO] 指定版本 rr_version=${REQ_RAW} 未找到，回退到最新版本"
+              RELEASE_JSON="$(fetch_latest)"
+            fi
+          fi
+
+          RR_TAG="$(printf '%s' "$RELEASE_JSON" | jq -r '.tag_name' | sed 's/^v//')"
+          RR_ASSET_URL="$(printf '%s' "$RELEASE_JSON" | jq -r '.assets[]? | select(.name | test("^rr-.*[.]img[.]zip$")) | .browser_download_url' | head -n1)"
+          if [ -z "$RR_TAG" ] || [ "$RR_TAG" = "null" ] || [ -z "$RR_ASSET_URL" ] || [ "$RR_ASSET_URL" = "null" ]; then
+            echo "[E] 下载失败：无法解析 RR 发布信息 (rr_version=${REQ_RAW:-latest})"
+            exit 1
+          fi
+
+          echo "[INFO] 已解析 RR 版本：${RR_TAG}"
+          echo "rr_tag=$RR_TAG" >> "$GITHUB_OUTPUT"
+          echo "rr_asset_url=$RR_ASSET_URL" >> "$GITHUB_OUTPUT"
+
+  select-models:
+    runs-on: ubuntu-latest
+    outputs:
+      models: ${{ steps.pick.outputs.models }}
+    steps:
+      - id: pick
+        shell: bash
+        run: |
+          set -euo pipefail
+          MODELS=()
+
+          if [ "${{ inputs.all_models }}" = "全选" ]; then
+            echo "[INFO] 已开启全选，将编译所有支持的型号"
+            MODELS+=("DS918+" "DS920+" "DS923+" "DS925+" "DS3622xs+" "SA6400" "DS425+" "DVA3221" "DVA1622")
+          else
+            [ "${{ inputs.model_ds918p }}"    = "true" ] && MODELS+=("DS918+")
+            [ "${{ inputs.model_ds920p }}"    = "true" ] && MODELS+=("DS920+")
+            [ "${{ inputs.model_ds923p }}"    = "true" ] && MODELS+=("DS923+")
+            [ "${{ inputs.model_ds925p }}"    = "true" ] && MODELS+=("DS925+")
+            [ "${{ inputs.model_ds3622xsp }}" = "true" ] && MODELS+=("DS3622xs+")
+            [ "${{ inputs.model_sa6400 }}"    = "true" ] && MODELS+=("SA6400")
+            [ "${{ inputs.model_ds425p }}"    = "true" ] && MODELS+=("DS425+")
+            [ "${{ inputs.model_dva3221 }}"   = "true" ] && MODELS+=("DVA3221")
+            [ "${{ inputs.model_dva1622 }}"   = "true" ] && MODELS+=("DVA1622")
+          fi
+          
+          # 追加自定义型号（工作流未列出的型号）
+          CUSTOM_RAW="${{ inputs.custom_models }}"
+          if [ -n "$(printf '%s' "$CUSTOM_RAW" | tr -d '[:space:]')" ]; then
+            echo "[INFO] 检测到自定义型号输入: ${CUSTOM_RAW}"
+            IFS=',' read -ra CUSTOM_ARR <<< "$CUSTOM_RAW"
+            for cm in "${CUSTOM_ARR[@]}"; do
+              cm="$(echo "$cm" | xargs)"
+              [ -n "$cm" ] && MODELS+=("$cm")
+            done
+          fi
+          
+          
+          # 去重
+          UNIQ_MODELS=()
+          for MODEL_ITEM in "${MODELS[@]}"; do
+            SKIP=0
+            for SEEN_ITEM in "${UNIQ_MODELS[@]}"; do
+              [ "$SEEN_ITEM" = "$MODEL_ITEM" ] && { SKIP=1; break; }
+            done
+            [ $SKIP -eq 0 ] && UNIQ_MODELS+=("$MODEL_ITEM")
+          done
+          MODELS=("${UNIQ_MODELS[@]}")
+
+          if [ ${#MODELS[@]} -eq 0 ] && [ "${{ inputs.build_update_zip }}" != "true" ]; then
+            echo "[E] 请至少勾选一个型号，或勾选 update 包编译"
+            exit 1
+          fi
+
+          # update 包作为独立任务（不分 dt/nodt）
+          if [ "${{ inputs.build_update_zip }}" = "true" ]; then
+            MODELS+=("__UPDATE__")
+          fi
+          # 原版 RR 镜像作为独立任务（跳过 Docker 编译）
+          if [ "${{ inputs.build_rr_original }}" = "true" ]; then
+            MODELS+=("__RR_ORIGINAL__")
+          fi
+
+          echo "[INFO] 已选择任务: ${MODELS[*]}"
+          MODELS_JSON=$(printf "%s\n" "${MODELS[@]}" | python3 -c "import sys,json; print(json.dumps([l.strip() for l in sys.stdin if l.strip()]))")
+          echo "models=$MODELS_JSON" >> "$GITHUB_OUTPUT"
+
+  # 单独串行创建并确认 Release，避免原版/update matrix 任务同时创建/查询同一标签。
+  ensure-release:
+    needs: resolve-release
+    runs-on: ubuntu-latest
+    steps:
+      - name: 创建或确认 RR Release
+        shell: bash
+        env:
+          ACTION_TOKEN: ${{ secrets.AiNas }}
+          RR_TAG: ${{ needs.resolve-release.outputs.rr_tag }}
+        run: |
+          set -euo pipefail
+          : "${ACTION_TOKEN:?缺少 ACTION_TOKEN}"
+          : "${RR_TAG:?缺少 RR_TAG}"
+          export GH_TOKEN="$ACTION_TOKEN"
+          export GH_REPO="myp015/ainas-2in1"
+          RELEASE_TAG="ainas-rr-${RR_TAG}"
+          # 单个 job 仍可能遇到 GitHub 短暂 429/503；串行重试创建/查询，避免 matrix 一开始被阻断。
+          for attempt in $(seq 1 12); do
+            if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+              echo "[INFO] Release 已确认可见: $RELEASE_TAG"
+              exit 0
+            fi
+            echo "[INFO] 创建或确认 Release: $RELEASE_TAG (${attempt}/12)"
+            set +e
+            create_out=$(gh release create "$RELEASE_TAG" \
+              --title "$RELEASE_TAG" \
+              --notes "RR build artifacts for ${RR_TAG}" \
+              --latest=false 2>&1)
+            create_rc=$?
+            set -e
+            if [ "$create_rc" -eq 0 ]; then
+              echo "[INFO] Release 创建成功，等待 API 可见"
+            else
+              echo "$create_out"
+              if ! echo "$create_out" | grep -qiE 'already exists|already_exists|Validation Failed|HTTP 429|HTTP 502|HTTP 503|HTTP 504|rate limit|secondary rate'; then
+                exit "$create_rc"
+              fi
+            fi
+            sleep $((attempt * 5))
+          done
+          echo "[E] Release ${RELEASE_TAG} 创建/查询连续失败" >&2
+          exit 1
+
+  build:
+    name: ${{ matrix.model == '__UPDATE__' && 'build (update)' || (matrix.model == '__RR_ORIGINAL__' && 'build (rr-original)' || format('build ({0})', matrix.model)) }}
+    needs: [resolve-release, select-models, ensure-release]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      # max-parallel: 3
+      matrix:
+        model: ${{ fromJson(needs.select-models.outputs.models) }}
+    env:
+      IMAGE_FORMAT: img
+      LANGUAGE: zh_CN
+      KERNEL: official
+      ADDONS: acpid,reboottoloader,addincards,cpuinfo,expands,diskcompat,lsiutil,nvmevolume,powersched,remotefs,storagepanel,smartctl,trivial,apppatch,vmtools
+      ACTION_TOKEN: ${{ secrets.AiNas }}
+      RR_ASSET_URL: ${{ needs.resolve-release.outputs.rr_asset_url }}
+      RR_TAG: ${{ needs.resolve-release.outputs.rr_tag }}
+      # ainas-rr 的版本号（YY.M.N）与上游 RR 的 Docker 镜像 tag 不是同一套，
+      # wjz304/rr 上并不存在 26.10.x；构建工具链固定用 latest。
+      RR_DOCKER_TAG: latest
+      MODEL: ${{ matrix.model }}
+      LINE: ${{ inputs.dsm_version }}
+    steps:
+      - name: Checkout main repo
+        uses: actions/checkout@main
+
+      - name: 初始化环境
+        run: |
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git config --global user.name "github-actions[bot]"
+          sudo timedatectl set-timezone "Asia/Shanghai"
+
+      - name: Checkout ainas-2in1
+        uses: actions/checkout@v4
+        with:
+          repository: myp015/ainas-2in1
+          token: ${{ secrets.AiNas }}
+          path: .2in1
+
+      - name: 下载 RR 镜像资源
+        shell: bash
+        run: |
+          set -euo pipefail
+          : "${RR_TAG:?缺少 RR_TAG}"
+          : "${RR_ASSET_URL:?缺少 RR_ASSET_URL}"
+          RR_FILENAME="rr-${RR_TAG}.img.zip"
+          echo "[INFO] 正在下载 RR 镜像资源：${RR_FILENAME}"
+          curl -fsSL --connect-timeout 10 "$RR_ASSET_URL" -o "$RR_FILENAME"
+          # RR_TAG 已由 job env 提供，无需再写 GITHUB_ENV
+          echo "RR_FILENAME=$RR_FILENAME" >> "$GITHUB_ENV"
+
+      - name: 编译镜像
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # ── 系统依赖（UPDATE 与主流程互斥，只装一次）──────────────
+          echo "[INFO] 正在安装构建依赖"
+          sudo apt-get update
+          sudo apt-get install -y gettext cpio zstd dosfstools rsync qemu-utils
+
+          # ── UPDATE 独立任务：应用 initrd patch 后打包 updateall ──
+          if [ "${MODEL}" = "__UPDATE__" ]; then
+            WORKDIR="$PWD"
+            AINAS2IN1_DIR="${WORKDIR}/.2in1"
+            PART3_PATH="/mnt/p3"
+            : "${RR_FILENAME:?缺少 RR_FILENAME}"
+            echo "[INFO] UPDATE 任务：解压 RR 镜像，应用 initrd patch，再打包 updateall"
+            unzip "$RR_FILENAME" -d rr rr.img
+
+            # 挂载 p3，修补 initrd（menu.sh 订单验证 patch 等）
+            . "$AINAS2IN1_DIR/script/2in1func.sh"
+            DISK_LOOP=$(sudo losetup -f)
+            sudo losetup -P "$DISK_LOOP" rr/rr.img
+            sudo mkdir -p "$PART3_PATH"
+            sudo mount "${DISK_LOOP}p3" "$PART3_PATH"
+
+            # ── grub.cfg 修补（update 场景 model 空 → Boot DSM）──
+            echo "[INFO] 修补 grub.cfg（update 场景 model=Boot DSM）"
+            sudo mkdir -p /mnt/p1
+            sudo mount -o rw "${DISK_LOOP}p1" /mnt/p1
+            sudo env MODEL_ENV="" python3 "$AINAS2IN1_DIR/script/patch-grub-cfg.py" /mnt/p1/boot/grub/grub.cfg
+            sudo umount /mnt/p1
+
+            # ── cpuinfo 插件修补 ──────────────────────────────
+            patch_cpuinfo "${PART3_PATH}/addons" "patch-cpuinfo.py"
+
+            # ── initrd 修补与重打包 ───────────────────────────
+            patch_ram "$PART3_PATH" rr "$WORKDIR"
+            sudo umount "$PART3_PATH"
+            sudo losetup --detach "$DISK_LOOP"
+
+            echo "[INFO] 打包 updateall-<版本号>.zip（RR 版，不分 dt/nodt）"
+            bash "$AINAS2IN1_DIR/script/2in1_build_update.sh" rr/rr.img "$GITHUB_WORKSPACE" "" "rr"
+            UPDATE_ZIP="$(ls -1 updateall-*.zip 2>/dev/null | head -n1)"
+            echo "UPDATE_ZIP=$UPDATE_ZIP" >> "$GITHUB_ENV"
+
+            # 无需上传镜像，直接结束
+            exit 0
+          fi
+
+          # ── 目录与常量 ────────────────────────────────────────────
+          WORKDIR="$PWD"
+          AINAS2IN1_DIR="${WORKDIR}/.2in1"
+          PART1_PATH="/mnt/p1"
+          PART3_PATH="/mnt/p3"
+
+          # 流程函数库（patch_* / docker_* / repack_*）
+          . "$AINAS2IN1_DIR/script/2in1func.sh"
+
+          # DSM 版本映射由上面 source 的 2in1func.sh 提供（pick_dsm_version）
+
+          LINE_REQ="${LINE:-7.2.1}"
+          if echo "${MODEL}" | grep -Eq '^(DS925\+|DS425\+)$' && [ "${LINE_REQ}" = "7.2.1" ]; then
+            echo "[INFO] ${MODEL} 不支持 DSM 7.2.1，自动切换到 7.2.2"
+            LINE_REQ="7.2.2"
+          fi
+
+          VERSION="$(pick_dsm_version "${LINE_REQ}")"
+          VER_MAIN="${VERSION%%-*}"
+          VER_MAIN_NODOT="${VER_MAIN//./}"
+          VER_BUILD="${VERSION#*-}"
+          VER_BUILD="${VER_BUILD%%-*}"
+          VER_SLUG="${VER_MAIN_NODOT}_${VER_BUILD}"
+          if [ "${MODEL}" = "__RR_ORIGINAL__" ]; then
+            ARTIFACT_NAME="rr-${RR_TAG}"
+            echo "[INFO] 原版 RR 镜像任务：ARTIFACT_NAME=${ARTIFACT_NAME}"
+          else
+            ARTIFACT_NAME="${MODEL}_${VER_SLUG}_rr"
+          fi
+          echo "[INFO] 型号=${MODEL} 目标DSM版本=${VERSION} DSM系列=${LINE_REQ} 版本slug=${VER_SLUG}"
+
+          unzip "$RR_FILENAME" -d rr rr.img
+
+          # ── GRUB 修补 ─────────────────────────────────────────────
+          # RR 原版镜像任务无型号，MODEL_ENV 置空 → patch 脚本默认 model=Boot DSM
+          # 官方 p1 没有 .locale，gettext 会回退原始 msgid；显式设为中文，
+          # 确保 zh_CN/rr.mo 中的 AiNas 文案生效；后续可在菜单切换其他语言。
+          if [ "${MODEL}" = "__RR_ORIGINAL__" ]; then
+            GRUB_MODEL_ENV=""
+            GRUB_LOCALE="zh_CN.UTF-8"
+          else
+            GRUB_MODEL_ENV="$MODEL"
+            GRUB_LOCALE=""
+          fi
+          patch_part1 rr/rr.img "$PART1_PATH" rr "$GRUB_MODEL_ENV" "$GRUB_LOCALE"
+
+          # ── 挂载 p3 分区 ──────────────────────────────────────────
+          DISK_LOOP=$(sudo losetup -f)
+          sudo losetup -P "$DISK_LOOP" rr/rr.img
+          sudo rm -rf "$PART3_PATH"
+          sudo mkdir -p "$PART3_PATH"
+          sudo mount "${DISK_LOOP}p3" "$PART3_PATH"
+
+          # ── cpuinfo 修补 ──────────────────────────────────────────
+          patch_cpuinfo "${PART3_PATH}/addons" "patch-cpuinfo.py"
+
+          # ── initrd 修补与重打包 ───────────────────────────────────
+          patch_ram "$PART3_PATH" rr "$WORKDIR" verify
+
+          sudo umount "$PART3_PATH"
+          sudo rm -rf "$PART3_PATH"
+
+          # RR 原版镜像任务：释放 loop
+          if [ "${MODEL}" = "__RR_ORIGINAL__" ]; then
+            sudo losetup --detach "$DISK_LOOP"
+          fi
+          
+          # ── RR 原版镜像任务：跳过 Docker 编译 ──────────────
+          if [ "${MODEL}" != "__RR_ORIGINAL__" ]; then
+          # ── 使用 RR Docker 编译镜像 ───────────────────────────────
+          docker_build rr "$MODEL" "$VERSION" "$LANGUAGE" "$ADDONS" "$RR_DOCKER_TAG" \
+            "$WORKDIR"
+
+          # ── 清理 p3 临时文件 ──────────────────────────────────────
+          sudo mkdir -p "$PART3_PATH"
+          sudo mount "${DISK_LOOP}p3" "$PART3_PATH"
+          sudo rm -rf "$PART3_PATH/dl" "$PART3_PATH/auxfiles" "$PART3_PATH/logs"
+          sudo umount "$PART3_PATH"
+          sudo losetup --detach "$DISK_LOOP"
+          rm -f "$WORKDIR/2in1func.sh"
+
+          fi
+
+          # ── 提取 user-config.yml + 选择引导镜像 + Repack 镜像 ─────
+          # 镜像大小固定 2.5GB（原 image_size 选项已移除），写法对齐 ova.yml
+          if [ "${MODEL}" = "__RR_ORIGINAL__" ]; then
+            repack_rr rr/rr.img "$RR_TAG" "$WORKDIR" "2.5GB" keep
+          else
+            repack_rr rr/rr.img "$RR_TAG" "$WORKDIR" "2.5GB"
+          fi
+
+          # ── 导出并打包制品 ────────────────────────────────────────
+          case "$IMAGE_FORMAT" in
+            img)
+              if [ "${MODEL}" = "__RR_ORIGINAL__" ]; then
+                # 原版 RR 镜像：保持 rr.img 文件名（官方格式），zip 名带版本号
+                mv -f rr/rr.img rr.img
+              else
+                mv -f rr/rr.img "${ARTIFACT_NAME}.img"
+              fi
+              [ "$USER_CONFIG_FILE" = "user-config.yml" ] || mv -f "$USER_CONFIG_FILE" "user-config.yml"
+              ;;
+            *)
+              echo "[E] 不支持的镜像格式: $IMAGE_FORMAT"
+              exit 1
+              ;;
+          esac
+
+          rm -f rr/rr.img
+
+          if [ "${MODEL}" = "__RR_ORIGINAL__" ]; then
+            # 原版 RR 镜像：官方压缩命令 zip -9，命名 rr-<版本>.img.zip，打包 rr.img + exe（不含 user-config.yml）
+            ARTIFACT_ZIP="rr-${RR_TAG}.img.zip"
+            rm -f "${ARTIFACT_NAME}.img"
+            zip -9 -q "$ARTIFACT_ZIP" rr.img
+            if [ -d "ainas" ]; then
+              for exe in ainas/*.exe; do
+                [ -f "$exe" ] && zip -qj "$ARTIFACT_ZIP" "$exe"
+              done
+            fi
+          else
+            ARTIFACT_ZIP="${ARTIFACT_NAME}.zip"
+            zip -qr "$ARTIFACT_ZIP" "${ARTIFACT_NAME}.img" user-config.yml
+            if [ -d "ainas" ]; then
+              for exe in ainas/*.exe; do
+                [ -f "$exe" ] && zip -qj "$ARTIFACT_ZIP" "$exe"
+              done
+            fi
+          fi
+          echo "[INFO] ${ARTIFACT_ZIP} 内容:"
+          zipinfo -1 "$ARTIFACT_ZIP" | sed 's/^/  /'
+          echo "[INFO] exe 数量: $(zipinfo -1 "$ARTIFACT_ZIP" | grep -c '\.exe$')"
+
+          echo "ARTIFACT_NAME=${ARTIFACT_NAME}" >> "$GITHUB_ENV"
+          echo "ARTIFACT_ZIP=$ARTIFACT_ZIP" >> "$GITHUB_ENV"
+
+      - name: 发布制品到 ainas-2in1 Release
+        shell: bash
+        env:
+          ACTION_TOKEN: ${{ secrets.AiNas }}
+        run: |
+          set -euo pipefail
+          : "${RR_TAG:?缺少 RR_TAG}"
+          : "${ACTION_TOKEN:?缺少 ACTION_TOKEN}"
+
+          export GH_TOKEN="$ACTION_TOKEN"
+          export GH_REPO="myp015/ainas-2in1"
+          RELEASE_TAG="ainas-rr-${RR_TAG}"
+
+          # 分卷、Release 自愈、退避重试统一在 .github/scripts/release_publish.sh 里
+          ASSET_ARGS=()
+          [ -n "${ARTIFACT_ZIP:-}" ] && ASSET_ARGS+=("$GITHUB_WORKSPACE/$ARTIFACT_ZIP")
+          [ -n "${UPDATE_ZIP:-}" ] && ASSET_ARGS+=("$GITHUB_WORKSPACE/$UPDATE_ZIP")
+
+          bash "$GITHUB_WORKSPACE/.github/scripts/release_publish.sh" \
+            "$RELEASE_TAG" "RR build artifacts for ${RR_TAG}" "${ASSET_ARGS[@]}"
