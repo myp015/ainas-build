@@ -1,0 +1,96 @@
+#
+# Copyright (C) 2022 Ing <https://github.com/wjz304>
+#
+# This is free software, licensed under the MIT License.
+# See /LICENSE for more information.
+#
+# 导出「内核/模块导出符号面」，供发布门禁 gate_release.py 按 DSM 版本选面。
+# 三来源与落点见 ainas-modules/scripts/export_kexports.sh 头部注释。
+#
+
+name: Export kernel symbols
+
+on:
+  workflow_dispatch:
+    inputs:
+      push:
+        description: "push"
+        default: true
+        type: boolean
+
+jobs:
+  kexports:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout ainas-modules
+        uses: actions/checkout@main
+        with:
+          repository: myp015/ainas-modules
+          token: ${{ secrets.AiNas }}
+          path: ainas-modules
+
+      - name: Checkout syno-modules
+        # 只取 official/（hda1/rd 是 nm 的输入源，kexports 是落点）；
+        # 排除 release/ modules/ thirdparty/ 可省下约 5G。
+        uses: actions/checkout@main
+        with:
+          repository: myp015/syno-modules
+          token: ${{ secrets.AiNas }}
+          path: syno-modules
+          sparse-checkout: |
+            official
+          sparse-checkout-cone-mode: true
+
+      - name: Checkout ainas-cks
+        # 只取 kexports/ 落点，避免拉取 1.4G 的 release/。
+        uses: actions/checkout@main
+        with:
+          repository: myp015/ainas-cks
+          token: ${{ secrets.AiNas }}
+          path: ainas-cks
+          sparse-checkout: |
+            kexports
+            README.md
+          sparse-checkout-cone-mode: true
+
+      - name: Init Env
+        run: |
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git config --global user.name "github-actions[bot]"
+          sudo timedatectl set-timezone "Asia/Shanghai"
+
+      - name: Export kernel symbols
+        # GH_TOKEN 供 gh api 访问私有的 ainas-dsm（按需下载 zImage，不 checkout 整仓库）。
+        env:
+          GH_TOKEN: ${{ secrets.AiNas }}
+        run: |
+          bash ainas-modules/scripts/export_kexports.sh "${{ github.workspace }}"
+
+      - name: Push syno-modules
+        if: success() && inputs.push == true
+        run: |
+          cd syno-modules
+          git pull || true
+          status=$(git status -s | grep -E 'official/kexports/' | awk '{printf " %s", $2}')
+          if [ -n "${status}" ]; then
+            git add ${status}
+            git commit -m "update $(date +%Y-%m-%d" "%H:%M:%S)"
+            git push -f
+          else
+            echo "official/kexports/ 无变更"
+          fi
+
+      - name: Push ainas-cks
+        if: success() && inputs.push == true
+        run: |
+          cd ainas-cks
+          git pull || true
+          status=$(git status -s | grep -E 'kexports/' | awk '{printf " %s", $2}')
+          if [ -n "${status}" ]; then
+            git add ${status}
+            git commit -m "update $(date +%Y-%m-%d" "%H:%M:%S)"
+            git push -f
+          else
+            echo "kexports/ 无变更"
+          fi
