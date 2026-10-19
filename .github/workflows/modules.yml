@@ -142,7 +142,14 @@ jobs:
           echo "copy official modules"
           IU="apollolake braswell broadwell broadwellnk broadwellnkv2 broadwellntbap bromolow denverton geminilake grantley purley geminilakenk icelaked"
           AU="r1000 v1000 epyc7002 epyc7003 epyc7003ntb r1000nk v1000nk"
-          OM=(auxiliary.ko i40e.ko ixgbe.ko processor.ko vfio.ko exfat.ko ehci-hcd.ko ehci-pci.ko uhci-hcd.ko xhci-hcd.ko xhci-pci.ko etxhci-hcd.ko)
+          # OM（官方模块强制覆盖）名单的**唯一真相源** = ainas-modules/scripts/ref/om-override.txt，
+          # 经 om_list.sh 按 KVER 做条件过滤（4.x 才覆盖 i915/OFED 栈）。
+          # 原来在这里内联 Bash 数组 —— 那会让发布后校验覆盖是否生效的 D1 判据
+          # （scripts/check_om_override.sh）与这里各写一份名单，一旦漂移，D1 校验的就是**旧名单**，
+          # 覆盖静默失效也查不出来（正是本判据要防的场景）。故改为读同一份。
+          mapfile -t OM < <(bash "${ROOT_PATH}/ainas-modules/scripts/om_list.sh" "${KVER:-4}")
+          [ "${#OM[@]}" -gt 0 ] || { echo "[E] OM 名单读空（om_list.sh 路径或名单文件有问题）"; exit 1; }
+          echo "OM 名单 ${#OM[@]} 项（KVER=${KVER:-4}）: ${OM[*]}"
           # vxlan 链（vxlan/udp_tunnel/ip6_udp_tunnel）已自编译（defines 开
           # CONFIG_VXLAN=m+CONFIG_NET_UDP_TUNNEL=m，src/{4.x,5.x}），不再拷贝官方
           # vxlan.ko。背景：RR 内核 CONFIG_VXLAN=y 内建 vxlan，RR 发布物无 vxlan.ko，
@@ -150,11 +157,10 @@ jobs:
           # vxlan_get_rx_port 且官方内核 CONFIG_VXLAN=m → 需 vxlan.ko 模块。自编译后
           # 依赖由 depends 链（vxlan→udp_tunnel,ip6_udp_tunnel）自动补齐，cks 流同样
           # 不再依赖官方拷贝。
-          [ "$(echo "${KVER:-4}" | cut -d'.' -f1)" -lt 5 ] && OM+=(i915.ko mlx_compat.ko mlx4_core.ko mlx4_en.ko mlx4_ib.ko mlx5_core.ko mlx5_ib.ko ib_core.ko qed.ko qede.ko qedr.ko)
-          # 所有平台全部添加 kvm_intel + kvm_amd（对齐 RR 全平台 kvm 三件套）：
-          # 官方有则强制覆盖（Intel 平台 kvm-intel / AMD 平台 kvm-amd），官方没有的
-          # （AMD 平台 kvm-intel / Intel 平台 kvm-amd）保留自编译产物补齐
-          OM+=(irqbypass.ko kvm.ko kvm-intel.ko kvm-amd.ko)
+          # 上面 om-override.txt 里的 `kver<5` 条件项 = 4.x 的 i915/OFED 栈（5.x 这两个栈
+          # 已自编并对齐 RR，不覆盖）；`all` 项含 kvm 三件套 —— 官方有则强制覆盖（Intel 平台
+          # kvm-intel / AMD 平台 kvm-amd），官方没有的（AMD 平台 kvm-intel / Intel 平台
+          # kvm-amd）保留自编译产物补齐。
           for M in ${OM[@]}; do
             function _copydepends() {
               # 官方模块强制覆盖自编译产物（4.x/5.x 全平台）：官方有的同名模块一律用
@@ -363,11 +369,22 @@ jobs:
           pattern: abi-*
           merge-multiple: true
 
+      - name: Gate selftest (negative test)
+        # 门禁自身的负向测试：证明 G1-G6 的判据**能失败**。没有这一步，判据逻辑写反、
+        # 路径失效、或产物为空导致判据在空集上"全绿"，报告依然是绿的而无人察觉
+        # （实测：空产物在修复前的门禁下是 PASS 退出 0）。
+        # 夹具取自 syno-modules/official 的真 .ko，不编译，几秒跑完。
+        run: |
+          bash "${GITHUB_WORKSPACE}/ainas-modules/scripts/gate_selftest.sh" \
+            "${GITHUB_WORKSPACE}"
+
       - name: Release gate
-        # 发布门禁（工具① G1-G4 + 工具② G5）。**硬阻断**：本 job 无 continue-on-error，
-        # 且后续 push 与建 Release 步骤全带 `if: success() && env.VERSION != ''` →
-        # 本步骤非零退出即天然中止整条发布链（不 push syno-modules、不建 Release）。
+        # 发布门禁（工具① G1-G4 + 工具② G5 + G6 产物加载面）。**硬阻断**：本 job 无
+        # continue-on-error，且后续 push 与建 Release 步骤全带 `if: success() && env.VERSION != ''`
+        # → 本步骤非零退出即天然中止整条发布链（不 push syno-modules、不建 Release）。
         # 此刻 syno-modules 工作区仍是上一版发布状态，故可直接作为"产物不缩水"的基线。
+        # --expect-targets：产物 target 数必须等于 build 矩阵项数 —— 防"矩阵里某个平台
+        # 的 build job 静默失败/artifact 没上传"，那种情况下产物变少但每条判据都还是绿的。
         run: |
           ROOT_PATH=${{ github.workspace }}
           sudo apt-get update -qq
@@ -378,6 +395,7 @@ jobs:
             --thirdparty "${ROOT_PATH}/syno-modules/thirdparty" \
             --prev "${ROOT_PATH}/syno-modules/modules" \
             --abi "${ROOT_PATH}/abi_out" \
+            --expect-targets "$(jq '.include | length' "${ROOT_PATH}/.github/matrix/build.json")" \
             --report "${ROOT_PATH}/gate_report.txt"
 
       - name: Upload gate report
@@ -506,6 +524,14 @@ jobs:
             echo "FATAL: 未解压任何平台（download all 异常），中止提交"
             exit 1
           fi
+
+          # D1：OM 覆盖**单向**不变量 —— build job 里 _copydepends 用官方版覆盖自编版，
+          # 这条链一旦静默失效（OM 名单读空 / 路径写错 / cp 失败），release/ 里就会是自编版：
+          # 自编版符号可能一样全（G1 看不出来），实机却加载失败（官方 i40e 自包含版正是为修
+          # v1000nk 上机 FAILED）。必须在这里查 —— 门禁跑在 release/ 解压**之前**，那时还看不到
+          # 覆盖结果。非零退出即中止（set -e + 本步骤后才是 push）。
+          bash "${GITHUB_WORKSPACE}/ainas-modules/scripts/check_om_override.sh" \
+            syno-modules/release syno-modules/official
 
           # 提交并推送 release/
           cd syno-modules

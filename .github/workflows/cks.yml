@@ -416,6 +416,20 @@ jobs:
           pattern: abi-*
           merge-multiple: true
 
+      - name: Gate selftest (negative test)
+        # 门禁自身的负向测试：证明 G1-G6 的判据**能失败**（逻辑写反 / 路径失效 / 产物为空
+        # 导致判据在空集上"全绿"，报告依然是绿的）。自检脚本自建官方面，只要求一个含真 .ko
+        # 的目录 —— 这里用上一版 cks 产物（ainas-cks/release/<target>，本 job 已 checkout）。
+        # 与 modules.yml 跑的是同一份 gate_release.py，故不重复覆盖，但两边的**内核面口径**
+        # 不同（这里是 --symvers），这一跑同时验证自检在 cks 环境下可用。
+        run: |
+          FIX="$(ls -d ainas-cks/release/*-7.*-5.10.55 2>/dev/null | head -1)"
+          [ -n "${FIX}" ] || { echo "[E] ainas-cks/release 下无可用夹具 target"; exit 1; }
+          echo "自检夹具: ${FIX}"
+          ST_TARGET="$(basename "${FIX}")" ST_FIXTURE_DIR="${FIX}" \
+            bash "${GITHUB_WORKSPACE}/ainas-modules/scripts/gate_selftest.sh" \
+            "${GITHUB_WORKSPACE}"
+
       - name: Release gate
         # 发布门禁（G1 符号可加载 / G2 depends 闭包 / G3 产物不缩水 / G5 ABI 指纹；G4 走本地）。
         # 硬阻断不需要额外机制：后续 Extract/push 与 Release 都带 if: success() && env.VERSION != ''，
