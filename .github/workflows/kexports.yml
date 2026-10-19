@@ -68,6 +68,15 @@ jobs:
         run: |
           bash ainas-modules/scripts/export_kexports.sh "${{ github.workspace }}"
 
+      - name: Self-check official module UND coverage
+        # 官方模块的 UND 应能在「内核面 ∪ 官方模块面」里解析。官方包自带残缺（mii/libfc 两族，
+        # 官方 vmlinux 里根本没有那些符号）⇒ 用**基线比对制**：只有出现**新的**未解析符号才失败
+        # （那才是提取口径退化或面文件损坏）。基线随推送一起提交。
+        run: |
+          python3 ainas-modules/scripts/check_official_und.py \
+            syno-modules/official \
+            syno-modules/official/kexports/und_unresolved_baseline.txt --update
+
       - name: Push syno-modules
         if: success() && inputs.push == true
         run: |
