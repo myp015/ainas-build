@@ -59,6 +59,9 @@ jobs:
           repository: myp015/intel-gpu-i915-backports
           token: ${{ secrets.AiNas }}
           path: intel-gpu-i915-backports
+          # Task#202：amdgpu/radeon 已并入 6.5 backport 栈（amd-backport 分支）。
+          # 合入默认分支前必须显式指定，否则检出的是不含 amd 的 mainline-tracking-v6.5。
+          ref: amd-backport
 
       - name: Checkout ainas-modules
         uses: actions/checkout@main
@@ -103,9 +106,20 @@ jobs:
           if [ -f "${KLIB_BUILD}/include/linux/module.h" ] && ! grep -q 'MODULE_INFO(description, _description " (Compiled by ainas' "${KLIB_BUILD}/include/linux/module.h"; then
             sed -i 's/#define MODULE_DESCRIPTION(_description) MODULE_INFO(description, _description)/#define MODULE_DESCRIPTION(_description) MODULE_INFO(description, _description " (Compiled by ainas for DSM)")/' "${KLIB_BUILD}/include/linux/module.h"
           fi
+          # Task#202：全部 5.10 平台统一 defconfig-amd —— Intel i915 与 AMD amdgpu/
+          # radeon 共用同一套 6.5 DRM 栈（drm/ttm/gpu-sched/dmabuf 只由 update/ 提供）。
+          # amdgpu.o 是 1462 个对象的 multi-object 链接，工作区路径下命令行约 180KB，
+          # 超过 /bin/sh -c 的 MAX_ARG_STRLEN（128KB），make 会报
+          # "/bin/sh: Argument list too long"（Error 127）。构建树复制到 /b 后
+          # 命令行约 88KB，留出余量。
+          BUILD_ROOT=/b
+          sudo rm -rf "${BUILD_ROOT}"
+          sudo mkdir -p "${BUILD_ROOT}"
+          sudo chown "$(id -u):$(id -g)" "${BUILD_ROOT}"
+          cp -a "${ROOT_PATH}/intel-gpu-i915-backports/." "${BUILD_ROOT}/"
           (
-            cd "${ROOT_PATH}/intel-gpu-i915-backports"
-            make defconfig-drm
+            cd "${BUILD_ROOT}"
+            make defconfig-amd
             make -j"$(nproc)"
             make -C "${KLIB_BUILD}" M="${PWD}" INSTALL_MOD_PATH="${PWD}/intermediates" INSTALL_MOD_STRIP=1 CONFIG_MODULE_SIG_ALL= _emodinst_
           )
@@ -114,13 +128,14 @@ jobs:
           SUBLEVEL=$(cat ${KLIB_BUILD}/Makefile | grep ^SUBLEVEL | awk -F' ' '{print $3}')
           KVER="${KVERSION}.${PATCHLEVEL}.${SUBLEVEL}"
 
-          MODULES_INTERMEDIATES="${ROOT_PATH}/intel-gpu-i915-backports/intermediates"
-          # 全平台统一 update/ 布局（对齐 geminilakenk 双套）：
-          # Task#188 后 5.x 主流程 root 是自编主线 DRM 栈（drm/ttm/dmabuf/drm_kms_helper
-          # + radeon/amdgpu/gpu-sched）。i915 backport 栈若扁平输出 root，modules.yml
-          # copy 3rd modules 会 cp -rf 覆盖主线栈 → 混合栈 ABI 断裂（v1000nk-7.2 上机
-          # radeon/gpu-sched Unknown symbol ttm_*/drm_*/dma_fence_* 实测）。
-          # update/ 子目录让 backport 栈与 root 主线栈共存（geminilakenk 已验证闭环）。
+          MODULES_INTERMEDIATES="${BUILD_ROOT}/intermediates"
+          # 全平台统一 update/ 布局：Task#202 起 root 5.10 的 DRM/GPU 栈全部停编，
+          # GPU 栈（drm/ttm/gpu-sched/dmabuf/drm_kms_helper + i915 + amdgpu/radeon）
+          # 统一由本栈提供。仍放 update/ 而非扁平 root，是因为：depmod 让 updates/
+          # 自带 dirname 优先；若扁平输出会与 modules.yml 阶段 root 产物的同名 .ko
+          # 互相覆盖（v1000nk-7.2 上机 radeon/gpu-sched Unknown symbol ttm_*/drm_*
+          # 实测根因即混合栈）。update/ 与 root 分离后由 modules.yml 的
+          # 「update 同名删 root」规则统一清理。
           OUT_MODULES="${ROOT_PATH}/output/update"
           mkdir -p "${OUT_MODULES}"
           find "${MODULES_INTERMEDIATES}" -type f -name '*.ko' -exec mv {} "${OUT_MODULES}" \;
