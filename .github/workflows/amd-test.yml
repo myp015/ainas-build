@@ -64,7 +64,11 @@ jobs:
 
           cd "${ROOT_PATH}/intel-gpu-i915-backports"
           make defconfig-amd
+          echo "=== config after defconfig ==="
+          grep -E 'AMDGPU|DRM_SCHED|DRM_TTM' .config || true
           make -j"$(nproc)" 2>&1 | tee "${ROOT_PATH}/build.log"
+          echo "=== config after make ==="
+          grep -E 'AMDGPU|DRM_SCHED|DRM_TTM' .config || true
           make -C "${KLIB_BUILD}" M="${PWD}" INSTALL_MOD_PATH="${PWD}/intermediates" \
                INSTALL_MOD_STRIP=1 CONFIG_MODULE_SIG_ALL= _emodinst_
 
