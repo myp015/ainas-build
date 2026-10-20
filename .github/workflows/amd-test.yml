@@ -62,7 +62,17 @@ jobs:
           export CROSS_COMPILE=${ROOT_PATH}/ds.${PLATFORM}-${VERSION}.env/usr/local/x86_64-pc-linux-gnu/bin/x86_64-pc-linux-gnu-
           export KLIB_BUILD=${ROOT_PATH}/ds.${PLATFORM}-${VERSION}.dev/usr/local/x86_64-pc-linux-gnu/x86_64-pc-linux-gnu/sys-root/usr/lib/modules/DSM-${VERSION}/build
 
-          cd "${ROOT_PATH}/intel-gpu-i915-backports"
+          # Task#202：amdgpu.o 是 1462 个对象的 multi-object 链接，工作区路径下
+          # 命令行约 180KB，超过 /bin/sh -c 的 MAX_ARG_STRLEN（128KB），make 会报
+          # "/bin/sh: Argument list too long"（Error 127）。放到 /b 下构建后
+          # 命令行约 88KB，留出余量。
+          BUILD_ROOT=/b
+          sudo rm -rf "${BUILD_ROOT}"
+          sudo mkdir -p "${BUILD_ROOT}"
+          sudo chown "$(id -u):$(id -g)" "${BUILD_ROOT}"
+          cp -a "${ROOT_PATH}/intel-gpu-i915-backports/." "${BUILD_ROOT}/"
+
+          cd "${BUILD_ROOT}"
           make defconfig-amd
           echo "=== config after defconfig ==="
           grep -E 'AMDGPU|DRM_SCHED|DRM_TTM' .config || true
