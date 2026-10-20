@@ -1,0 +1,108 @@
+#
+# Task#205 验证工作流：5.10 root 模块集不得再产出 hdmi.ko。
+#
+# 背景：Task#202 为 amd 依赖把 CONFIG_HDMI 从 n 改成 m，root 由此编出 hdmi.ko；
+# 而 update/ 的 i915-compat.ko 在官方内核 CONFIG_HDMI 为空时内嵌 hdmi_5_10.o，
+# 也导出同一组 26 个 hdmi_* 符号。实机 epyc7002-7.2 上 hdmi.ko 先加载，
+# i915-compat 因 “exports duplicate symbol” 拒载 → i915 不加载 → /dev/dri 为空。
+# 修复：root 侧恢复 CONFIG_HDMI=n，hdmi 只由 i915-compat 提供。
+#
+name: Test hdmi single provider (Task#205)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - version: "7.2"
+            platform: epyc7002
+          - version: "7.2"
+            platform: r1000nk
+          - version: "7.4"
+            platform: icelaked
+          - version: "7.2"
+            platform: geminilakenk
+
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@main
+        with:
+          token: ${{ secrets.AiNas }}
+      - name: Checkout ainas-modules
+        uses: actions/checkout@main
+        with:
+          repository: myp015/ainas-modules
+          token: ${{ secrets.AiNas }}
+          path: ainas-modules
+
+      - name: Init Env
+        run: |
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git config --global user.name "github-actions[bot]"
+          sudo timedatectl set-timezone "Asia/Shanghai"
+
+      - name: Make modules
+        run: |
+          set -euo pipefail
+          ROOT_PATH=${{ github.workspace }}
+          VERSION=${{ matrix.version }}
+          PLATFORM=${{ matrix.platform }}
+
+          . ${ROOT_PATH}/ainas-modules/compile.sh
+
+          echo "makeEnvDeploy"
+          for i in $(seq 1 3); do makeEnvDeploy "${ROOT_PATH}" "${VERSION}" "${PLATFORM}" && break || { echo "Retry makeEnvDeploy ${i}/3"; sleep 5; }; done
+
+          echo "makemodules"
+          KVER="$(getKver "${ROOT_PATH}" "${VERSION}" "${PLATFORM}")"
+          cp -f "${ROOT_PATH}/ainas-modules/src/${KVER}/defines.${PLATFORM}" "${ROOT_PATH}/ainas-modules/src/${KVER}/defines"
+          makemodules "${ROOT_PATH}" "${VERSION}" "${PLATFORM}" "${ROOT_PATH}/ainas-modules/src/${KVER}" "${ROOT_PATH}/output"
+          echo "${KVER}" > "${ROOT_PATH}/kver.txt"
+
+      - name: Verify hdmi single provider
+        run: |
+          set -euo pipefail
+          ROOT_PATH=${{ github.workspace }}
+          OUT="${ROOT_PATH}/output"
+          PLATFORM=${{ matrix.platform }}
+          VERSION=${{ matrix.version }}
+          KVER=$(cat "${ROOT_PATH}/kver.txt")
+
+          echo "[${PLATFORM}-${VERSION}-${KVER}] 产物 $(find "${OUT}" -name '*.ko' | wc -l) 个 .ko"
+          find "${OUT}" -maxdepth 1 -name '*.ko' | sed 's#.*/##' | sort | tr '\n' ' '; echo
+
+          # 1. root 侧必须没有 hdmi.ko（唯一提供者是 update/i915-compat.ko）
+          if find "${OUT}" -name 'hdmi.ko' | grep -q .; then
+            echo "[E] 产物里仍有 hdmi.ko —— CONFIG_HDMI 未恢复为 n" >&2
+            exit 1
+          fi
+          # 2. 预期产物不能因此缩水（hdmi.ko 之外仍应有 >=100 个模块）
+          N=$(find "${OUT}" -name '*.ko' | wc -l)
+          [ "${N}" -ge 100 ] || { echo "[E] 产物数量异常：${N}" >&2; exit 1; }
+          # 3. 若有 drm 相关模块，确认它们没有把 hdmi 编译进去（根模块集不应再引用）
+          for f in "${OUT}"/drm*.ko; do
+            [ -f "$f" ] || continue
+            if nm -u "$f" 2>/dev/null | grep -q ' hdmi_'; then
+              echo "[E] ${f} 引用了 hdmi_* —— 根 DRM 栈不应参与" >&2
+              exit 1
+            fi
+          done
+          echo "[OK] root 侧无 hdmi.ko，hdmi 符号唯一提供者为 update/i915-compat.ko"
+
+      - name: Tar to Artifacts
+        run: |
+          ROOT_PATH=${{ github.workspace }}
+          KVER=$(cat "${ROOT_PATH}/kver.txt")
+          tar -zcf "${ROOT_PATH}/${{ matrix.platform }}-${{ matrix.version }}-${KVER}.tgz" -C "${ROOT_PATH}/output" .
+
+      - name: Upload to Artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: modules-${{ matrix.version }}-${{ matrix.platform }}
+          path: |
+            *.tgz
