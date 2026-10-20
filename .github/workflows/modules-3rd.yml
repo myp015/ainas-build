@@ -13,6 +13,9 @@ on:
 jobs:
   i915:
     strategy:
+      # 单个平台失败不取消其余 job：16 个平台共用一份矩阵，任一平台的头文件/
+      # 配置差异都会让其余结果不可见（2026-10-20 r1000nk MCE 头差异实证）。
+      fail-fast: false
       matrix:
         include:
           - version: 7.1
