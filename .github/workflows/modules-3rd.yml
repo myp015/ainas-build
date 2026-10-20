@@ -152,9 +152,196 @@ jobs:
           path: |
             i915-*.tgz
 
+  # ── 4.4.302 双 DRM 栈（i915 + amdgpu，Linux 5.4 OOT backport）──────────────
+  # 来源：myp015/redpill-dual-drm-backports（我们自己的 fork）。该栈定位 headless
+  # （不初始化 fbdev 模拟），构建方式为 make -C $KLIB_BUILD M=$OOT_ROOT，
+  # KSRC 与上面 5.x 栈同源（群晖官方 dev txz）。
+  # 产物统一放 output/update/，由 modules.yml 的「update 同名删 root」规则
+  # 清理 root 4.4 的 DRM/FB 同名模块，避免混合栈。
+  drm4:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - version: 7.2
+            platform: apollolake
+          - version: 7.2
+            platform: broadwell
+          - version: 7.2
+            platform: broadwellnk
+          - version: 7.2
+            platform: broadwellnkv2
+          - version: 7.2
+            platform: broadwellntbap
+          - version: 7.2
+            platform: denverton
+          - version: 7.2
+            platform: geminilake
+          - version: 7.2
+            platform: purley
+          - version: 7.2
+            platform: r1000
+          - version: 7.2
+            platform: v1000
+
+          - version: 7.3
+            platform: apollolake
+          - version: 7.3
+            platform: broadwell
+          - version: 7.3
+            platform: broadwellnk
+          - version: 7.3
+            platform: broadwellnkv2
+          - version: 7.3
+            platform: broadwellntbap
+          - version: 7.3
+            platform: denverton
+          - version: 7.3
+            platform: geminilake
+          - version: 7.3
+            platform: purley
+          - version: 7.3
+            platform: r1000
+          - version: 7.3
+            platform: v1000
+
+          - version: 7.4
+            platform: apollolake
+          - version: 7.4
+            platform: broadwell
+          - version: 7.4
+            platform: broadwellnk
+          - version: 7.4
+            platform: broadwellnkv2
+          - version: 7.4
+            platform: broadwellntbap
+          - version: 7.4
+            platform: denverton
+          - version: 7.4
+            platform: geminilake
+          - version: 7.4
+            platform: purley
+          - version: 7.4
+            platform: r1000
+          - version: 7.4
+            platform: v1000
+
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout redpill dual drm
+        uses: actions/checkout@main
+        with:
+          repository: myp015/redpill-dual-drm-backports
+          token: ${{ secrets.AiNas }}
+          path: redpill-dual-drm-backports
+
+      - name: Init Env
+        run: |
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git config --global user.name "github-actions[bot]"
+          sudo timedatectl set-timezone "Asia/Shanghai"
+
+      - name: Build
+        run: |
+          set -euo pipefail
+          ROOT_PATH=${{ github.workspace }}
+          VERSION=${{ matrix.version }}
+          PLATFORM=${{ matrix.platform }}
+          OOT_ROOT="${ROOT_PATH}/redpill-dual-drm-backports"
+
+          echo "getting toolkit"
+          for N in env dev; do
+            for i in $(seq 1 3); do
+              curl -skL --retry 3 "https://global.synologydownload.com/download/ToolChain/toolkit/${VERSION}/${PLATFORM}/ds.${PLATFORM}-${VERSION}.${N}.txz" -o "${ROOT_PATH}/ds.${PLATFORM}-${VERSION}.${N}.txz" \
+                && [ -s "${ROOT_PATH}/ds.${PLATFORM}-${VERSION}.${N}.txz" ] && break
+              echo "Retry download ${N} ${i}/3"
+              sleep 5
+            done
+            mkdir -p "${ROOT_PATH}/ds.${PLATFORM}-${VERSION}.${N}"
+            tar -xhf "${ROOT_PATH}/ds.${PLATFORM}-${VERSION}.${N}.txz" -C "${ROOT_PATH}/ds.${PLATFORM}-${VERSION}.${N}"
+          done
+
+          echo "building dual drm modules"
+          export CROSS_COMPILE=${ROOT_PATH}/ds.${PLATFORM}-${VERSION}.env/usr/local/x86_64-pc-linux-gnu/bin/x86_64-pc-linux-gnu-
+          export KLIB_BUILD=${ROOT_PATH}/ds.${PLATFORM}-${VERSION}.dev/usr/local/x86_64-pc-linux-gnu/x86_64-pc-linux-gnu/sys-root/usr/lib/modules/DSM-${VERSION}/build
+
+          [ -d "${KLIB_BUILD}" ] || { echo "[E] KLIB_BUILD 不存在: ${KLIB_BUILD}"; exit 1; }
+
+          # 与 5.x i915 栈一致的 modinfo 标识（区分自编与官方模块）
+          if [ -f "${KLIB_BUILD}/include/linux/module.h" ] && ! grep -q 'MODULE_INFO(description, _description " (Compiled by ainas' "${KLIB_BUILD}/include/linux/module.h"; then
+            sed -i 's/#define MODULE_DESCRIPTION(_description) MODULE_INFO(description, _description)/#define MODULE_DESCRIPTION(_description) MODULE_INFO(description, _description " (Compiled by ainas for DSM)")/' "${KLIB_BUILD}/include/linux/module.h"
+          fi
+
+          export KBUILD_MODPOST_WARN=1
+          export OOT_KCPPFLAGS="\
+            -I${OOT_ROOT}/compat/backport-include \
+            -I${OOT_ROOT}/include \
+            -I${OOT_ROOT}/include/uapi \
+            -I${OOT_ROOT}/compat \
+            -include ${OOT_ROOT}/compat/drm_compat.h \
+            -include ${OOT_ROOT}/compat/kcl_compat.h \
+            -DCONFIG_FB_DEFERRED_IO -DCONFIG_FB_NOTIFY"
+
+          # geminilake/apollolake host 已内建 hdmi/drm_mipi_dsi/sync_file/interval_tree/
+          # fb_notify/intel_gtt（实机 kallsyms 确认），重复生产会 "invalid module format"；
+          # 其余 8 平台 host 没有，由栈内模块补齐。
+          EXTRA_CONFIG="CONFIG_FB_NOTIFY_IN_KERNEL=y"
+          NOHOST_CONFIG="CONFIG_AGP_INTEL=m CONFIG_DRM_MIPI_DSI=m"
+          case "${PLATFORM}" in
+            geminilake|apollolake)
+              EXTRA_CONFIG="$EXTRA_CONFIG CONFIG_DRM_SYNC_FILE_IN_KERNEL=y CONFIG_INTERVAL_TREE_IN_KERNEL=y CONFIG_DRM_HDMI_IN_KERNEL=y"
+              NOHOST_CONFIG=""
+              OOT_KCPPFLAGS="$OOT_KCPPFLAGS -DCONFIG_DRM_HDMI_IN_KERNEL"
+              ;;
+          esac
+
+          make -C "${KLIB_BUILD}" M="${OOT_ROOT}" \
+            CONFIG_DRM=m CONFIG_DRM_KMS_HELPER=m \
+            CONFIG_DRM_I915=m CONFIG_DRM_I915_USERPTR=y \
+            CONFIG_DRM_TTM=m CONFIG_DRM_SCHED=m \
+            CONFIG_DRM_AMDGPU=m \
+            ${NOHOST_CONFIG} \
+            CONFIG_DRM_PANEL_ORIENTATION_QUIRKS=m \
+            ${EXTRA_CONFIG} \
+            KCPPFLAGS="${OOT_KCPPFLAGS}" \
+            modules 2>&1 | tee "${ROOT_PATH}/build.log"
+
+          # fail-fast：未解析/重复导出符号一律视为构建失败（redpill CI 同款判据）
+          if grep -E 'WARNING:.*undefined|WARNING:.*exported twice|Unknown symbol' "${ROOT_PATH}/build.log"; then
+            echo "[E] MODPOST 报告未解析或重复符号" >&2
+            exit 1
+          fi
+
+          KVERSION=$(grep ^VERSION "${KLIB_BUILD}/Makefile" | awk -F' ' '{print $3}')
+          PATCHLEVEL=$(grep ^PATCHLEVEL "${KLIB_BUILD}/Makefile" | awk -F' ' '{print $3}')
+          SUBLEVEL=$(grep ^SUBLEVEL "${KLIB_BUILD}/Makefile" | awk -F' ' '{print $3}')
+          KVER="${KVERSION}.${PATCHLEVEL}.${SUBLEVEL}"
+
+          OUT_MODULES="${ROOT_PATH}/output/update"
+          mkdir -p "${OUT_MODULES}"
+          find "${OOT_ROOT}/drivers/gpu/drm" -name '*.ko' -exec cp -f {} "${OUT_MODULES}/" \;
+          find "${OOT_ROOT}/drivers/char/agp" -name '*.ko' -exec cp -f {} "${OUT_MODULES}/" \; 2>/dev/null || true
+          find "${OOT_ROOT}" -maxdepth 1 -name '*.ko' -exec cp -f {} "${OUT_MODULES}/" \;
+          find "${OUT_MODULES}" -name '*.ko' -exec ${CROSS_COMPILE}strip --strip-debug {} \;
+
+          COUNT=$(find "${OUT_MODULES}" -name '*.ko' | wc -l)
+          echo "[${PLATFORM}-${VERSION}] 产出 ${COUNT} 个 .ko:"
+          ls -l "${OUT_MODULES}"
+          # 正常 16–19 个；少于 10 说明构建树/收集路径异常，尽早暴露
+          [ "${COUNT}" -ge 10 ] || { echo "[E] 产物数量异常: ${COUNT}" >&2; exit 1; }
+
+          tar -zcf "${ROOT_PATH}/drm4-${PLATFORM}-${VERSION}-${KVER}.tgz" -C "${ROOT_PATH}/output" .
+
+      - name: Upload to Artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: drm4-${{ matrix.version }}-${{ matrix.platform }}
+          path: |
+            drm4-*.tgz
+
   release:
     runs-on: ubuntu-latest
-    needs: i915
+    needs: [i915, drm4]
     steps:
       - name: Checkout
         uses: actions/checkout@main
@@ -176,11 +363,19 @@ jobs:
           pattern: i915-*
           merge-multiple: true
 
+      - name: download 4.x artifacts
+        uses: actions/download-artifact@v8
+        with:
+          path: output
+          pattern: drm4-*
+          merge-multiple: true
+
       - name: delete-artifact
         uses: geekyeggo/delete-artifact@v6
         with:
           name: |
             i915-*
+            drm4-*
 
       - name: firmware
         run: |
@@ -188,9 +383,9 @@ jobs:
 
           echo "extract all modules"
           OUT_MODULES="${ROOT_PATH}/syno-modules/thirdparty"
-          for F in output/i915-*.tgz; do
+          for F in output/*.tgz; do
             echo "${F}"
-            DIR_NAME="${OUT_MODULES}/$(echo $(basename "${F}" .tgz 2>/dev/null) | sed 's/^i915-//')"
+            DIR_NAME="${OUT_MODULES}/$(echo $(basename "${F}" .tgz 2>/dev/null) | sed -E 's/^(i915|drm4)-//')"
             rm -rf "${DIR_NAME}"
             mkdir -p "${DIR_NAME}"
             tar -zxf "${F}" -C "${DIR_NAME}" || echo "Failed to extract ${F}"
