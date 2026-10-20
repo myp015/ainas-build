@@ -152,7 +152,7 @@ jobs:
           path: |
             i915-*.tgz
 
-  # ── 4.4.302 双 DRM 栈（i915 + amdgpu，Linux 5.4 OOT backport）──────────────
+  # ── 4.4.302 双 DRM 栈（i915 + amdgpu + radeon，Linux 5.4 OOT backport）─────
   # 来源：myp015/redpill-dual-drm-backports（我们自己的 fork）。该栈定位 headless
   # （不初始化 fbdev 模拟），构建方式为 make -C $KLIB_BUILD M=$OOT_ROOT，
   # KSRC 与上面 5.x 栈同源（群晖官方 dev txz）。
@@ -300,6 +300,7 @@ jobs:
             CONFIG_DRM_I915=m CONFIG_DRM_I915_USERPTR=y \
             CONFIG_DRM_TTM=m CONFIG_DRM_SCHED=m \
             CONFIG_DRM_AMDGPU=m \
+            CONFIG_DRM_RADEON=m \
             ${NOHOST_CONFIG} \
             CONFIG_DRM_PANEL_ORIENTATION_QUIRKS=m \
             ${EXTRA_CONFIG} \
@@ -327,7 +328,7 @@ jobs:
           COUNT=$(find "${OUT_MODULES}" -name '*.ko' | wc -l)
           echo "[${PLATFORM}-${VERSION}] 产出 ${COUNT} 个 .ko:"
           ls -l "${OUT_MODULES}"
-          # 正常 16–19 个；少于 10 说明构建树/收集路径异常，尽早暴露
+          # 正常 17–20 个（Task#204 起含 radeon.ko）；少于 10 说明构建树/收集路径异常，尽早暴露
           [ "${COUNT}" -ge 10 ] || { echo "[E] 产物数量异常: ${COUNT}" >&2; exit 1; }
 
           tar -zcf "${ROOT_PATH}/drm4-${PLATFORM}-${VERSION}-${KVER}.tgz" -C "${ROOT_PATH}/output" .
