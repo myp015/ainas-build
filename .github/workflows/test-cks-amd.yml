@@ -154,6 +154,11 @@ jobs:
           mkdir -p "${ROOT_PATH}/output/modules"
           cp -rf "${ROOT_PATH}/modules/"* "${ROOT_PATH}/output/modules/"
 
+          # 与 cks.yml 同款（Task#207）：小矩阵也要跑自编必含门禁，否则「小矩阵全绿」
+          # 会给人「cks 门禁已过」的错觉——本文件此前就漏了这一条。
+          echo "check selfbuilt-required"
+          bash "${ROOT_PATH}/ainas-modules/scripts/check_selfbuilt.sh" "${KVER}" "${ROOT_PATH}/output/modules"
+
       - name: Tar to Artifacts
         run: |
           ROOT_PATH=${{ github.workspace }}
