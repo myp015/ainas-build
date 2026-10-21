@@ -135,6 +135,9 @@ jobs:
           merge-multiple: true
 
       - name: delete-artifact
+        # 未填版本号（env.VERSION == ''）时不发布、也不删产物：此时 run 的成果就是
+        # 这批编译好的 tgz，删了 run 结束即不可取回（与 modules.yml / cks.yml 同规则）。
+        if: success() && env.VERSION != ''
         uses: geekyeggo/delete-artifact@v6
         with:
           name: |

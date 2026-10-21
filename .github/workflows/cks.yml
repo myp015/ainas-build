@@ -504,9 +504,11 @@ jobs:
           path: gate_report.txt
 
       - name: delete-artifact
-        # 仅 download 成功才删（if: success()）：download 失败时保留 artifacts，
-        # 否则编译产物被无条件删除后无法重跑 Extract/手动下载验证
-        if: success()
+        # 仅「成功且确实要发布」时才删（if: success() && env.VERSION != ''）：
+        #   · download 失败 → 保留 artifacts，否则无法重跑 Extract/手动下载验证；
+        #   · 未填版本号（env.VERSION == ''）→ 按设计不发布，此时保留全部编译产物
+        #     （本 run 的唯一成果就是它们；删了 run 结束即不可取回）。
+        if: success() && env.VERSION != ''
         uses: geekyeggo/delete-artifact@v6
         with:
           name: |
