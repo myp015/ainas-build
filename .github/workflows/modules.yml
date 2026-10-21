@@ -88,6 +88,12 @@ jobs:
           cp -f "${ROOT_PATH}/ainas-modules/src/${KVER}/defines.${PLATFORM}" "${ROOT_PATH}/ainas-modules/src/${KVER}/defines"
           makemodules "${ROOT_PATH}" "${VERSION}" "${PLATFORM}" "${ROOT_PATH}/ainas-modules/src/${KVER}" "${ROOT_PATH}/output"
 
+          # 规则（用户 2026-10-21）：即便模块会被官方 OM 覆盖，自编面也必须有我们的版本。
+          # 判据在 scripts/ref/selfbuilt-required.txt；此处是**纯编译面**（output/ 尚未合并
+          # 官方/第三方），fail-fast 可直接指向 defines.${PLATFORM} 里被写成 =n 的那行。
+          echo "check selfbuilt-required"
+          bash "${ROOT_PATH}/ainas-modules/scripts/check_selfbuilt.sh" "${KVER}" "${ROOT_PATH}/output"
+
       - name: ABI probe
         # 工具②：在同一个 KSRC 上编两路探针（A = KSRC 原生 = 官方内核条件；
         # B = KSRC + 本次实际生效的 KCFLAGS），pahole dump 后差分。两路只要有一处

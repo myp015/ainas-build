@@ -137,6 +137,13 @@ jobs:
           mkdir -p "${ROOT_PATH}/output/modules"
           cp -rf "${ROOT_PATH}/modules/"* "${ROOT_PATH}/output/modules/"
 
+          # 规则（用户 2026-10-21）：即便模块会被官方 OM 覆盖，自编面也必须有我们的版本。
+          # cks 没有主流程 modules.yml 的 OM 合并环节，缺自编版就是直接悬空（Task#206 的
+          # i40e/iavf）——名单见 scripts/ref/selfbuilt-required.txt。此处仍是纯编译面
+          # （Tar 步骤才合并 thirdparty），报错直接指向 defines.${PLATFORM}。
+          echo "check selfbuilt-required"
+          bash "${ROOT_PATH}/ainas-modules/scripts/check_selfbuilt.sh" "${KVER}" "${ROOT_PATH}/output/modules"
+
       - name: Kernel symvers
         # 自编内核的权威导出面 → release job 发布门禁 G1 的口径（Module.symvers 第 3 列
         # == vmlinux 的行才是内核本体导出；=m 模块提供的符号不算，因为那些模块是我们自己
