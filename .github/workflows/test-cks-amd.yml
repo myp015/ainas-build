@@ -28,6 +28,10 @@ jobs:
             platform: geminilakenk
           - version: 7.2
             platform: r1000nk
+          # v1000nk 与 epyc7002 同属 edc59276「官方有 i40e 平台」；cks 恢复自编
+          # i40e 后两者都须验证 iavf→i40e 闭包。
+          - version: 7.2
+            platform: v1000nk
 
     runs-on: ubuntu-latest
     steps:
@@ -131,6 +135,21 @@ jobs:
               echo "[E] $(basename "${F}") vermagic=${V}，期望 5.10.55+" >&2; exit 1; }
           done
           echo "[I] update 模块数: $(ls "${ROOT_PATH}/modules/update/"*.ko | wc -l)"
+
+          # i40e/iavf 闭包（同 cks.yml 的 Task#62 不变量，提前到 build 阶段 fail-fast）：
+          # auxiliary bus 归 i40e.ko 所有并导出 intel_auxiliary_*，iavf 只能引用它。
+          # edc59276 在 epyc7002/v1000nk 停了自编 i40e 却留着 IAVF=m，导致 iavf 的
+          # 两个 intel_auxiliary_* UND 悬空（run 39551787486 实测）。
+          if [ -f "${ROOT_PATH}/modules/iavf.ko" ]; then
+            [ -f "${ROOT_PATH}/modules/i40e.ko" ] || {
+              echo "[E] iavf.ko 存在但 i40e.ko 缺失（intel_auxiliary_* 将悬空）" >&2; exit 1; }
+            modinfo -F depends "${ROOT_PATH}/modules/iavf.ko" | tr ',' ' ' | xargs -n1 | \
+              /bin/grep -qx i40e || {
+              echo "[E] iavf.ko 未依赖 i40e（intel_auxiliary_* 无提供者）" >&2; exit 1; }
+            nm --defined-only "${ROOT_PATH}/modules/i40e.ko" | \
+              /bin/grep -q " T intel_auxiliary_device_init$" || {
+              echo "[E] i40e.ko 未折入 intel_auxiliary_device_init" >&2; exit 1; }
+          fi
 
           mkdir -p "${ROOT_PATH}/output/modules"
           cp -rf "${ROOT_PATH}/modules/"* "${ROOT_PATH}/output/modules/"
