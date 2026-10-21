@@ -79,7 +79,8 @@ jobs:
             -I${OOT_ROOT}/compat \
             -include ${OOT_ROOT}/compat/drm_compat.h \
             -include ${OOT_ROOT}/compat/kcl_compat.h \
-            -DCONFIG_FB_DEFERRED_IO -DCONFIG_FB_NOTIFY"
+            -DCONFIG_FB_DEFERRED_IO -DCONFIG_FB_NOTIFY \
+            -DCONFIG_DRM_I915_CAPTURE_ERROR=1"
 
           # geminilake/apollolake host 已内建 hdmi/drm_mipi_dsi/sync_file/interval_tree/
           # fb_notify/intel_gtt（实机 kallsyms 确认），重复生产会 "invalid module format"；
