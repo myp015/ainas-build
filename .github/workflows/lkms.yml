@@ -135,9 +135,8 @@ jobs:
           merge-multiple: true
 
       - name: delete-artifact
-        # 未填版本号（env.VERSION == ''）时不发布、也不删产物：此时 run 的成果就是
-        # 这批编译好的 tgz，删了 run 结束即不可取回（与 modules.yml / cks.yml 同规则）。
-        if: success() && env.VERSION != ''
+        # 对齐 RR：分平台 artifact 一律删，run 的可取回成果是下面那个合并 zip
+        # （未填版本号时会以 artifact 形式保留 5 天，见 Zip 之后的 Upload to Artifacts）。
         uses: geekyeggo/delete-artifact@v6
         with:
           name: |
@@ -150,6 +149,16 @@ jobs:
 
           echo "${VERSION}" > "output/VERSION"
           zip -9 rp-lkms-${VERSION}.zip -j output/*
+
+      - name: Upload to Artifacts
+        # 对齐 RR：未填版本号 → 不发布 Release，但把合并好的 zip 作为 artifact 保留 5 天。
+        if: success() && env.VERSION == ''
+        uses: actions/upload-artifact@v7
+        with:
+          name: rp-lkms
+          path: |
+            rp-lkms*.zip
+          retention-days: 5
 
       - name: Release
         if: success() && env.VERSION != ''

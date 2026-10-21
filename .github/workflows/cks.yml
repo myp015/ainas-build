@@ -504,11 +504,10 @@ jobs:
           path: gate_report.txt
 
       - name: delete-artifact
-        # 仅「成功且确实要发布」时才删（if: success() && env.VERSION != ''）：
-        #   · download 失败 → 保留 artifacts，否则无法重跑 Extract/手动下载验证；
-        #   · 未填版本号（env.VERSION == ''）→ 按设计不发布，此时保留全部编译产物
-        #     （本 run 的唯一成果就是它们；删了 run 结束即不可取回）。
-        if: success() && env.VERSION != ''
+        # 对齐 RR：分平台 artifact 一律删，run 的可取回成果是下面那个合并 zip
+        # （未填版本号时会以 artifact 形式保留 5 天）。仍保留 if: success()：
+        # download 失败时不动 artifacts，便于排查。
+        if: success()
         uses: geekyeggo/delete-artifact@v6
         with:
           name: |
@@ -524,6 +523,17 @@ jobs:
           mkdir -p output
           echo "${VERSION}" > "output/VERSION"
           zip -9 ainas-cks-${VERSION}.zip -j output/*
+
+      - name: Upload to Artifacts
+        # 对齐 RR：未填版本号 → 不发布 Release，但把合并好的 zip 作为 artifact 保留
+        # 5 天（分平台 artifact 已删除）。
+        if: success() && env.VERSION == ''
+        uses: actions/upload-artifact@v7
+        with:
+          name: ainas-cks
+          path: |
+            ainas-cks-*.zip
+          retention-days: 5
 
       - name: Extract release to ainas-cks/release and push
         if: success() && env.VERSION != ''

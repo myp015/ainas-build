@@ -63,17 +63,16 @@ jobs:
           echo "${VERSION}" > "VERSION"
           zip -9 ${{ github.workspace }}/addons-${VERSION}.zip -j *.addon VERSION
 
-      - name: Upload addon package
-        # 本工作流没有 delete-artifact（不会删东西），但原本也没有 upload-artifact：
-        # 未填版本号时 Release 跳过，打完的 addons-test.zip 随 runner 销毁、取不回来。
-        # 与 modules.yml / cks.yml / lkms.yml 同规则（Task#207）：不发布也要留下编译产物。
-        # 发布时也照传一份，便于在 run 页面直接取件核对。
-        if: always()
+      - name: Upload to Artifacts
+        # 对齐 RR：未填版本号 → 不发布 Release，但把打好的 zip 作为 artifact 保留 5 天
+        # （本工作流没有 delete-artifact，打包物只有这一个 zip）。
+        if: success() && env.VERSION == ''
         uses: actions/upload-artifact@v7
         with:
-          name: addons-package
-          path: addons-*.zip
-          if-no-files-found: warn
+          name: addons
+          path: |
+            addons*.zip
+          retention-days: 5
 
       - name: Release
         uses: ncipollo/release-action@v1

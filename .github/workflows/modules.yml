@@ -421,12 +421,10 @@ jobs:
           if-no-files-found: ignore
 
       - name: delete-artifact
-        # 仅「成功且确实要发布」时才删（if: success() && env.VERSION != ''）：
-        #   · download 失败 → 保留 artifacts，否则无法重跑 Extract/手动下载验证；
-        #   · 未填版本号（env.VERSION == ''）→ calc_version.sh 按设计不发布，此时更
-        #     不能删：本 run 的成果就是那批编译产物，删了 run 结束即不可取回
-        #     （artifact 默认 90 天过期，足够复跑验证或手工取件）。
-        if: success() && env.VERSION != ''
+        # 对齐 RR：分平台 artifact 一律删，run 的可取回成果是下面那个合并 zip
+        # （未填版本号时会以 artifact 形式保留 5 天，见 Zip 之后的 Upload to Artifacts）。
+        # 仍保留 if: success()：download 失败时不动 artifacts，便于排查。
+        if: success()
         uses: geekyeggo/delete-artifact@v6
         with:
           name: |
@@ -450,6 +448,17 @@ jobs:
           else
             echo "WARN: firmware.tgz 未下载，zip 不含固件"
           fi
+
+      - name: Upload to Artifacts
+        # 对齐 RR：未填版本号 → 不发布 Release，但把合并好的 zip 作为 artifact 保留
+        # 5 天，run 结束后仍可取件（分平台 artifact 已在上一步删除）。
+        if: success() && env.VERSION == ''
+        uses: actions/upload-artifact@v7
+        with:
+          name: modules
+          path: |
+            modules*.zip
+          retention-days: 5
 
       - name: Extract to syno-modules/modules
         if: success() && env.VERSION != ''
