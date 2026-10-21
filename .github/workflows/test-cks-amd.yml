@@ -1,0 +1,244 @@
+#
+# Task#206 小矩阵验证：cks 5.10.55 的 AMD（amdgpu/radeon）迁入 6.5 backport 栈。
+#
+# 只跑 build job 的「Make modules + 打包」两段（firmware/release 与本改动无关），
+# 目标是证明：
+#   1. `make defconfig-amd` + `make` 在 /b 下成功（无 Argument list too long）；
+#   2. root 5.10 不再产出 amdgpu/radeon（epyc 另含 udl/virtio-gpu/vmwgfx）；
+#   3. update/ 出现 6.5 栈的 AMD 六件 + 原 i915 栈；
+#   4. 去重后 root 与 update 无同名 .ko，残留旧栈消费者带来的符号缺口归零；
+#   5. update/*.ko 的 vermagic 全为 5.10.55+。
+# 全量 12 target 仍由 cks.yml 跑（含门禁 G1-G7 与 ABI probe）。
+#
+
+name: Test cks amd stack
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - version: 7.2
+            platform: epyc7002
+          - version: 7.2
+            platform: geminilakenk
+          - version: 7.2
+            platform: r1000nk
+
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@main
+        with:
+          token: ${{ secrets.AiNas }}
+      - name: Checkout
+        uses: actions/checkout@main
+        with:
+          repository: myp015/ainas-modules
+          token: ${{ secrets.AiNas }}
+          path: ainas-modules
+
+      - name: Checkout
+        uses: actions/checkout@main
+        with:
+          repository: myp015/ainas-cks
+          token: ${{ secrets.AiNas }}
+          path: ainas-cks
+
+      - name: Init Env
+        run: |
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git config --global user.name "github-actions[bot]"
+          sudo timedatectl set-timezone "Asia/Shanghai"
+
+          sudo apt update
+          sudo apt install -y curl build-essential bison flex dwarves ruby libncurses-dev libssl-dev libelf-dev
+
+      - name: Make modules
+        run: |
+          ROOT_PATH=${{ github.workspace }}
+          VERSION=${{ matrix.version }}
+          PLATFORM=${{ matrix.platform }}
+
+          git clone -b ${PLATFORM}-${VERSION}-5.10.55 --depth=1 https://github.com/myp015/dsm_linux.git
+          # Task#206：AMD 与 i915 必须共用同一套 6.5 DRM 栈（主流程 modules-3rd.yml 同款）。
+          git clone -b amd-backport --depth=1 https://github.com/myp015/intel-gpu-i915-backports.git
+          test -f "${ROOT_PATH}/intel-gpu-i915-backports/defconfigs/amd" || {
+            echo "[E] amd-backport 分支缺少 defconfigs/amd" >&2; exit 1; }
+          grep -q 'defined(CONFIG_ACPI_NUMA) && defined(CONFIG_NUMA)' \
+            "${ROOT_PATH}/intel-gpu-i915-backports/drivers/gpu/drm/amd/amdgpu/amdgpu_acpi.c" || {
+            echo "[E] amd-backport 缺少 amdgpu NUMA 门控（CONFIG_ACPI_NUMA && CONFIG_NUMA）" >&2; exit 1; }
+
+          . ${ROOT_PATH}/ainas-modules/compile-ck.sh
+
+          echo "makeEnvDeploy"
+          makeEnvDeploy "${ROOT_PATH}" "${VERSION}" "${PLATFORM}"
+
+          echo "makekernel"
+          makekernel "${ROOT_PATH}" "${VERSION}" "${PLATFORM}" "${ROOT_PATH}/dsm_linux" "${ROOT_PATH}/output"
+
+          echo "makemodules"
+          KVER="$(getKver "${ROOT_PATH}" "${VERSION}" "${PLATFORM}" "${ROOT_PATH}/dsm_linux")"
+          cp -f "${ROOT_PATH}/ainas-modules/src/${KVER}-ck/defines.${PLATFORM}" "${ROOT_PATH}/ainas-modules/src/${KVER}-ck/defines"
+          makemodules "${ROOT_PATH}" "${VERSION}" "${PLATFORM}" "${ROOT_PATH}/dsm_linux" "${ROOT_PATH}/ainas-modules/src/${KVER}-ck" "${ROOT_PATH}/modules"
+
+          echo "assert: root 5.10 不再编 AMD 与旧栈消费者"
+          for M in amdgpu.ko radeon.ko; do
+            [ ! -e "${ROOT_PATH}/modules/${M}" ] || {
+              echo "[E] root 仍产出 ${M}（defines CONFIG_DRM_*=n 未生效）" >&2; exit 1; }
+          done
+          if [ "${PLATFORM}" = "epyc7002" ]; then
+            for M in udl.ko virtio-gpu.ko vmwgfx.ko; do
+              [ ! -e "${ROOT_PATH}/modules/${M}" ] || {
+                echo "[E] epyc root 仍产出 ${M}（旧 DRM 栈消费者，混栈必崩）" >&2; exit 1; }
+            done
+          fi
+
+          # /b 短路径：amdgpu.o 的 multi-object 链接命令在长路径下超过 MAX_ARG_STRLEN。
+          BUILD_ROOT=/b
+          sudo rm -rf "${BUILD_ROOT}"
+          sudo mkdir -p "${BUILD_ROOT}"
+          sudo chown "$(id -u):$(id -g)" "${BUILD_ROOT}"
+          cp -a "${ROOT_PATH}/intel-gpu-i915-backports/." "${BUILD_ROOT}/"
+
+          echo "makei915"
+          makei915 "${ROOT_PATH}" "${VERSION}" "${PLATFORM}" "${ROOT_PATH}/dsm_linux" "${BUILD_ROOT}" "${ROOT_PATH}/modules/update" amd
+
+          echo "assert: update/ 6.5 栈产物齐全"
+          for M in amdgpu.ko radeon.ko amdxcp.ko gpu-sched.ko drm_suballoc_helper.ko \
+                   drm_panel_orientation_quirks.ko drm.ko ttm.ko drm_kms_helper.ko \
+                   i915.ko i915-compat.ko; do
+            [ -e "${ROOT_PATH}/modules/update/${M}" ] || {
+              echo "[E] update/ 缺少 ${M}" >&2; exit 1; }
+          done
+          for F in "${ROOT_PATH}/modules/update/"*.ko; do
+            V="$(modinfo -F vermagic "${F}" | awk '{print $1}')"
+            [ "${V}" = "5.10.55+" ] || {
+              echo "[E] $(basename "${F}") vermagic=${V}，期望 5.10.55+" >&2; exit 1; }
+          done
+          echo "[I] update 模块数: $(ls "${ROOT_PATH}/modules/update/"*.ko | wc -l)"
+
+          mkdir -p "${ROOT_PATH}/output/modules"
+          cp -rf "${ROOT_PATH}/modules/"* "${ROOT_PATH}/output/modules/"
+
+      - name: Tar to Artifacts
+        run: |
+          ROOT_PATH=${{ github.workspace }}
+          VERSION=${{ matrix.version }}
+          PLATFORM=${{ matrix.platform }}
+
+          . ${ROOT_PATH}/ainas-modules/compile-ck.sh
+          KVER="$(getKver "${ROOT_PATH}" "${VERSION}" "${PLATFORM}" "${ROOT_PATH}/dsm_linux")"
+
+          OFFICIAL_PATH=""
+          PARTY3RD_PATH="${ROOT_PATH}/ainas-cks/thirdparty/${PLATFORM}-${VERSION}-${KVER}"
+
+          echo "copy 3rd modules"
+          [ -d "${PARTY3RD_PATH}" ] && cp -rf ${PARTY3RD_PATH}/* ${ROOT_PATH}/output/modules/
+
+          # Task#206：update/ 同名 .ko 删除 root 同名产物（与主流程 modules.yml 一致）。
+          if [ -d "${ROOT_PATH}/output/modules/update" ]; then
+            for U in "${ROOT_PATH}/output/modules/update"/*.ko; do
+              [ -e "${U}" ] || continue
+              B="$(basename "${U}")"
+              if [ -f "${ROOT_PATH}/output/modules/${B}" ]; then
+                rm -f "${ROOT_PATH}/output/modules/${B}"
+                echo "[Task#206] 移除 root 同名模块 ${B}（保留 update/ 版）"
+              fi
+            done
+          fi
+
+          echo "assert: 去重后 root 与 update 无同名 .ko"
+          DUP=0
+          for U in "${ROOT_PATH}/output/modules/update/"*.ko; do
+            B="$(basename "${U}")"
+            if [ -e "${ROOT_PATH}/output/modules/${B}" ]; then
+              echo "[E] root 仍残留同名 ${B}" >&2
+              DUP=1
+            fi
+          done
+          [ "${DUP}" -eq 0 ] || exit 1
+          for M in amdgpu.ko radeon.ko gpu-sched.ko drm.ko ttm.ko drm_kms_helper.ko; do
+            [ ! -e "${ROOT_PATH}/output/modules/${M}" ] || {
+              echo "[E] 打包产物 root 层仍有 ${M}" >&2; exit 1; }
+            [ -e "${ROOT_PATH}/output/modules/update/${M}" ] || {
+              echo "[E] 打包产物 update 层缺少 ${M}" >&2; exit 1; }
+          done
+
+          echo "assert: 包内全部 .ko 的未解析符号可在「内核面 ∪ 包内导出面」解析"
+          # 内核面用本次自编内核的 Module.symvers（vmlinux + 内建），再并上包内所有 .ko 的导出。
+          python3 - "${ROOT_PATH}" <<'PY'
+          import subprocess, sys, pathlib
+          root = pathlib.Path(sys.argv[1])
+          symvers = root / "dsm_linux" / "Module.symvers"
+          provided = set()
+          for line in symvers.read_text(errors="replace").splitlines():
+              p = line.split("\t")
+              if len(p) >= 2:
+                  provided.add(p[1])
+          mods = sorted((root / "output/modules").glob("*.ko")) + \
+                 sorted((root / "output/modules/update").glob("*.ko"))
+          for ko in mods:
+              out = subprocess.run(["nm", "-g", "--defined-only", str(ko)],
+                                   capture_output=True, text=True).stdout
+              for l in out.splitlines():
+                  p = l.split()
+                  if len(p) >= 3 and p[-2] in ("T", "D", "R", "B"):
+                      provided.add(p[-1])
+          bad = 0
+          for ko in mods:
+              out = subprocess.run(["nm", "-g", "-u", str(ko)],
+                                   capture_output=True, text=True).stdout
+              miss = set()
+              for l in out.splitlines():
+                  p = l.split()
+                  if len(p) >= 2 and p[-2] == "U":
+                      miss.add(p[-1].split("@")[0])
+              miss -= provided
+              if miss:
+                  bad += 1
+                  print(f"[E] {ko.relative_to(root)} 未解析 {len(miss)}: {sorted(miss)[:12]}")
+          print(f"[I] 检查模块 {len(mods)}，缺口模块 {bad}")
+          sys.exit(1 if bad else 0)
+          PY
+
+          echo "check depends"
+          for M in $(ls ${ROOT_PATH}/output/modules/*.ko ${ROOT_PATH}/output/modules/update/*.ko 2>/dev/null | xargs -n1 basename); do
+            function _copydepends() {
+              if [ ! -f "${ROOT_PATH}/output/modules/${1}" ] && [ ! -f "${ROOT_PATH}/output/modules/update/${1}" ] && [ ! -f "${OFFICIAL_PATH/hda1/rd}/${1}" ]; then
+                if [ -f "${OFFICIAL_PATH}/${1}" ]; then
+                  echo "[W] '${PLATFORM}-${KVER}' - '${M}' depends '${1}' copied from official hda1"
+                  cp -f "${OFFICIAL_PATH}/${1}" "${ROOT_PATH}/output/modules"
+                else
+                  echo "[E] '${PLATFORM}-${KVER}' - '${M}' depends '${1}' does not exist."
+                fi
+              fi
+              D=""
+              [ -z "${D}" ] && [ -f "${ROOT_PATH}/output/modules/${1}" ] && D="${ROOT_PATH}/output/modules/${1}"
+              [ -z "${D}" ] && [ -f "${ROOT_PATH}/output/modules/update/${1}" ] && D="${ROOT_PATH}/output/modules/update/${1}"
+              [ -z "${D}" ] && [ -f "${OFFICIAL_PATH/hda1/rd}/${1}" ] && D="${OFFICIAL_PATH/hda1/rd}/${1}"
+              if [ -n "${D}" ]; then
+                depends=($(modinfo -F depends "${D}" 2>/dev/null | sed 's/,/ /g' || :))
+                if [ ${#depends[*]} -gt 0 ]; then
+                  for k in ${depends[@]}; do
+                    { [ -f "${ROOT_PATH}/output/modules/${k}.ko" ] || [ -f "${ROOT_PATH}/output/modules/update/${k}.ko" ]; } && continue
+                    _copydepends "${k}.ko"
+                  done
+                fi
+              fi
+            }
+            _copydepends "${M}"
+          done
+
+          tar -zcf ${ROOT_PATH}/modules-${PLATFORM}-${VERSION}-${KVER}.tgz -C ${ROOT_PATH}/output/modules .
+
+      - name: Upload to Artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-cks-amd-${{ matrix.version }}-${{ matrix.platform }}
+          path: |
+            modules-*.tgz

@@ -95,7 +95,16 @@ jobs:
           PLATFORM=${{ matrix.platform }}
 
           git clone -b ${PLATFORM}-${VERSION}-5.10.55 --depth=1 https://github.com/myp015/dsm_linux.git
-          git clone --depth=1 https://github.com/myp015/intel-gpu-i915-backports.git
+          # Task#206：AMD 与 i915 必须共用同一套 6.5 DRM 栈（主流程 modules-3rd.yml 同款）。
+          # 默认分支 mainline-tracking-v6.5 不含 drivers/gpu/drm/amd 与 radeon，必须用
+          # amd-backport。两条断言防止分支 tip 回退到未修复状态（NUMA 门控对应
+          # Task#202 的 contig_page_data 缺口）。
+          git clone -b amd-backport --depth=1 https://github.com/myp015/intel-gpu-i915-backports.git
+          test -f "${ROOT_PATH}/intel-gpu-i915-backports/defconfigs/amd" || {
+            echo "[E] amd-backport 分支缺少 defconfigs/amd" >&2; exit 1; }
+          grep -q 'defined(CONFIG_ACPI_NUMA) && defined(CONFIG_NUMA)' \
+            "${ROOT_PATH}/intel-gpu-i915-backports/drivers/gpu/drm/amd/amdgpu/amdgpu_acpi.c" || {
+            echo "[E] amd-backport 缺少 amdgpu NUMA 门控（CONFIG_ACPI_NUMA && CONFIG_NUMA）" >&2; exit 1; }
 
           . ${ROOT_PATH}/ainas-modules/compile-ck.sh
 
@@ -110,14 +119,21 @@ jobs:
           cp -f "${ROOT_PATH}/ainas-modules/src/${KVER}-ck/defines.${PLATFORM}" "${ROOT_PATH}/ainas-modules/src/${KVER}-ck/defines"
           makemodules "${ROOT_PATH}" "${VERSION}" "${PLATFORM}" "${ROOT_PATH}/dsm_linux" "${ROOT_PATH}/ainas-modules/src/${KVER}-ck" "${ROOT_PATH}/modules"
 
-          # if ! echo "geminilakenk" | grep -wq "${PLATFORM}"; then
-            echo "makei915"
-            makei915 "${ROOT_PATH}" "${VERSION}" "${PLATFORM}" "${ROOT_PATH}/dsm_linux" "${ROOT_PATH}/intel-gpu-i915-backports" "${ROOT_PATH}/modules/update"
-          # fi
+          # Task#206：amdgpu.o 是 1462 个对象的 multi-object 链接，工作区长路径下命令行
+          # 约 180KB，超过 /bin/sh -c 的 MAX_ARG_STRLEN（128KB），make 会报
+          # "Argument list too long"（Error 127）。构建树复制到 /b 后约 88KB，
+          # 留出余量（与主流程 modules-3rd.yml 同款做法）。
+          BUILD_ROOT=/b
+          sudo rm -rf "${BUILD_ROOT}"
+          sudo mkdir -p "${BUILD_ROOT}"
+          sudo chown "$(id -u):$(id -g)" "${BUILD_ROOT}"
+          cp -a "${ROOT_PATH}/intel-gpu-i915-backports/." "${BUILD_ROOT}/"
 
-          # 对齐 RR 官方 cks.yml 流程（RR 无 relocateDupUpdate）：根目录布局由 defines
-          # 天然决定（update/-only 模块 =n，makemodules 不产根目录副本），makei915
-          # 无条件输出 update/ 栈，下方 cp -rf 保留根目录 + update/ 双套，与 RR 官方一致。
+          echo "makei915"
+          makei915 "${ROOT_PATH}" "${VERSION}" "${PLATFORM}" "${ROOT_PATH}/dsm_linux" "${BUILD_ROOT}" "${ROOT_PATH}/modules/update" amd
+
+          # root 5.10 与 update/ 6.5 双套产物并存；同名模块由下方 Tar 步骤统一去重
+          # （Task#206 起不再沿用 RR 的“不做 relocateDupUpdate”布局）。
           mkdir -p "${ROOT_PATH}/output/modules"
           cp -rf "${ROOT_PATH}/modules/"* "${ROOT_PATH}/output/modules/"
 
@@ -186,6 +202,24 @@ jobs:
           echo "copy 3rd modules"
           [ -d "${PARTY3RD_PATH}" ] && cp -rf ${PARTY3RD_PATH}/* ${ROOT_PATH}/output/modules/
 
+          # Task#206：update/ 里存在的同名 .ko，一律删除 root 同名产物（与主流程
+          # modules.yml Task#202 规则一致）。5.x 的 GPU/DRM 栈（drm/ttm/gpu-sched/
+          # dmabuf/drm_kms_helper/i915/amdgpu/radeon…）自本任务起统一由 update/ 的
+          # 6.5 backport 栈提供；root 5.10 同名模块若残留，eudev 平铺 update/ 后两份
+          # 会被 depmod 当成同一模块的不同版本 → 混栈 ABI 断裂（本次 amdgpu/radeon
+          # 115 条 Unknown symbol 的直接形态）。放在 thirdparty 合并之后，防止第三方
+          # 层重新注入同名文件；前提是 OFFICIAL_PATH=""（上方已固定）。
+          if [ -d "${ROOT_PATH}/output/modules/update" ]; then
+            for U in "${ROOT_PATH}/output/modules/update"/*.ko; do
+              [ -e "${U}" ] || continue
+              B="$(basename "${U}")"
+              if [ -f "${ROOT_PATH}/output/modules/${B}" ]; then
+                rm -f "${ROOT_PATH}/output/modules/${B}"
+                echo "[Task#206] 移除 root 同名模块 ${B}（保留 update/ 版）"
+              fi
+            done
+          fi
+
           if [ "${PLATFORM}" != "geminilakenk" ]; then
             for K in CHECK_SIGNATURE I2C_SMBUS I2C_I801; do
               grep -q "^CONFIG_${K}=y$" "${ROOT_PATH}/dsm_linux/include/config/auto.conf" || {
@@ -202,8 +236,10 @@ jobs:
           fi
 
           echo "check depends"
-          for M in $(ls ${ROOT_PATH}/output/modules 2>/dev/null); do
-            [ -d "${ROOT_PATH}/output/modules/${M}" ] && continue # 跳过子目录（update/），避免把目录当模块名误报 [E] depends does not exist
+          # Task#206：外层遍历同时覆盖 root 与 update/（_copydepends 本就两处都查），
+          # 使 update/amdgpu.ko 这类 6.5 栈模块的依赖缺口在 build 阶段可见；硬阻断
+          # 仍以 release 门禁 G2 为准（本函数沿用既有“探测型”语义，只报 [E] 不退出）。
+          for M in $(ls ${ROOT_PATH}/output/modules/*.ko ${ROOT_PATH}/output/modules/update/*.ko 2>/dev/null | xargs -n1 basename); do
             function _copydepends() {
               if [ ! -f "${ROOT_PATH}/output/modules/${1}" ] && [ ! -f "${ROOT_PATH}/output/modules/update/${1}" ] && [ ! -f "${OFFICIAL_PATH/hda1/rd}/${1}" ]; then
                 if [ -f "${OFFICIAL_PATH}/${1}" ]; then
