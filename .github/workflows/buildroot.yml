@@ -95,6 +95,17 @@ jobs:
           echo "${VERSION}" > "VERSION"
           zip -9 ${{ github.workspace }}/buildroot-${VERSION}.zip -j bzImage-rr initrd-rr VERSION
 
+      - name: Upload buildroot package
+        # 未填版本号时 Release 跳过，打完的 buildroot-test.zip 原本会随 runner 销毁、
+        # 取不回来。与 modules.yml / cks.yml / lkms.yml / addons.yml 同规则（Task#207）：
+        # 不发布也要留下编译产物（发布时也照传一份，便于直接取件核对）。
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: buildroot-package
+          path: buildroot-*.zip
+          if-no-files-found: warn
+
       - name: Release
         if: success() && env.VERSION != ''
         uses: ncipollo/release-action@v1
