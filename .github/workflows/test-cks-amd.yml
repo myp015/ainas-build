@@ -110,11 +110,21 @@ jobs:
 
           echo "assert: update/ 6.5 栈产物齐全"
           for M in amdgpu.ko radeon.ko amdxcp.ko gpu-sched.ko drm_suballoc_helper.ko \
-                   drm_panel_orientation_quirks.ko drm.ko ttm.ko drm_kms_helper.ko \
-                   i915.ko i915-compat.ko; do
+                   drm.ko ttm.ko drm_kms_helper.ko i915.ko i915-compat.ko; do
             [ -e "${ROOT_PATH}/modules/update/${M}" ] || {
               echo "[E] update/ 缺少 ${M}" >&2; exit 1; }
           done
+          # drm_panel_orientation_quirks.ko 是条件产物：回移植栈的 kconfig 发现 5.10
+          # 内核已把该子系统内建（CONFIG_DRM_PANEL_ORIENTATION_QUIRKS=y，如 epyc7002）
+          # 时不会重复编成模块（重复导出会被内核拒载，Task#205 同类问题），此时
+          # drm_get_panel_orientation_quirk 由内核导出面提供，i915/amdgpu 的
+          # drm_connector_set_panel_orientation_with_quirk 由 update/drm.ko 提供。
+          if /bin/grep -qx 'CONFIG_DRM_PANEL_ORIENTATION_QUIRKS=y' "${ROOT_PATH}/dsm_linux/.config"; then
+            echo "[I] 内核内建 drm_panel_orientation_quirks，update/ 无该模块属正常"
+          else
+            [ -e "${ROOT_PATH}/modules/update/drm_panel_orientation_quirks.ko" ] || {
+              echo "[E] update/ 缺少 drm_panel_orientation_quirks.ko（内核未内建）" >&2; exit 1; }
+          fi
           for F in "${ROOT_PATH}/modules/update/"*.ko; do
             V="$(modinfo -F vermagic "${F}" | awk '{print $1}')"
             [ "${V}" = "5.10.55+" ] || {
