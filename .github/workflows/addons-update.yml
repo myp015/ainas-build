@@ -6,7 +6,7 @@
 #
 # RR 原版结构（保持不动），仅仓库地址适配 myp015：
 #   checkout RROrg/rr-addons → myp015/ainas-addons（secrets.AiNas）
-#   rr-misc 保持原样         → myp015 无 rr-misc 且上游已删（404），本 workflow 依赖它编译 SPK，仍不可用
+#   checkout RROrg/rr-misc   → myp015/ainas-rr-misc（secrets.AiNas，上游已删，本仓库为复刻）
 #
 
 name: Update addons update
@@ -41,8 +41,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@main
         with:
-          repository: RROrg/rr-misc
-          token: ${{ secrets.RRORG }}
+          repository: myp015/ainas-rr-misc
+          token: ${{ secrets.AiNas }}
           path: rr-misc
 
       - name: Init Env
@@ -76,6 +76,10 @@ jobs:
           if [ -n "$(ls ${ROOT_PATH}/spksrc/packages/rr-misc_${MAKE_ARCH}_*.spk 2>/dev/null)" ]; then
             mkdir -p ${ROOT_PATH}/spk
             tar -xf ${ROOT_PATH}/spksrc/packages/rr-misc_${MAKE_ARCH}_*.spk -C ${ROOT_PATH}/spk
+            # misc/all/usr 完全来自 package.tgz，先清空再解包，避免旧版本残留文件
+            # （如已不再需要的 libubsan.so*）混入 addon。
+            rm -rf ainas-addons/misc/all/usr
+            mkdir -p ainas-addons/misc/all/usr
             tar -zxf ${ROOT_PATH}/spk/package.tgz -C ainas-addons/misc/all/usr
             rm -rf ${ROOT_PATH}/spk
           fi
