@@ -393,3 +393,45 @@ PR 合并点），而 `fix/partition-guard-20261011` 已领先 **55 个提交**�
 其余 5 个调用方不受影响。
 验证：run `38850658666` @ `main` success —— `ainas-rr` 的 `consts.sh` 从 `26.10.13`
 更新为 `26.10.15`（push 提交 `d37ffd05`），Release `26.10.15` 创建。
+
+## 2026-10-22 复刻 rr-misc：两条交叉编译坑
+
+**1. `AC_FUNC_MALLOC` 在交叉编译下必然误判**
+configure 无法运行测试程序 → `ac_cv_func_malloc_0_nonnull=no` →
+config.h 把 `malloc` 重定义为 `rpl_malloc`。若包本身不带 gnulib 的实现，
+链接期就是 `undefined reference to rpl_malloc`（acpid 2.0.28 实测）。
+修法：`CONFIGURE_ARGS += ac_cv_func_malloc_0_nonnull=yes` 与
+`ac_cv_func_realloc_0_nonnull=yes`（spksrc 的 autossh/davfs2 已是此写法）。
+看到 `rpl_malloc`/`rpl_realloc` 未定义，先查 config.h 的 `HAVE_MALLOC 0`。
+
+**2. Synology 工具链裁剪了内核 UAPI 头**
+sys-root 里没有 `linux/if_macsec.h`，而 wpa_supplicant 的 defconfig
+默认开 `CONFIG_DRIVER_MACSEC_LINUX=y` → `fatal error: linux/if_macsec.h`。
+根因不是代码，是头文件缺失。libnl 源码树自带兼容副本
+（`include/linux-private/linux/if_macsec.h`），编译前拷到独立的
+include 目录并 `-I` 进去即可，不要为了过编译关掉功能（旧 addon 带 macsec）。
+判据：新旧二进制 `strings | grep macsec_linux` 对比，别凭感觉降级。
+
+**3. 新 spksrc 的 .spk 是不压缩的 POSIX tar**
+`tar -zxf *.spk` 会报 "not in gzip format"，要用 `tar -xf`；
+里面的 `package.tgz` 才是 gzip。
+
+**4. automake 里写死的绝对安装目录会绕过 prefix**
+open-vm-tools 的 `scripts/Makefile.am` 把 `vmsupportdir = /usr/bin`、
+`confdir = /etc/vmware-tools` 写死，`make install DESTDIR=... prefix=...`
+只给 prefix 拼 DESTDIR，这两个目录直接落到 `$(DESTDIR)/usr/bin`、
+`$(DESTDIR)/etc`，不在 staging 前缀下 → spk copy 阶段 PLIST `Cannot stat`。
+判据：日志里 `install -c ... '/.../install/usr/bin'` 没有 `var/packages/.../target`。
+修法：给 `post_install_target` 追加 recipe 搬进 `$(STAGING_INSTALL_PREFIX)`。
+
+**5. 覆盖 spksrc 的 POST_INSTALL_TARGET 变量无效**
+`spksrc.build/install.mk` 在 include 时就用 `$(POST_INSTALL_TARGET)` 展开了
+`$(INSTALL_PLIST): ...` 与 `$(POST_INSTALL_TARGET): $(INSTALL_TARGET)` 的接线，
+include 之后再改这个变量不会被调用。要挂钩子就直接给 `post_install_target`
+追加 recipe（同一目标可以多次定义，前后依赖保留）。
+
+**6. 手动删过 staging 目录后，cookie 必须成组清**
+`install/` 是所有依赖共享的暂存区。删掉它却留着 `*-install_done` /
+`*-dependency_done`，下次构建会认为依赖都已就绪，跳过重装 → configure
+找不到 pkg-config（如 `glib2 >= 2.34.0 is required`）。清理范围：
+`.*-install_done`、`.*-plist_done`、`.*-dependency_done`、`.dependency_done`。
