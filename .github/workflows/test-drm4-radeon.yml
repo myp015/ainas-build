@@ -17,19 +17,21 @@ on:
         required: true
         default: main
         type: string
+      platform:
+        description: 编译目标平台
+        required: true
+        default: all
+        type: choice
+        options:
+          - all
+          - r1000
 
 jobs:
   drm4:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - version: 7.2
-            platform: broadwellnk
-          - version: 7.2
-            platform: geminilake
-          - version: 7.2
-            platform: r1000
+        include: ${{ inputs.platform == 'r1000' && fromJSON('[{"version":"7.2","platform":"r1000"}]') || fromJSON('[{"version":"7.2","platform":"broadwellnk"},{"version":"7.2","platform":"geminilake"},{"version":"7.2","platform":"r1000"}]') }}
 
     runs-on: ubuntu-latest
     steps:
