@@ -435,3 +435,13 @@ include 之后再改这个变量不会被调用。要挂钩子就直接给 `post
 `*-dependency_done`，下次构建会认为依赖都已就绪，跳过重装 → configure
 找不到 pkg-config（如 `glib2 >= 2.34.0 is required`）。清理范围：
 `.*-install_done`、`.*-plist_done`、`.*-dependency_done`、`.dependency_done`。
+
+**7. `cpp` 前端不接受 2 个以上输入，gcc 驱动的 `-E` 可以**
+grub 2.12 生成 `libgrub.pp` 的规则是 `$(CPP) <200+ 源文件> > libgrub.pp`。
+spksrc 把 `CPP` 设成 `<triple>-cpp`，该前端最多吃 2 个文件，第 3 个直接
+`fatal error: too many input files`；换成宿主 `/usr/bin/cpp`（GCC 14）同样失败。
+根因是 `cpp` 这个程序名本身的限制，不是版本或架构问题：同一套工具链里
+`<triple>-gcc -E` 一次 300 个文件都正常（gcc 驱动会顺序拼接）。
+修法：`make CPP="$(call tc,gcc) -E"`；spksrc 自己的
+`mk/spksrc.native/env-default.mk` 也是 `CPP="$(NATIVE_CC) -E"`，属既有惯例。
+判据：`cpp` 报 too many input files 时先用 `gcc -E` 复现，不要改上游规则。
