@@ -433,6 +433,57 @@ jobs:
             abi-*
             firmware
 
+      - name: Copy DSM 6.2 modules
+        # DSM 6.2 不在本仓库的编译矩阵内（matrix/build.json 只到 7.0+），且 RR 24.4.0
+        # 是最后一个支持 6.2 的 loader 版本 —— 按"直接复制成品"原则，6.2 的 modules 以
+        # **已入库的成品**形式放在 syno-modules/6.24-25556/，此处只拷贝，不下载、不编译。
+        # 内容与 RR 24.4.0 updateall-24.4.0.zip 里的 modules.tgz 逐字节一致，仅补了 6.2- 前缀。
+        # 该目录的重新生成工具：.github/scripts/fetch-rr62-modules.sh（维护用，不参与发布链）。
+        #
+        # 命名必须与 menu.sh 的 PKVER="${KPRE:+${KPRE}-}${KVER}" 严格一致：
+        #   本仓库 <platform>-<kpre>-<kver>.tgz，6.2 的 kpre="6.2" ⇒ <platform>-6.2-<kver>.tgz
+        # 6.2 的 kver 只有 4.4.59 / 3.10.105（7.x 是 4.4.180 / 4.4.302），
+        # 所以这些包只服务 6.2，不会与 7.x 串味、也不会与编译产物重名。
+        #
+        # 落 output_all/（下一步 zip -j 平铺进 modules-<VERSION>.zip，ainas-rr 的 getModules
+        # 正是从这个 zip 取模块）；后续 release/ 解压镜像也会带上这 8 个平台，
+        # check_om_override.sh 的 target 正则 ^[^-]+-7\.[0-9]-[0-9] 天然跳过非 7.x。
+        # 绝不写 syno-modules/modules —— 那是 gate_release.py 的"产物不缩水"基线。
+        run: |
+          set -euo pipefail
+          SRC="${GITHUB_WORKSPACE}/syno-modules/6.24-25556"
+          DST="${GITHUB_WORKSPACE}/output_all"
+
+          # 期望清单钉死平台与 kver：少一个平台也必须失败 —— 否则 6.2 loader 会在
+          # 运行时才报 "modules 不存在"，而整条发布链全绿（unpackModules 吞 tar 错误）。
+          EXPECTED="
+            apollolake-6.2-4.4.59
+            broadwell-6.2-3.10.105
+            broadwellnk-6.2-4.4.59
+            broadwellntbap-6.2-4.4.59
+            denverton-6.2-4.4.59
+            geminilake-6.2-4.4.59
+            purley-6.2-4.4.59
+            v1000-6.2-4.4.59
+          "
+
+          [ -d "${SRC}" ] || { echo "ERROR: ${SRC} 不存在（syno-modules 未检出 6.24-25556/）" >&2; exit 1; }
+          [ -d "${DST}" ] || { echo "ERROR: ${DST} 不存在（download all 未产出）" >&2; exit 1; }
+
+          COUNT=0
+          for NAME in ${EXPECTED}; do
+            F="${SRC}/${NAME}.tgz"
+            [ -f "${F}" ] || { echo "ERROR: 缺少 ${F}" >&2; exit 1; }
+            tar -tzf "${F}" >/dev/null 2>&1 || { echo "ERROR: ${NAME}.tgz 不是有效 tgz" >&2; exit 1; }
+            [ "$(tar -tzf "${F}" | wc -l)" -gt 0 ] || { echo "ERROR: ${NAME}.tgz 为空归档" >&2; exit 1; }
+            [ ! -e "${DST}/${NAME}.tgz" ] || { echo "ERROR: ${NAME}.tgz 与编译产物重名" >&2; exit 1; }
+            cp -f "${F}" "${DST}/"
+            echo "6.2 modules: ${NAME}.tgz ($(stat -c%s "${F}") 字节)"
+            COUNT=$((COUNT + 1))
+          done
+          [ "${COUNT}" -eq 8 ] || { echo "ERROR: 只拷到 ${COUNT} 个（应为 8）" >&2; exit 1; }
+          echo "6.2 modules 拷贝完成：${COUNT} 个"
+
       - name: Zip modules
         run: |
           VERSION="${{ env.VERSION }}"

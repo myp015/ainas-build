@@ -73,9 +73,10 @@ on:
         type: string
         default: ""
       dsm_version:
-        description: "DSM 版本编号（从 pats.xlsx 获取，选择 >= 7.2.1 的所有版本）"
+        description: "DSM 版本编号（6.2.4 走 RR 24.4.0 的模块与型号白名单，其余来自 pats.xlsx）"
         type: choice
         options:
+          - "6.2.4"
           - "7.2.1"
           - "7.2.2"
           - "7.3.0"
