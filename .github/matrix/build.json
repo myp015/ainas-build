@@ -1,5 +1,5 @@
 {
-  "_note": "modules.yml 与 lkms.yml 共用的平台×版本矩阵。include = 实际参与构建的项；disabled（原单#注释）与 unsupported（原双#注释）仅作文档保留，不参与构建。",
+  "_note": "modules.yml 与 lkms.yml 共用的平台×版本矩阵。include = 两者都构建的项；lkm_only = 仅 lkms.yml 构建（模块仓库无对应支持，如 DSM 6.2）；disabled（原单#注释）与 unsupported（原双#注释）仅作文档保留，不参与构建。",
   "include": [
     {
       "version": "7.0",
@@ -254,7 +254,7 @@
       "platform": "v1000nk"
     }
   ],
-  "disabled": [
+  "lkm_only": [
     {
       "version": "6.2",
       "platform": "apollolake"
@@ -266,6 +266,10 @@
     {
       "version": "6.2",
       "platform": "broadwellnk"
+    },
+    {
+      "version": "6.2",
+      "platform": "broadwellntbap"
     },
     {
       "version": "6.2",
@@ -282,7 +286,9 @@
     {
       "version": "6.2",
       "platform": "v1000"
-    },
+    }
+  ],
+  "disabled": [
     {
       "version": "7.0",
       "platform": "braswell"

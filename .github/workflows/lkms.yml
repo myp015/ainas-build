@@ -26,6 +26,7 @@ on:
 jobs:
   # 平台×版本矩阵的单一来源：.github/matrix/build.json
   # （modules.yml / lkms.yml 原本各自内联了 195 行逐字节相同的 include 块）
+  # lkms.yml 额外合并 lkm_only（DSM 6.2 等仅 LKM 侧支持的组合），modules.yml 不读该键。
   setup:
     runs-on: ubuntu-latest
     outputs:
@@ -38,13 +39,17 @@ jobs:
       - name: Generate matrix
         id: gen
         run: |
-          echo "matrix=$(jq -c '{include: .include}' .github/matrix/build.json)" >>"$GITHUB_OUTPUT"
-          echo "生效 $(jq '.include | length' .github/matrix/build.json) 项；" \
+          echo "matrix=$(jq -c '{include: (.include + (.lkm_only // []))}' .github/matrix/build.json)" >>"$GITHUB_OUTPUT"
+          echo "生效 $(jq '.include + (.lkm_only // []) | length' .github/matrix/build.json) 项；" \
+               "其中仅 LKM $(jq '(.lkm_only // []) | length' .github/matrix/build.json) 项；" \
                "已禁用 $(jq '.disabled | length' .github/matrix/build.json) 项；" \
                "不支持 $(jq '.unsupported | length' .github/matrix/build.json) 项"
   build:
     needs: setup
     strategy:
+      # 单个平台失败（如 6.2 的 3.10.105 工具链问题、toolchain 下载瞬时网络错误）
+      # 不取消其余 job：默认 fail-fast 会把剩下的全标 cancelled，等于丢掉整轮验收
+      fail-fast: false
       matrix: ${{ fromJson(needs.setup.outputs.matrix) }}
     runs-on: ubuntu-latest
     steps:
