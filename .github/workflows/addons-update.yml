@@ -195,6 +195,42 @@ jobs:
           fi
           echo "######## build grub end ########"
 
+      # DSM 6.x（内核 4.x/3.x，glibc 2.20 / libstdc++ 6.0.20）需要两件 7.1 产物跑不了的东西：
+      #   cpio          —— 7.1 工具包里的 cpio 需要 glibc 2.26
+      #   powersched    —— 7.1 的 powersched 需要 GLIBCXX_3.4.21（gcc 5+）
+      # 其余 addon 载荷在 6.x 上用的是 RR 24.4.0 成品或 DSM 6.2 自带二进制（见各 addon/install.sh）。
+      - name: Build Package 6.2
+        run: |
+          ROOT_PATH="${{ github.workspace }}"
+          MAKE_ARCH="x64-6.2.4" # DSM 6.2.4-25556
+          cd ${ROOT_PATH}
+
+          echo "######## build cpio 6.2 begin ########"
+          docker run -v ${ROOT_PATH}/spksrc:/spksrc -w /spksrc/cross/cpio ghcr.io/synocommunity/spksrc make "arch-${MAKE_ARCH}"
+          CPIO_BIN="${ROOT_PATH}/spksrc/cross/cpio/work-${MAKE_ARCH}/install/usr/local/cpio/bin/cpio"
+          if [ ! -f "${CPIO_BIN}" ]; then
+            echo "ERROR: cpio for ${MAKE_ARCH} not built"
+            exit 1
+          fi
+          # mountloader-6.2.tgz = 7.1 工具包原样，仅替换 bin/cpio（工具包内唯一需要 glibc > 2.20 的文件）
+          rm -rf "${ROOT_PATH}/mountloader-6.2"
+          mkdir -p "${ROOT_PATH}/mountloader-6.2"
+          tar -zxf ainas-addons/mountloader/all/addons/mountloader-7.1.tgz -C "${ROOT_PATH}/mountloader-6.2"
+          cp -vpf "${CPIO_BIN}" "${ROOT_PATH}/mountloader-6.2/bin/cpio"
+          tar -czf ainas-addons/mountloader/all/addons/mountloader-6.2.tgz -C "${ROOT_PATH}/mountloader-6.2" .
+          rm -rf "${ROOT_PATH}/mountloader-6.2"
+          echo "######## build cpio 6.2 end ########"
+
+          echo "######## build powersched 6.2 begin ########"
+          docker run -v ${ROOT_PATH}/spksrc:/spksrc -w /spksrc/cross/powersched ghcr.io/synocommunity/spksrc make "arch-${MAKE_ARCH}"
+          PS_BIN="${ROOT_PATH}/spksrc/cross/powersched/work-${MAKE_ARCH}/install/usr/local/powersched/sbin/powersched"
+          if [ ! -f "${PS_BIN}" ]; then
+            echo "ERROR: powersched for ${MAKE_ARCH} not built"
+            exit 1
+          fi
+          cp -vpf "${PS_BIN}" ainas-addons/powersched/all/usr/sbin/powersched-6.2
+          echo "######## build powersched 6.2 end ########"
+
       - name: Upload to Artifacts
         if: success() && inputs.push == false
         uses: actions/upload-artifact@v7
