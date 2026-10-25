@@ -74,8 +74,9 @@ meson setup "${BUILD_ROOT}/mesa-build" "${MESA_SRC}" \
     --buildtype=release \
     --strip \
     -Dgallium-drivers=r600 \
+    -Ddri-drivers= \
     -Dvulkan-drivers= \
-    -Dplatforms=surfaceless \
+    -Dplatforms= \
     -Dglx=disabled \
     -Degl=disabled \
     -Dgbm=disabled \
