@@ -98,7 +98,7 @@ install -m 0755 "${SO}" "${OUT_DIR}/libgallium_drv_video.so"
 # expat 无法通过 meson 选项关闭：xmlconfig（pipe-loader 依赖）无条件使用它，
 # 而 Emby 容器里没有 libexpat.so.1。产物已带 RPATH=$ORIGIN，把 18.04 的
 # libexpat.so.1 一并放到同目录即可被加载，部署时两个文件须一起拷贝。
-EXPAT_SO=$(readlink -f /usr/lib/x86_64-linux-gnu/libexpat.so.1)
+EXPAT_SO=$(ldconfig -p | awk '/libexpat\.so\.1 .*x86-64/{print $NF; exit}')
 test -f "${EXPAT_SO}"
 install -m 0755 "${EXPAT_SO}" "${OUT_DIR}/libexpat.so.1"
 
