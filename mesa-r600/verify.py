@@ -74,8 +74,17 @@ def main():
             errors.append("依赖了随包库但缺少 RUNPATH=$ORIGIN")
         so_dir = os.path.dirname(os.path.abspath(SO))
         for lib in bundled:
-            if not os.path.isfile(os.path.join(so_dir, lib)):
+            path = os.path.join(so_dir, lib)
+            if not os.path.isfile(path):
                 errors.append(f"随包依赖 {lib} 不在产物目录，部署会失败")
+                continue
+            # 随包库自身也必须在容器 glibc 2.27 下可加载
+            lv = [tuple(map(int, v.split("."))) for v in
+                  re.findall(r"GLIBC_(\d+\.\d+(?:\.\d+)?)", run("readelf", "--version-info", path))]
+            ltop = max(lv) if lv else (0, 0)
+            print(f"{lib} 最高 GLIBC: {'.'.join(map(str, ltop))}")
+            if ltop > (2, 27):
+                errors.append(f"随包库 {lib} 需要 GLIBC {ltop}，超过 2.27")
 
     size = os.path.getsize(SO)
     print(f"产物大小: {size / 1024 / 1024:.1f} MiB")

@@ -43,7 +43,7 @@ echo "== [2/6] 安装构建依赖 =="
 apt-get ${APT_OPTS} install -y --no-install-recommends \
     build-essential ca-certificates curl pkg-config bison flex ninja-build \
     python3 python3-pip python3-setuptools python3-wheel python3-mako \
-    libdrm-dev zlib1g-dev libzstd-dev libexpat1-dev libudev-dev libelf-dev
+    libdrm-dev zlib1g-dev libzstd-dev libexpat1-dev libudev-dev libelf-dev patchelf
 
 echo "== [3/6] meson / ninja =="
 # PyPI 上支持 python3.6 的最后一个 meson 是 0.61.5（0.63 起要求 >=3.7）
@@ -85,8 +85,7 @@ meson setup "${BUILD_ROOT}/mesa-build" "${MESA_SRC}" \
     -Dbuild-tests=false \
     -Dvalgrind=disabled \
     -Dosmesa=false \
-    -Dzstd=disabled \
-    -Dc_link_args='-Wl,-rpath,$ORIGIN'
+    -Dzstd=disabled
 ninja -C "${BUILD_ROOT}/mesa-build"
 
 SO="${BUILD_ROOT}/mesa-build/src/gallium/targets/va/libgallium_drv_video.so"
@@ -95,8 +94,12 @@ test -f "${SO}"
 install -d "${OUT_DIR}"
 install -m 0755 "${SO}" "${OUT_DIR}/libgallium_drv_video.so"
 
+# RUNPATH 用 patchelf 打：meson 的 c_link_args 会经 ninja/shell 两层展开，
+# 传 $ORIGIN 会被吃掉（实测产物没有任何 RUNPATH），patchelf 最可靠。
+patchelf --set-rpath '$ORIGIN' "${OUT_DIR}/libgallium_drv_video.so"
+
 # expat 无法通过 meson 选项关闭：xmlconfig（pipe-loader 依赖）无条件使用它，
-# 而 Emby 容器里没有 libexpat.so.1。产物已带 RPATH=$ORIGIN，把 18.04 的
+# 而 Emby 容器里没有 libexpat.so.1。产物已带 RUNPATH=$ORIGIN，把 18.04 的
 # libexpat.so.1 一并放到同目录即可被加载，部署时两个文件须一起拷贝。
 EXPAT_SO=$(ldconfig -p | awk '/libexpat\.so\.1 .*x86-64/{print $NF; exit}')
 test -f "${EXPAT_SO}"
