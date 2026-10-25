@@ -105,6 +105,11 @@ EXPAT_SO=$(ldconfig -p | awk '/libexpat\.so\.1 .*x86-64/{print $NF; exit}')
 test -f "${EXPAT_SO}"
 install -m 0755 "${EXPAT_SO}" "${OUT_DIR}/libexpat.so.1"
 
+# 上下文创建测试程序：必须用 18.04 的 glibc 编译，容器里的 glibc 是 2.27，
+# 且容器没有 /lib64 目录，运行时要用 /lib/ld-linux-x86-64.so.2 显式拉起。
+gcc -O2 -o "${OUT_DIR}/test_ctx" "${REPO_DIR}/mesa-r600/test/test_ctx.c" -ldl
+chmod 0755 "${OUT_DIR}/test_ctx"
+
 ls -l "${OUT_DIR}/"
 
 echo "== 构建完成 =="
