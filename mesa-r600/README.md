@@ -67,16 +67,31 @@ docker run --rm -v "$PWD:/work" -w /work ubuntu:18.04 bash /work/mesa-r600/build
 # 或走 CI：GitHub Actions → "Build Mesa r600 VA" → Run workflow
 ```
 
-产物：`mesa-r600/out/libgallium_drv_video.so`，由 `verify.py` 校验
-`__vaDriverInit_1_22`、GLIBC ≤ 2.27、无 libLLVM、依赖库白名单。
+产物目录 `mesa-r600/out/`：
+
+* `libgallium_drv_video.so` —— 驱动本体
+* `libexpat.so.1` —— 随包依赖（见下）
+
+由 `verify.py` 校验 `__vaDriverInit_1_22`、GLIBC ≤ 2.27、无 libLLVM、
+依赖库白名单、`RUNPATH=$ORIGIN` 且随包库在位。
+
+### 依赖处理
+
+* **libzstd**：`-Dzstd=disabled` 关掉（shader cache 回落 zlib），容器里没有它。
+* **libexpat**：Mesa 21.3.9 没有 xmlconfig 开关，`src/gallium/auxiliary/pipe-loader`
+  无条件链接 `idep_xmlconfig` → expat，无法通过选项关闭。因此产物带
+  `RUNPATH=$ORIGIN`，并附 18.04 的 `libexpat.so.1` 一起部署到同目录。
+* **libstdc++ / libgcc_s**：容器自带（libstdc++.so.6.0.28），无需额外部署。
 
 ## 部署（高影响，需单独确认）
 
 容器内 `/lib/dri/r600_drv_video.so` 与 `radeonsi_drv_video.so` 都是
-`libgallium_drv_video.so` 的软链，因此只需替换后者：
+`libgallium_drv_video.so` 的软链，因此只需替换后者；`libexpat.so.1` 必须与它
+放在同一目录（靠 `RUNPATH=$ORIGIN` 定位）：
 
 ```bash
 docker cp libgallium_drv_video.so emby-8096:/lib/dri/libgallium_drv_video.so
+docker cp libexpat.so.1           emby-8096:/lib/dri/libexpat.so.1
 ```
 
 然后重启 Emby 容器并重新触发一次硬件转码。

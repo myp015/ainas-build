@@ -40,12 +40,12 @@ jobs:
           set -euo pipefail
           SO=mesa-r600/out/libgallium_drv_video.so
           file "$SO"
-          ls -l "$SO"
+          ls -l mesa-r600/out/
           python3 mesa-r600/verify.py "$SO"
 
       - name: 上传产物
         uses: actions/upload-artifact@v4
         with:
           name: mesa-r600-va-${{ github.sha }}
-          path: mesa-r600/out/libgallium_drv_video.so
+          path: mesa-r600/out/
           if-no-files-found: error

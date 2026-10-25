@@ -14,11 +14,14 @@ import sys
 
 SO = sys.argv[1] if len(sys.argv) > 1 else "mesa-r600/out/libgallium_drv_video.so"
 
+# 容器内已有的库
 ALLOWED_NEEDED = {
     "libdrm.so.2",
     "libdrm_radeon.so.1",
     "libdrm_amdgpu.so.1",
     "libz.so.1",
+    "libstdc++.so.6",
+    "libgcc_s.so.1",
     "libm.so.6",
     "libdl.so.2",
     "librt.so.1",
@@ -26,6 +29,9 @@ ALLOWED_NEEDED = {
     "libc.so.6",
     "ld-linux-x86-64.so.2",
 }
+
+# 容器内没有、需随产物一起部署到同一目录的库（依赖 RUNPATH=$ORIGIN 定位）
+BUNDLED_NEEDED = {"libexpat.so.1"}
 
 
 def run(*args):
@@ -50,13 +56,26 @@ def main():
     if top > (2, 27):
         errors.append(f"GLIBC 符号版本 {top} 超过容器上限 2.27")
 
-    needed = re.findall(r"Shared library: \[(.*?)\]", run("readelf", "-d", SO))
+    dynamic = run("readelf", "-d", SO)
+    needed = re.findall(r"Shared library: \[(.*?)\]", dynamic)
     print("NEEDED:", ", ".join(needed))
     if any("LLVM" in n for n in needed):
         errors.append("产物依赖了 libLLVM（容器内不存在）")
-    extra = sorted(set(needed) - ALLOWED_NEEDED)
+    extra = sorted(set(needed) - ALLOWED_NEEDED - BUNDLED_NEEDED)
     if extra:
         errors.append(f"出现未预期依赖: {extra}")
+
+    # 随产物部署的库必须真的在产物目录里，且 RUNPATH 含 $ORIGIN 才能被找到
+    bundled = sorted(set(needed) & BUNDLED_NEEDED)
+    if bundled:
+        runpath = re.search(r"\(RUNPATH\)\s+Library runpath: \[(.*?)\]", dynamic)
+        print("RUNPATH:", runpath.group(1) if runpath else "(无)")
+        if not runpath or "$ORIGIN" not in runpath.group(1):
+            errors.append("依赖了随包库但缺少 RUNPATH=$ORIGIN")
+        so_dir = os.path.dirname(os.path.abspath(SO))
+        for lib in bundled:
+            if not os.path.isfile(os.path.join(so_dir, lib)):
+                errors.append(f"随包依赖 {lib} 不在产物目录，部署会失败")
 
     size = os.path.getsize(SO)
     print(f"产物大小: {size / 1024 / 1024:.1f} MiB")

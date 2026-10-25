@@ -84,7 +84,9 @@ meson setup "${BUILD_ROOT}/mesa-build" "${MESA_SRC}" \
     -Dgallium-va=enabled \
     -Dbuild-tests=false \
     -Dvalgrind=disabled \
-    -Dosmesa=false
+    -Dosmesa=false \
+    -Dzstd=disabled \
+    -Dc_link_args='-Wl,-rpath,$ORIGIN'
 ninja -C "${BUILD_ROOT}/mesa-build"
 
 SO="${BUILD_ROOT}/mesa-build/src/gallium/targets/va/libgallium_drv_video.so"
@@ -92,6 +94,14 @@ test -f "${SO}"
 
 install -d "${OUT_DIR}"
 install -m 0755 "${SO}" "${OUT_DIR}/libgallium_drv_video.so"
-ls -l "${OUT_DIR}/libgallium_drv_video.so"
+
+# expat 无法通过 meson 选项关闭：xmlconfig（pipe-loader 依赖）无条件使用它，
+# 而 Emby 容器里没有 libexpat.so.1。产物已带 RPATH=$ORIGIN，把 18.04 的
+# libexpat.so.1 一并放到同目录即可被加载，部署时两个文件须一起拷贝。
+EXPAT_SO=$(readlink -f /usr/lib/x86_64-linux-gnu/libexpat.so.1)
+test -f "${EXPAT_SO}"
+install -m 0755 "${EXPAT_SO}" "${OUT_DIR}/libexpat.so.1"
+
+ls -l "${OUT_DIR}/"
 
 echo "== 构建完成 =="
