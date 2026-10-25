@@ -41,14 +41,14 @@ fi
 
 echo "== [2/6] 安装构建依赖 =="
 apt-get ${APT_OPTS} install -y --no-install-recommends \
-    build-essential ca-certificates curl pkg-config bison flex \
+    build-essential ca-certificates curl pkg-config bison flex ninja-build \
     python3 python3-pip python3-setuptools python3-wheel python3-mako \
     libdrm-dev zlib1g-dev libzstd-dev libexpat1-dev libudev-dev libelf-dev
 
 echo "== [3/6] meson / ninja =="
-# py3.6 上 pip 最高只能到 21.3.x
+# PyPI 上支持 python3.6 的最后一个 meson 是 0.61.5（0.63 起要求 >=3.7）
 python3 -m pip install --no-cache-dir --upgrade 'pip<22'
-python3 -m pip install --no-cache-dir 'meson==0.63.3' 'ninja==1.11.1'
+python3 -m pip install --no-cache-dir 'meson==0.61.5'
 meson --version
 ninja --version
 
