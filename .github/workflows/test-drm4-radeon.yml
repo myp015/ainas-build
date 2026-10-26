@@ -11,6 +11,11 @@ name: Test drm4 radeon (Task#204)
 
 on:
   workflow_dispatch:
+    inputs:
+      ref:
+        description: 'redpill-dual-drm-backports 提交/分支（默认 main）'
+        required: false
+        default: 'main'
 
 jobs:
   drm4:
@@ -31,6 +36,7 @@ jobs:
         uses: actions/checkout@main
         with:
           repository: myp015/redpill-dual-drm-backports
+          ref: ${{ inputs.ref }}
           token: ${{ secrets.AiNas }}
           path: redpill-dual-drm-backports
 
