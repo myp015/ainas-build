@@ -92,6 +92,15 @@ if [ -n "${VERSION}" ]; then
       break
     fi
   done
+  # 循环有上限：走满 20 次仍未避开已存在的 tag，说明这一段的号基本被占满
+  # （典型是把别的仓库的版本号当成本仓库版本传进来，例如把 addons 26.10.14
+  # 传给 ainas-rr，而 ainas-rr 自己已经发到 26.10.39）。此时若继续往下建，
+  # 会在 15 分钟构建完成后的 release-action 处才报 422 already_exists ——
+  # 必须在这里 fail fast，别把错误推迟到构建之后。
+  if tag_exists "${VERSION}"; then
+    echo "[E] ${REPO} 没有可用版本号：${REQUESTED:-auto} 起连续 20 个 tag 均已存在" >&2
+    exit 1
+  fi
 fi
 
 # stdout 输出纯版本号：GITHUB_ENV 只对后续步骤生效，同一步骤内要立刻用到
