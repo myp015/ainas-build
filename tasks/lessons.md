@@ -464,11 +464,18 @@ AINAS_VERSION、EFI），`patch_ram`（2in1 变体）与 `patch_addons_disk` 都
 设备侧配套：`fan.iynas.cn/order_auth.php` 原按 `updateall-<版本>-<type>.zip` 拼地址，
 已改为「version 里有 `file=` 行就用它，否则沿用旧名」，否则新包下载 404。
 
-## 2026-10-27 — 2in1 repack 在 GitHub runner 上会写满磁盘（既有问题）
+## 2026-10-27 — 2in1 repack 写满的是 **P6 分区**，不是 runner 磁盘
 
 `repack_2in1` 往 `/tmp/repack/o/p6/modules/` rsync 时 `No space left on device`，
 表现为 `rsync error … code 11` 后 `##[error]Process completed with exit code 11`。
-07:21 与 08:26 两次 `build (DS918+)` 都栽在这里，与当次代码改动无关：
-runner 约 14G，rr.img 2.1G + 解压产物 + 全平台 modules 叠加即超限。
-判据：失败路径落在 `/tmp/repack/o/p6/...`。修法方向：repack 前清掉 rr.img 中间件，
-或把暂存目录放到 workspace 外并边拷边删。
+
+**先前的「runner 磁盘只有 14G」归因是错的**：`/tmp/repack/o/p6` 是挂在镜像
+P6 分区上的挂载点，ENOSPC 来自**分区内**空间耗尽。基础镜像的 P6(RAMDISK)
+只有 2048MiB，而 loader `rr.img` 的 p3 载荷自 `modules-26.10.22` 起已约 2.0GB
+（modules 976M + cks 429M + initrd 245M + 其余 72M），写到 modules 末尾
+（`v1000nk-7.3`，字母序靠后）就满。铁证：loader 自己的 p3 分区是
+`7133184` 扇区 = 3.4GiB（`sfdisk -d rr.img`），P6 取 2GiB 本就不够。
+
+判据要点：**看到挂载点路径下的 ENOSPC，先 `df` 那个挂载点**，别拿宿主磁盘容量解释。
+已修（ainas-2in1 `46dbd1f`）：整盘 14.5G→18G、P6 2048→2560MiB，并在
+`repack_2in1_Img` 的 p3→p6 rsync 前加 `du -sb` vs `df` 容量校验 fail fast。
