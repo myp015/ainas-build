@@ -7,8 +7,13 @@
 # 2in1 GPT 引导盘构建：
 #   checkout myp015/ainas-2in1（secrets.AiNas）
 #   → script/install-grub-2.14.sh 构建 grub-2.14（i386-pc/i386-efi/x86_64-efi）
-#   → script/2in1_grubmake-gpt.sh 生成 14.5G GPT 双引导镜像 grub.img.gz
-#   → push 回 myp015/ainas-2in1 的 img/grub.img.gz（secrets.AiNas）
+#   → script/2in1_grubmake-gpt.sh 生成 14.5G GPT 双引导镜像
+#   → push 回 myp015/ainas-2in1 的 img/（secrets.AiNas）
+#
+# 基础镜像按 DSM 版本族二选一（脚本第 3 个参数）：
+#   7.2 → grub.img.gz       P1=16777216 扇区(8GiB)，起点 8192
+#   6.2 → grub_6.2.img.gz   P1=4980480 扇区(2.375GiB)，起点 2048（对齐真机 synopartition）
+# 下游 2in1func.sh 的 docker_build 按 DSM 主版本自动挑对应文件。
 #
 # 说明：2in1_grubmake-gpt.sh 直接使用脚本同目录的 mdadm-syno（<script_dir>/mdadm-syno）。
 #
@@ -30,6 +35,13 @@ on:
         description: "P6(RAMDISK) 大小 MiB"
         default: "2048"
         type: string
+      dsm_version:
+        description: "DSM 版本族（决定 P1 布局与产物名）"
+        type: choice
+        options:
+          - "7.2"
+          - "6.2"
+        default: "7.2"
 
 jobs:
   grub:
@@ -64,7 +76,7 @@ jobs:
 
       - name: Make 2in1 GPT image
         run: |
-          bash ainas-2in1/script/2in1_grubmake-gpt.sh "${{ inputs.disk_size }}" "${{ inputs.p6_size_mib }}"
+          bash ainas-2in1/script/2in1_grubmake-gpt.sh "${{ inputs.disk_size }}" "${{ inputs.p6_size_mib }}" "${{ inputs.dsm_version }}"
 
       - name: Upload artifact
         if: success() && inputs.push == false
@@ -72,20 +84,29 @@ jobs:
         with:
           name: grub
           path: |
-            grub.img.gz
+            grub*.img.gz
           retention-days: 5
 
       - name: Check and Push
         if: success() && inputs.push == true
         run: |
-          [ -f "grub.img.gz" ] || { echo "[E] grub.img.gz 未生成"; exit 1; }
+          # 产物名必须与 2in1_grubmake-gpt.sh 的 DSM 版本族一致
+          case "${{ inputs.dsm_version }}" in
+            6 | 6.*) IMG="grub_6.2.img.gz" ;;
+            7 | 7.*) IMG="grub.img.gz" ;;
+            *)
+              echo "[E] 不支持的 DSM 版本: ${{ inputs.dsm_version }}"
+              exit 1
+              ;;
+          esac
+          [ -f "${IMG}" ] || { echo "[E] ${IMG} 未生成"; exit 1; }
 
-          mv -f grub.img.gz ainas-2in1/img/grub.img.gz
+          mv -f "${IMG}" "ainas-2in1/img/${IMG}"
 
           cd ainas-2in1
           echo "Git push ..."
           git pull
-          status=$(git status -s | grep -E 'img/grub.img.gz' | awk '{printf " %s", $2}')
+          status=$(git status -s | grep -F "img/${IMG}" | awk '{printf " %s", $2}')
           if [ -n "${status}" ]; then
             git add ${status}
             git commit -m "update $(date +%Y-%m-%d" "%H:%M:%S)"
