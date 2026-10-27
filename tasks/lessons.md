@@ -572,3 +572,23 @@ data_offset 之后」去算。2026-10-28 直接抓产物镜像头部（`gh api -
 
 判据上也要注意：`blkid` 报 `linux_raid_member` 不代表不能按 ext4 挂，
 `mount` 不带 `-t ext4` 时它会听 libblkid 的自动识别而拒绝，必须显式 `-t ext4`。
+
+## 2026-10-28 — 7.x 装完自己就重启：`reboot.cgi` 会超时，别把它当致命错误
+
+run `40594465296`（DS920+ / 7.2.1）在 6.2 的改法上回归失败：
+
+```
+[INFO] 触发 DSM 重启（webman/reboot.cgi）
+curl: (28) Operation timed out after 10002 milliseconds with 36 bytes received
+[E] 触发重启失败：reboot.cgi 请求出错
+```
+
+区别就在这里：**6.2 装完不会自己重启**（靠前端 `installer.js` 在 Success 时 POST
+`webman/reboot.cgi`），**7.x 装完系统自行重启**，这时 POST 的连接会被挂住/切断——
+重启其实已经发生。把它当致命错误就直接误杀。
+
+两条修正（ainas-2in1 `54e245f`）：
+1. POST 非零退出只告警不退出，是否真重启交给等待循环判定
+   （**内核 banner 次数增加 + Web 连续两次可达**）；真没重启照样超时失败，所以不算吞异常。
+2. **`BOOTS_BEFORE` 必须在 POST 之前取**：7.x 自行重启时，POST 期间新的一次启动会被
+   算进基线，后面「次数变多」的判据就永远不成立（这是比超时更隐蔽的坑）。
