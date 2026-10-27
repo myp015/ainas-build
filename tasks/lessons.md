@@ -445,3 +445,30 @@ spksrc 把 `CPP` 设成 `<triple>-cpp`，该前端最多吃 2 个文件，第 3 
 修法：`make CPP="$(call tc,gcc) -E"`；spksrc 自己的
 `mk/spksrc.native/env-default.mk` 也是 `CPP="$(NATIVE_CC) -E"`，属既有惯例。
 判据：`cpp` 报 too many input files 时先用 `gcc -E` 复现，不要改上游规则。
+
+## 2026-10-27 — 上游文案改名会让「前缀替换」的 sed 产出双重前缀
+
+ainas-rr 把 `consts.sh` 的 `RR_TITLE` 从 `"RR v${RR_VERSION}"` 改成
+`"AiNas_RR v${RR_VERSION}"` 后，2in1 的 `s/RR v/AiNas 2in1 Loader v/` 命中的是
+`AiNas_RR v` 里的后半段 → 得到 `AiNas_AiNas 2in1 Loader v…`。
+正则本身没写错，错在**替换目标的尾串与被替换串共享**（同 149 行「长名先于短名」）。
+修法：先匹配最长的新前缀（`s/AiNas_RR v/…/g`），再留旧前缀分支给历史镜像。
+验证：把新旧两版输入各跑一次 `diff`，结果必须为空——只验新版会漏掉兼容分支。
+
+## 2026-10-27 — 2in1 升级包的 DT / 非 DT 两份本来就等价
+
+`update-list.yml` 只取 p1/p3 的通用文件（bzImage/initrd/cks/lkms/addons/modules、
+AINAS_VERSION、EFI），`patch_ram`（2in1 变体）与 `patch_addons_disk` 都不看型号，
+`patch_part1` 唯一依赖型号的产物 grub.cfg 不进包 ⇒ 拆两个 job 属重复构建。
+现在只留一个 `__UPDATE__`，产 `updateall-<版本>.zip`。
+设备侧配套：`fan.iynas.cn/order_auth.php` 原按 `updateall-<版本>-<type>.zip` 拼地址，
+已改为「version 里有 `file=` 行就用它，否则沿用旧名」，否则新包下载 404。
+
+## 2026-10-27 — 2in1 repack 在 GitHub runner 上会写满磁盘（既有问题）
+
+`repack_2in1` 往 `/tmp/repack/o/p6/modules/` rsync 时 `No space left on device`，
+表现为 `rsync error … code 11` 后 `##[error]Process completed with exit code 11`。
+07:21 与 08:26 两次 `build (DS918+)` 都栽在这里，与当次代码改动无关：
+runner 约 14G，rr.img 2.1G + 解压产物 + 全平台 modules 叠加即超限。
+判据：失败路径落在 `/tmp/repack/o/p6/...`。修法方向：repack 前清掉 rr.img 中间件，
+或把暂存目录放到 workspace 外并边拷边删。
