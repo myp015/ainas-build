@@ -24,6 +24,10 @@ on:
         description: "DS918+"
         type: boolean
         default: false
+      model_ds3617xs:
+        description: "DS3617xs（仅 DSM 6.2 支持，7.x 请勿勾选）"
+        type: boolean
+        default: false
       model_ds920p:
         description: "DS920+"
         type: boolean
@@ -73,7 +77,7 @@ on:
         type: string
         default: ""
       dsm_version:
-        description: "DSM 版本编号（6.2.4 走 RR 24.4.0 的模块与型号白名单，其余来自 pats.xlsx）"
+        description: "DSM 版本编号（6.2.4 仅编译 DS918+/DS3617xs，其余来自 pats.xlsx）"
         type: choice
         options:
           - "6.2.4"
@@ -143,7 +147,20 @@ jobs:
           set -euo pipefail
           MODELS=()
 
-          if [ "${{ inputs.all_models }}" = "全选" ]; then
+          if [ "${{ inputs.dsm_version }}" = "6.2.4" ]; then
+            # DSM 6.2 型号白名单：只有 DS918+(apollolake) / DS3617xs(broadwellnk) 有 6.2 版本
+            echo "[INFO] DSM 6.2 开启型号白名单：DS918+ / DS3617xs"
+            if [ "${{ inputs.all_models }}" = "全选" ]; then
+              MODELS+=("DS918+" "DS3617xs")
+            else
+              [ "${{ inputs.model_ds918p }}"   = "true" ] && MODELS+=("DS918+")
+              [ "${{ inputs.model_ds3617xs }}" = "true" ] && MODELS+=("DS3617xs")
+            fi
+            if [ ${#MODELS[@]} -eq 0 ] && [ "${{ inputs.build_update_zip }}" != "true" ]; then
+              echo "[E] DSM 6.2 仅支持 DS918+ / DS3617xs，请至少勾选其一"
+              exit 1
+            fi
+          elif [ "${{ inputs.all_models }}" = "全选" ]; then
             echo "[INFO] 已开启全选，将编译所有支持的型号"
             MODELS+=("DS918+" "DS920+" "DS923+" "DS925+" "DS3622xs+" "SA6400" "DS425+" "DVA3221" "DVA1622")
           else
@@ -157,9 +174,13 @@ jobs:
             [ "${{ inputs.model_dva3221 }}"   = "true" ] && MODELS+=("DVA3221")
             [ "${{ inputs.model_dva1622 }}"   = "true" ] && MODELS+=("DVA1622")
           fi
-          
-          # 追加自定义型号（工作流未列出的型号）
+
+          # 追加自定义型号（工作流未列出的型号）；6.2 走白名单，不接受自定义型号
           CUSTOM_RAW="${{ inputs.custom_models }}"
+          if [ "${{ inputs.dsm_version }}" = "6.2.4" ] && [ -n "$(printf '%s' "$CUSTOM_RAW" | tr -d '[:space:]')" ]; then
+            echo "[WARN] DSM 6.2 走型号白名单，自定义型号 ${CUSTOM_RAW} 已忽略"
+            CUSTOM_RAW=""
+          fi
           if [ -n "$(printf '%s' "$CUSTOM_RAW" | tr -d '[:space:]')" ]; then
             echo "[INFO] 检测到自定义型号输入: ${CUSTOM_RAW}"
             IFS=',' read -ra CUSTOM_ARR <<< "$CUSTOM_RAW"
