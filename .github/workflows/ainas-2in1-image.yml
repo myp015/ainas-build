@@ -273,8 +273,8 @@ jobs:
       ACTION_TOKEN: ${{ secrets.AiNas }}
       RR_ASSET_URL: ${{ needs.resolve-release.outputs.asset_url }}
       RR_TAG: ${{ needs.resolve-release.outputs.tag }}
-      # ainas-rr 的版本号（YY.M.N）与上游 RR 的 Docker 镜像 tag 不是同一套，
-      # wjz304/rr 上并不存在 26.10.x；构建工具链固定用 latest。
+      # 构建容器镜像源为 myp015/rr（rootfs 取自 ainas-rr 的 initrd，由 docker.yml 构建，
+      # 含 DSM 6.2 平台数据）；ainas-rr 的版本号（YY.M.N）与镜像 tag 不同步，固定用 latest。
       RR_DOCKER_TAG: latest
       LINE: ${{ inputs.dsm_version }}
     steps:
