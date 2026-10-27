@@ -274,7 +274,7 @@ jobs:
           # ── 目录变量 ──────────────────────────────────────────────
           WORKDIR="$PWD"
           AINAS2IN1_DIR="${WORKDIR}/.2in1"
-          PAT_XLSX_URL="https://raw.githubusercontent.com/RROrg/rr/main/docs/pats.xlsx"
+          PAT_XLSX_URL="https://raw.githubusercontent.com/myp015/ainas-rr/main/docs/pats.xlsx"
           PAT_XLSX="/tmp/pats.xlsx"
           DSM_INSTALL_DIR="/tmp/dsm-install"
           PART1_PATH="/mnt/p1"
