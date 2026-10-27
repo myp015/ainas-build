@@ -521,3 +521,54 @@ P6 分区上的挂载点，ENOSPC 来自**分区内**空间耗尽。基础镜像
 
 **顺带修掉**：Web 探活里 `OUT=$(curl ...)` 在重启期间连接被拒会返回非零，`set -e` 直接
 打断脚本，已加 `|| true`。
+
+## 2026-10-27 — 纠正上面那条「容器里只有 2 次 init」：现在是 3 次启动 / 2 种内核 banner
+
+上面 2026-10-27 那条结论在当时的镜像上成立，但 **2in1 镜像把 loader 与 DSM 装到同一块盘之后，
+update7→update8 的完整链路在容器内确实跑通了**。run `40535696916`（DS918+ / 6.2.4）实测：
+
+- DSM 内核启动 **3 次**：安装引导（build3）→ update7（build3）→ update8（build7）；
+- 内核 banner 出现 **2 种**：`Linux version 4.4.59+ (root@build3)` 与 `... (root@build7)`；
+- 串口在 update8 启动 ~120s 之后完全静默（每轮 0 新字节），与真机日志节律一致；
+- 所以「6.2 装完」的判据可以、且必须用**不同 DSM banner 的种类数 ≥2**，
+  而不是某个固定秒数或「静默」时间。静默只能作为附加条件。
+
+推论：上面那条「容器内无法判断 6.2 装没装完」**已作废**，勿再据此回退判据。
+
+## 2026-10-28 — 未初始化 DSM 6.2 的 `get_state.cgi` 会返回 500：Web 判据只能看「有没有 HTTP 状态行」
+
+同一个 run 的取证里，`/webman/get_state.cgi` 在 update8 的最终系统上返回 **HTTP 500**：
+一次响应体为空（0B），另一次却有 **11939 字节**。所以两种常见判据都不成立：
+
+- 按状态码判 200 → 永远失败；
+- 按「响应体非空」判 → 时真时假（取决于 nginx 有没有给出错误页），第一次失败 run 就是被它判成
+  「Web 不可达」白等 900 秒。
+
+**正确判据**：只要拿到 HTTP 状态行（`curl -w '%{http_code}'` 不是 `000`，即不是 connection
+refused/超时）就算 Web 层起来了；系统是否真的进了 update8 由**内核 banner 种类数**兜底。
+状态码与体长仍要打进日志（`WEB_STATE=路径|状态码|体长`），否则下次又只能靠猜。
+
+## 2026-10-28 — `losetup --show -o` 必须带 `--find`，否则被拒且错误被 `2>/dev/null` 吞掉
+
+想在分区设备内的某个偏移处看文件系统（DSM 的 md 成员）：
+
+```sh
+losetup --show -o 2097152 /dev/loop0p1            # ✗ 报错：
+# the options --{sizelimit,partscan,read-only,show} are allowed during loop device setup only
+losetup --find --show -o 2097152 /dev/loop0p1    # ✓
+```
+
+脚本里原本写的是前者 + `2>/dev/null || continue`，于是 9 个候选偏移全部**静默 continue**，
+日志只剩一句「按常见偏移都挂不上」，完全看不出是命令用法错。教训：**探测类命令的 stderr
+不许直接丢弃**，至少要在失败时打印一次原文。
+
+顺带：DSM 盘上 p1/p2 的 `blkid` 都是 `linux_raid_member`（p1=md0 系统、p2=md1 swap），
+但 **6.2 的成员其实是 fs 从分区起点开始**——不能按「md 1.2 超级块在 4KiB、数据在
+data_offset 之后」去算。2026-10-28 直接抓产物镜像头部（`gh api -H "Range: bytes=0-…"`
++ 部分 `gzip -dc`）实测 DS918+/6.2.4 的 p1：ext4 魔数 `0xEF53` 在分区 **+1024**，
+而分区 +4096 处既不是 `0xa92b4efc` 也不是其它已知魔数 ⇒ `mount -t ext4` 直接用**偏移 0**
+即可（`losetup --find --show -o 0`）。md 1.2 的 `data_offset` 解析只能当兜底分支保留，
+解析成功才用，失败是正常路径，别把它当成「必须解析出来」的前置条件。
+
+判据上也要注意：`blkid` 报 `linux_raid_member` 不代表不能按 ext4 挂，
+`mount` 不带 `-t ext4` 时它会听 libblkid 的自动识别而拒绝，必须显式 `-t ext4`。
