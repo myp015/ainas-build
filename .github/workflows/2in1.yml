@@ -330,7 +330,12 @@ jobs:
           SAFE_TAG="${TAG//./_}"
           echo "SAFE_TAG=${SAFE_TAG}" >> "$GITHUB_ENV"
 
-          ARTIFACT="${MODEL}_${VER_SLUG}_15g_Ainas2in1_${SAFE_TAG}"
+          # 制品名的容量后缀跟随基础镜像的实际大小（GiB，四舍五入），镜像扩容后自动同步，
+          # 不再出现「18G 的镜像却叫 15g」。本工作流只有 7.x 版本线，固定用 grub.img.gz。
+          GRUB_IMAGE="grub.img.gz"
+          IMG_GIB=$(( ( $(gzip -l "${AINAS2IN1_DIR}/img/${GRUB_IMAGE}" | awk 'NR==2{print $2}') + 536870912 ) / 1073741824 ))
+
+          ARTIFACT="${MODEL}_${VER_SLUG}_${IMG_GIB}g_Ainas2in1_${SAFE_TAG}"
           echo "[INFO] 型号=${MODEL} 目标DSM版本=${VERSION} DSM系列=${LINE_REQ} 制品版本=${VER_SLUG}"
 
           # ── 系统依赖 ───────────────────────────────────────────────
@@ -417,7 +422,7 @@ jobs:
             dsm_setup "$MODEL" "$LINE_REQ" "$PAT_XLSX_URL" "$DSM_INSTALL_DIR" \
               "$WORKDIR" \
               "$AINAS2IN1_DIR/docker/docker-compose.yaml" "$DSM_INSTALL_DIR/docker-compose.yaml" \
-              "_15g_Ainas2in1" "$SAFE_TAG" "180" \
+              "_${IMG_GIB}g_Ainas2in1" "$SAFE_TAG" "180" \
               "s#\./rr.img:/rr.img#${WORKDIR}/rr/rr.img:/rr.img#g"
 
             cd "$WORKDIR"
