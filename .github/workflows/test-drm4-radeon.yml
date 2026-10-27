@@ -1,0 +1,174 @@
+#
+# Task#204 验证工作流：4.4.302 双 DRM 栈的 GuC 固件声明（MODULE_FIRMWARE 恢复）、
+# dma_fence cb_list 修复，先在 3 个代表性 target 上跑通再走全量。
+# 注：radeon 已从 4.4.302 移除（用户决定），本工作流不再产出/断言 radeon.ko。
+#
+# 与 modules-3rd.yml 的 drm4 job 的区别：
+#   · 只跑 broadwellnk / geminilake / r1000 的 7.2；
+#   · 额外断言 i915.ko 的 firmware 声明条数（17）与 amdgpu 依赖闭合；
+#   · 不推进发布，仅上传 artifact 供实机验证。
+#
+name: Test drm4 stack (Task#204)
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'redpill-dual-drm-backports 提交/分支（默认 main）'
+        required: false
+        default: 'main'
+
+jobs:
+  drm4:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - version: 7.2
+            platform: broadwellnk
+          - version: 7.2
+            platform: geminilake
+          - version: 7.2
+            platform: r1000
+
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout redpill dual drm
+        uses: actions/checkout@main
+        with:
+          repository: myp015/redpill-dual-drm-backports
+          ref: ${{ inputs.ref }}
+          token: ${{ secrets.AiNas }}
+          path: redpill-dual-drm-backports
+
+      - name: Init Env
+        run: |
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git config --global user.name "github-actions[bot]"
+          sudo timedatectl set-timezone "Asia/Shanghai"
+
+      - name: Build
+        run: |
+          set -euo pipefail
+          ROOT_PATH=${{ github.workspace }}
+          VERSION=${{ matrix.version }}
+          PLATFORM=${{ matrix.platform }}
+          OOT_ROOT="${ROOT_PATH}/redpill-dual-drm-backports"
+
+          echo "getting toolkit"
+          for N in env dev; do
+            for i in $(seq 1 3); do
+              curl -skL --retry 3 "https://global.synologydownload.com/download/ToolChain/toolkit/${VERSION}/${PLATFORM}/ds.${PLATFORM}-${VERSION}.${N}.txz" -o "${ROOT_PATH}/ds.${PLATFORM}-${VERSION}.${N}.txz" \
+                && [ -s "${ROOT_PATH}/ds.${PLATFORM}-${VERSION}.${N}.txz" ] && break
+              echo "Retry download ${N} ${i}/3"
+              sleep 5
+            done
+            mkdir -p "${ROOT_PATH}/ds.${PLATFORM}-${VERSION}.${N}"
+            tar -xhf "${ROOT_PATH}/ds.${PLATFORM}-${VERSION}.${N}.txz" -C "${ROOT_PATH}/ds.${PLATFORM}-${VERSION}.${N}"
+          done
+
+          echo "building dual drm modules"
+          export CROSS_COMPILE=${ROOT_PATH}/ds.${PLATFORM}-${VERSION}.env/usr/local/x86_64-pc-linux-gnu/bin/x86_64-pc-linux-gnu-
+          export KLIB_BUILD=${ROOT_PATH}/ds.${PLATFORM}-${VERSION}.dev/usr/local/x86_64-pc-linux-gnu/x86_64-pc-linux-gnu/sys-root/usr/lib/modules/DSM-${VERSION}/build
+
+          [ -d "${KLIB_BUILD}" ] || { echo "[E] KLIB_BUILD 不存在: ${KLIB_BUILD}"; exit 1; }
+
+          # 与 5.x i915 栈一致的 modinfo 标识（区分自编与官方模块）
+          if [ -f "${KLIB_BUILD}/include/linux/module.h" ] && ! grep -q 'MODULE_INFO(description, _description " (Compiled by ainas' "${KLIB_BUILD}/include/linux/module.h"; then
+            sed -i 's/#define MODULE_DESCRIPTION(_description) MODULE_INFO(description, _description)/#define MODULE_DESCRIPTION(_description) MODULE_INFO(description, _description " (Compiled by ainas for DSM)")/' "${KLIB_BUILD}/include/linux/module.h"
+          fi
+
+          export KBUILD_MODPOST_WARN=1
+          export OOT_KCPPFLAGS="\
+            -I${OOT_ROOT}/compat/backport-include \
+            -I${OOT_ROOT}/include \
+            -I${OOT_ROOT}/include/uapi \
+            -I${OOT_ROOT}/compat \
+            -include ${OOT_ROOT}/compat/drm_compat.h \
+            -include ${OOT_ROOT}/compat/kcl_compat.h \
+            -DCONFIG_FB_DEFERRED_IO -DCONFIG_FB_NOTIFY \
+            -DCONFIG_DRM_I915_CAPTURE_ERROR=1"
+
+          # geminilake/apollolake host 已内建 hdmi/drm_mipi_dsi/sync_file/interval_tree/
+          # fb_notify/intel_gtt（实机 kallsyms 确认），重复生产会 "invalid module format"；
+          # 其余平台 host 没有，由栈内模块补齐。
+          EXTRA_CONFIG="CONFIG_FB_NOTIFY_IN_KERNEL=y"
+          NOHOST_CONFIG="CONFIG_AGP_INTEL=m CONFIG_DRM_MIPI_DSI=m"
+          case "${PLATFORM}" in
+            geminilake|apollolake)
+              EXTRA_CONFIG="$EXTRA_CONFIG CONFIG_DRM_SYNC_FILE_IN_KERNEL=y CONFIG_INTERVAL_TREE_IN_KERNEL=y CONFIG_DRM_HDMI_IN_KERNEL=y"
+              NOHOST_CONFIG=""
+              OOT_KCPPFLAGS="$OOT_KCPPFLAGS -DCONFIG_DRM_HDMI_IN_KERNEL"
+              ;;
+          esac
+
+          make -C "${KLIB_BUILD}" M="${OOT_ROOT}" \
+            CONFIG_DRM=m CONFIG_DRM_KMS_HELPER=m \
+            CONFIG_DRM_I915=m CONFIG_DRM_I915_USERPTR=y \
+            CONFIG_DRM_I915_CAPTURE_ERROR=y \
+            CONFIG_DRM_TTM=m CONFIG_DRM_SCHED=m \
+            CONFIG_DRM_AMDGPU=m \
+            ${NOHOST_CONFIG} \
+            CONFIG_DRM_PANEL_ORIENTATION_QUIRKS=m \
+            ${EXTRA_CONFIG} \
+            KCPPFLAGS="${OOT_KCPPFLAGS}" \
+            modules 2>&1 | tee "${ROOT_PATH}/build.log"
+
+          # fail-fast：未解析/重复导出符号一律视为构建失败（redpill CI 同款判据）
+          if grep -E 'WARNING:.*undefined|WARNING:.*exported twice|Unknown symbol' "${ROOT_PATH}/build.log"; then
+            echo "[E] MODPOST 报告未解析或重复符号" >&2
+            exit 1
+          fi
+
+          KVERSION=$(grep ^VERSION "${KLIB_BUILD}/Makefile" | awk -F' ' '{print $3}')
+          PATCHLEVEL=$(grep ^PATCHLEVEL "${KLIB_BUILD}/Makefile" | awk -F' ' '{print $3}')
+          SUBLEVEL=$(grep ^SUBLEVEL "${KLIB_BUILD}/Makefile" | awk -F' ' '{print $3}')
+          KVER="${KVERSION}.${PATCHLEVEL}.${SUBLEVEL}"
+
+          OUT_MODULES="${ROOT_PATH}/output/update"
+          mkdir -p "${OUT_MODULES}"
+          find "${OOT_ROOT}/drivers/gpu/drm" -name '*.ko' -exec cp -f {} "${OUT_MODULES}/" \;
+          find "${OOT_ROOT}/drivers/char/agp" -name '*.ko' -exec cp -f {} "${OUT_MODULES}/" \; 2>/dev/null || true
+          find "${OOT_ROOT}" -maxdepth 1 -name '*.ko' -exec cp -f {} "${OUT_MODULES}/" \;
+          find "${OUT_MODULES}" -name '*.ko' -exec ${CROSS_COMPILE}strip --strip-debug {} \;
+
+          COUNT=$(find "${OUT_MODULES}" -name '*.ko' | wc -l)
+          echo "[${PLATFORM}-${VERSION}] 产出 ${COUNT} 个 .ko:"
+          ls -l "${OUT_MODULES}"
+          # radeon.ko 已移除，阈值由 10 下调到 8
+          [ "${COUNT}" -ge 8 ] || { echo "[E] 产物数量异常: ${COUNT}" >&2; exit 1; }
+
+          tar -zcf "${ROOT_PATH}/drm4-${PLATFORM}-${VERSION}-${KVER}.tgz" -C "${ROOT_PATH}/output" .
+
+      - name: Verify firmware declarations
+        run: |
+          set -euo pipefail
+          OUT="${{ github.workspace }}/output/update"
+
+          echo "==== i915 firmware 声明 ===="
+          FW=$(modinfo -F firmware "${OUT}/i915.ko" | sort -u)
+          echo "${FW}"
+          N=$(echo "${FW}" | grep -c . || true)
+          echo "条数: ${N}"
+          [ "${N}" -ge 17 ] || { echo "[E] i915 firmware 声明不足 17 条" >&2; exit 1; }
+          # GuC 33.0.0 五款 + HuC 旧版 + DMC 必须齐全（实机 r1000=KBL 需要 kbl_guc_33.0.0.bin）
+          for f in kbl icl skl bxt glk; do
+            echo "${FW}" | grep -q "i915/${f}_guc_33.0.0.bin" \
+              || { echo "[E] 缺少 i915/${f}_guc_33.0.0.bin" >&2; exit 1; }
+          done
+
+          echo "==== amdgpu.ko ===="
+          [ -f "${OUT}/amdgpu.ko" ] || { echo "[E] amdgpu.ko 缺失" >&2; exit 1; }
+          modinfo "${OUT}/amdgpu.ko" | sed -n '1,12p'
+
+          echo "==== depends 链 ===="
+          for M in drm_kms_helper drm ttm gpu-sched amdgpu i915; do
+            [ -f "${OUT}/${M}.ko" ] && echo "${M}: $(modinfo -F depends "${OUT}/${M}.ko")"
+          done
+
+      - name: Upload to Artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: drm4-${{ matrix.version }}-${{ matrix.platform }}
+          path: |
+            drm4-*.tgz
