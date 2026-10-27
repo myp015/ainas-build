@@ -479,3 +479,23 @@ P6 分区上的挂载点，ENOSPC 来自**分区内**空间耗尽。基础镜像
 判据要点：**看到挂载点路径下的 ENOSPC，先 `df` 那个挂载点**，别拿宿主磁盘容量解释。
 已修（ainas-2in1 `46dbd1f`）：整盘 14.5G→18G、P6 2048→2560MiB，并在
 `repack_2in1_Img` 的 p3→p6 rsync 前加 `du -sb` vs `df` 容量校验 fail fast。
+
+## 2026-10-27 — 2in1 6.2 线取不到 PAT：pats.xlsx 根本没有 6.2 行
+
+修掉上面的 ENOSPC 后，同一个 job 立刻在下一步暴露第二个坑：
+`[E] PAT 版本不匹配: req=6.2.4, got=7.4.1-90080-0`。
+
+`dsm_setup` 从 `RROrg/rr` 的 `docs/pats.xlsx` 里按 `6.2.4-` 前缀找 PAT，找不到就退到
+「该型号所有版本里最大的」（7.4.1），再做前缀校验并退出。上游表由 Synology **7.x** 升级 API
+生成，**一行 6.2 都没有**（RR 24.4.0 起已移除 6.2 支持）。
+
+修法（ainas-rr `c340f6d` / ainas-2in1 `1fdb52e` / ainas-build `a1afbb2e`）：
+- `scripts/func.py` 的 `getpats` 在写文件前固定补 `DS918+`/`DS3617xs` 的 `6.2.4-25556-0`
+  （官方 URL，`+`→`%2B`，sum 全 0），所以 data.yml 将来刷新也不会丢这两行；
+- 三个工作流（2in1 / ainas-2in1-image / ova）的 `PAT_XLSX_URL` 改指
+  `myp015/ainas-rr/main/docs/pats.xlsx`；
+- 同步重新生成 `docs/pats.xlsx` 与 `docs/pats.json`。
+
+实测 run `40487882268` 全绿：`PAT_VERSION=6.2.4-25556-0`、容器安装完成、制品已发布。
+教训：**fail-fast 修掉一个会立刻暴露下一个**——「跑到下一个错」不等于修完，
+要一直跑到整条链路绿为止。
