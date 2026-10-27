@@ -143,7 +143,7 @@ jobs:
           MODELS=()
 
           if [ "${{ inputs.dsm_version }}" = "6.2.4" ]; then
-            # DSM 6.2 型号白名单：只有 DS918+(apollolake) / DS3617xs(broadwellnk) 有 6.2 版本
+            # DSM 6.2 型号白名单：只有 DS918+(apollolake) / DS3617xs(broadwell 3.10.105) 有 6.2 版本
             echo "[INFO] DSM 6.2 开启型号白名单：DS918+ / DS3617xs"
             if [ "${{ inputs.all_models }}" = "全选" ]; then
               MODELS+=("DS918+" "DS3617xs")
@@ -197,8 +197,7 @@ jobs:
           MODELS=("${UNIQ_MODELS[@]}")
 
           if [ "${{ inputs.build_update_zip }}" = "true" ]; then
-            MODELS+=("__UPDATE_DT__")
-            MODELS+=("__UPDATE_NODT__")
+            MODELS+=("__UPDATE__")
           fi
 
           if [ ${#MODELS[@]} -eq 0 ]; then
@@ -258,7 +257,7 @@ jobs:
           exit 1
 
   build:
-    name: ${{ matrix.model == '__UPDATE_DT__' && 'build (update-dt)' || (matrix.model == '__UPDATE_NODT__' && 'build (update-nodt)' || format('build ({0})', matrix.model)) }}
+    name: ${{ matrix.model == '__UPDATE__' && 'build (update)' || format('build ({0})', matrix.model) }}
     needs: [resolve-release, select-models, ensure-release]
     runs-on: ubuntu-latest
     strategy:
@@ -329,16 +328,18 @@ jobs:
           . "$AINAS2IN1_DIR/script/2in1func.sh" "${AINAS_TOKEN}"
 
           # ── UPDATE 特殊处理 ────────────────────────────────────────
+          # 升级包只出一份，不再按 DT / 非 DT 平台区分：update-list.yml 只取 p1/p3 的通用文件，
+          # patch_ram（2in1 变体）与 patch_addons_disk 都不依赖型号，被 patch_part1 改写的
+          # grub.cfg 也不在 update 包里 —— 两个任务的产物本来就逐字节等价。
+          # 占位型号仅用于跑通主流程；6.2 没有 epyc7002，故按版本线挑一个存在的型号。
           UPDATE_ONLY="false"
-          UPDATE_FLAVOR=""
-          if [ "${MODEL}" = "__UPDATE_DT__" ]; then
+          if [ "${MODEL}" = "__UPDATE__" ]; then
             UPDATE_ONLY="true"
-            UPDATE_FLAVOR="dt"
-            MODEL="SA6400"
-          elif [ "${MODEL}" = "__UPDATE_NODT__" ]; then
-            UPDATE_ONLY="true"
-            UPDATE_FLAVOR="nodt"
-            MODEL="DS918+"
+            if [ "${LINE:-7.3.2}" = "6.2.4" ]; then
+              MODEL="DS918+"
+            else
+              MODEL="SA6400"
+            fi
           fi
 
           # DSM 版本映射由上面 source 的 2in1func.sh 提供（pick_dsm_version）
@@ -434,7 +435,7 @@ jobs:
           ZIP_NAME=""
 
           if [ "${UPDATE_ONLY}" = "true" ]; then
-            bash "$AINAS2IN1_DIR/script/2in1_build_update.sh" rr/rr.img "$GITHUB_WORKSPACE" "$UPDATE_FLAVOR"
+            bash "$AINAS2IN1_DIR/script/2in1_build_update.sh" rr/rr.img "$GITHUB_WORKSPACE" ""
             # find 无匹配时返回 0 且输出为空（`ls | head` 在 pipefail 下会因 ls 的退出码中断）
             RAW_UPDATE_ZIP="$(find . -maxdepth 1 -name 'updateall-*.zip' -print -quit)"
             if [ -n "$RAW_UPDATE_ZIP" ] && [ -f "$RAW_UPDATE_ZIP" ]; then
