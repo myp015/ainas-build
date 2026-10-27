@@ -7,12 +7,13 @@
 # 2in1 GPT 引导盘构建：
 #   checkout myp015/ainas-2in1（secrets.AiNas）
 #   → script/install-grub-2.14.sh 构建 grub-2.14（i386-pc/i386-efi/x86_64-efi）
-#   → script/2in1_grubmake-gpt.sh 生成 14.5G GPT 双引导镜像
+#   → script/2in1_grubmake-gpt.sh 生成 18G GPT 双引导镜像
 #   → push 回 myp015/ainas-2in1 的 img/（secrets.AiNas）
 #
 # 基础镜像按 DSM 版本族二选一（脚本第 3 个参数）：
 #   7.2 → grub.img.gz       P1=16777216 扇区(8GiB)，起点 8192
 #   6.2 → grub_6.2.img.gz   P1=4980480 扇区(2.375GiB)，起点 2048（对齐真机 synopartition）
+# 两者 P6(RAMDISK) 均为 2560MiB = 2.5GiB：loader p3 载荷已约 2.0GB，2GiB 会 ENOSPC
 # 下游 2in1func.sh 的 docker_build 按 DSM 主版本自动挑对应文件。
 #
 # 说明：2in1_grubmake-gpt.sh 直接使用脚本同目录的 mdadm-syno（<script_dir>/mdadm-syno）。
@@ -28,12 +29,12 @@ on:
         default: false
         type: boolean
       disk_size:
-        description: "整盘大小 (如 14.5G / 20G)"
-        default: "14.5G"
+        description: "整盘大小 (如 18G / 20G)"
+        default: "18G"
         type: string
       p6_size_mib:
         description: "P6(RAMDISK) 大小 MiB"
-        default: "2048"
+        default: "2560"
         type: string
       dsm_version:
         description: "DSM 版本族（决定 P1 布局与产物名）"
