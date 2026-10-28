@@ -454,12 +454,25 @@ jobs:
             # ── 2in1 镜像重打包 ───────────────────────────────────
             repack_2in1 "$WORKDIR" "$REPACK_STAGE_DIR"
 
+            # ── QEMU 引导方式按内核选择 ────────────────────────────────
+            # DS3617xs 的 6.2 内核是 3.10.105，不支持 UEFI：OVMF 下
+            # efi_enter_virtual_mode 调 SetVirtualAddressMap 会执行 NX 页，
+            # 0.028s 就 panic 重启（run 40703756818），DSM 永远起不来。
+            # 改用 SeaBIOS（legacy）引导；同走 6.2 的 DS918+ 是 4.4 内核，
+            # UEFI 下实测正常，保持不变。
+            COMPOSE_EXTRA_SEDS=()
+            if [[ "${LINE_REQ}" == 6.2* ]] && [ "${MODEL}" = "DS3617xs" ]; then
+              COMPOSE_EXTRA_SEDS+=('s/^\([[:space:]]*BOOT_MODE:[[:space:]]*\).*/\1"legacy"/')
+              echo "[INFO] ${MODEL} 为 3.x 内核（不支持 UEFI），QEMU 切换为 legacy BIOS 引导"
+            fi
+
             # ── DSM 自动安装（解析 pats.xlsx → 启容器 → 安装 → 停容器）──
             dsm_setup "$MODEL" "$LINE_REQ" "$PAT_XLSX_URL" "$DSM_INSTALL_DIR" \
               "$WORKDIR" \
               "$AINAS2IN1_DIR/docker/docker-compose.yaml" "$DSM_INSTALL_DIR/docker-compose.yaml" \
               "_${IMG_GIB}g_Ainas2in1" "$SAFE_TAG" "180" \
-              "s#\./rr.img:/rr.img#${WORKDIR}/rr/rr.img:/rr.img#g"
+              "s#\./rr.img:/rr.img#${WORKDIR}/rr/rr.img:/rr.img#g" \
+              "${COMPOSE_EXTRA_SEDS[@]}"
 
             cd "$WORKDIR"
             echo "[INFO] 开始重命名并导出镜像（img.gz）"
