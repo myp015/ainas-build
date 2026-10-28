@@ -592,3 +592,43 @@ curl: (28) Operation timed out after 10002 milliseconds with 36 bytes received
    （**内核 banner 次数增加 + Web 连续两次可达**）；真没重启照样超时失败，所以不算吞异常。
 2. **`BOOTS_BEFORE` 必须在 POST 之前取**：7.x 自行重启时，POST 期间新的一次启动会被
    算进基线，后面「次数变多」的判据就永远不成立（这是比超时更隐蔽的坑）。
+
+## 2026-10-28 — 7.x 串口不会静默：`synobios` 心跳让「连续 N 秒无新输出」的判据永远不成立
+
+run `40596056118`（DS920+ / 7.2.1）稳定等待 600s 超时，日志里 `系统稳定中 30/90s`
+原地重复 10 次。控制台原文：
+
+```
+[  297.834165] synobios get empty ttyS current
+[  358.343154] synobios get empty ttyS current      ← 每 ~60.5s 一行
+```
+
+官方 `synobios` 会周期性打这行心跳（另有零星 `Invalid parameter`），所以
+**7.x 永远不会有「连续 90s 零新字节」的时刻**。原判据在 6.2 上碰巧成立（6.2 的心跳少），
+在 7.x 上结构性失效——这类判据要么对已知心跳免疫，要么别用。
+
+改法（ainas-2in1 `3d5bdf6`）：稳定性 = **Web 连续可达 STABLE_SEC 秒 且期间没有新的
+DSM 内核启动**（`boot_count_changed`）。重启仍能被抓住：重启必先断 Web、必新增 banner。
+不要再用「串口静默」当任何完成判据。
+
+## 2026-10-28 — 未初始化的 DSM `get_state.cgi` 恒返回 500：版本只能从系统盘 `/etc/VERSION` 读
+
+用户要求「系统启动后 cat /etc/VERSION 确认版本」，本意是别为此停容器再挂镜像。
+先按 `get_state.cgi` 的 `dsinfo` 取（`dsm_auto_install.sh` 就是这么解析 `build_ver` 的），
+结果 **6.2 与 7.x 都拿不到**：响应是 HTTP 500 + 11939 字节 HTML 错误页。
+原因不是超时——没跑过 setup 向导（未初始化）的 DSM，这个 CGI 根本不出 JSON。
+于是日志里一直只有「系统自报版本=<未取到>」，等于没有版本证据。
+
+可靠做法：镜像本来就是 **bind mount 进容器**的（`docker-compose.yaml` 的
+`./rr.img:/rr.img`），容器运行中直接对宿主侧文件只读挂 p1 读文件即可，**无需停容器**：
+
+- `losetup -Pf --show rr.img` → `losetup --find --show -o <data_offset>` → `mount -t ext4 -o ro,noload`
+- `-o ro,noload` 不写盘、不重放日志，QEMU 继续写自己的不受影响；读到滞后内容就重挂重试（3 次足够）
+- 6.2 的 fs 在分区起点（偏移 0），7.x 的 md0 成员走 `data_offset`；同一个探测函数两种都覆盖
+- **挂载过程的日志必须走 stderr**：函数的 stdout 是 `$( )` 的返回值（VERSION 原文），
+  混进去不影响解析但日志里就看不到挂载到底用了哪个偏移
+
+实测（ainas-2in1 `667eef2` / `c98c1aa`，run `40604877753` + `40606875963` 均 success）：
+6.2 → `6.2.4-25556-8`（`nano7-fullpatch`，`builddate=2024/11/25`），banner `build3` + `build7`；
+7.2.1 → `7.2.1-69057-13`。6.2 若读到 `smallfixnumber < 8` 直接判「仍停在 update7」失败退出；
+读不到只告警（此时 banner ≥2 种已证明 u8 内核在跑，别让挂载偶发失败误杀整轮构建）。
