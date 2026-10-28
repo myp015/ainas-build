@@ -632,3 +632,28 @@ DSM 内核启动**（`boot_count_changed`）。重启仍能被抓住：重启必
 6.2 → `6.2.4-25556-8`（`nano7-fullpatch`，`builddate=2024/11/25`），banner `build3` + `build7`；
 7.2.1 → `7.2.1-69057-13`。6.2 若读到 `smallfixnumber < 8` 直接判「仍停在 update7」失败退出；
 读不到只告警（此时 banner ≥2 种已证明 u8 内核在跑，别让挂载偶发失败误杀整轮构建）。
+
+## 2026-10-28 — addon 的 install.sh 在 loader initrd 里跑：6.x 的 busybox 不认 mkdir -v / ln -v
+
+真机 DSM 6.x 安装日志（用户反馈，CI 里可复现）：
+
+```
+Installing addon expand_volume - late
+mkdir: invalid option -- 'v'
+ln: invalid option -- 'v'
+```
+
+`ainas-2in1/addons/resizepart/all.tgz` 里的 install.sh 抄了上游 `expands` 的风格，用了
+`mkdir -vp` / `ln -vsf`：GNU coreutils 支持，**6.x 的 busybox 的 mkdir/ln 不支持**
+（`cp -v` 反而支持，所以只有这两行报错）。后果不只是刷屏——
+`multi-user.target.wants/expand_volume.service` 这条软链建不出来，
+**6.x 上插件等于没装**（6.x 没有 systemd，只能靠 loader 的 `dsm6-services.sh`
+枚举 `multi-user.target.wants` 执行 unit）。
+
+修法（ainas-2in1 `9e3bf9c`）：`mkdir -vp`→`mkdir -p`、`ln -vsf`→`ln -sf`、`cp -vpf`→`cp -pf`，
+重打包 all.tgz。验证：run `40614029539`（DS918+ / 6.2.4）里两行报错消失，
+`Installing addon ResizePart` 与 `dsm6-services: installed /usr/share/init/rr-addons.conf`
+正常，最终系统仍为 `6.2.4-25556-8`。
+
+教训：**addon 的 install.sh 只能用 POSIX/busybox 子集**，动手前先核对上游脚本里有没有
+`-v`；另外 `all.tgz` 是二进制载荷，改了 install.sh 必须重新打包并核对清单（本次清单不变）。
