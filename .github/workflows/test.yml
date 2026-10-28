@@ -53,6 +53,23 @@ jobs:
           - version: "7.4"
             platform: r1000
 
+          # ============ 5.10 主线 drivers/scsi 官方化验证 ============
+          # 背景：src/5.10.55/drivers/scsi 14 个文件（B 类 11 + C 类 3）按官方 GPL
+          # 5.10 源码（linux-5.10-7.3.x.txz，2026-01-30）整份替换，恢复 syno 分支。
+          # 实际参与自编的只有 sg.c（sg.ko）与 libiscsi.c（libiscsi.ko），其余
+          # 12 个文件为官方内核内置（scsi_mod/sd_mod 在 Makefile 中注释），只做
+          # 源码一致性。
+          # 判据：
+          #   - sg.ko 无新增 UND；libiscsi.ko 无新增 UND（taskqueuelock/back_lock
+          #     两个字段在 KSRC 头中存在，spin_lock_irqsave 分支可编译）；
+          #   - 全部 scsi 系 .ko 的 UND ⊆ 官方导出面 ∪ 本 target 导出面；
+          #   - 所有 target 编译零错误。
+          # 版本取 7.4（最新 dev KSRC）与 7.1（最老 dev KSRC），覆盖头文件跨度。
+          - version: "7.4"
+            platform: epyc7002
+          - version: "7.1"
+            platform: epyc7002
+
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
