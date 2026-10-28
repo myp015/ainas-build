@@ -454,16 +454,26 @@ jobs:
             # ── 2in1 镜像重打包 ───────────────────────────────────
             repack_2in1 "$WORKDIR" "$REPACK_STAGE_DIR"
 
+            # ── 引导方式按型号选择 ──────────────────────────────────
+            # DS3617xs 的 6.2 内核是 3.10.105（3.x，不支持 UEFI）：
+            # OVMF 下在 efi_enter_virtual_mode / efi_init 阶段 panic
+            # （run 40703756818、40717211128；后者已试过 cmdline 加
+            # noefi，panic 只是提前到 efi_init，仍然起不来）。
+            # 故 3617 构建时把 compose 里的 BOOT_MODE 换成 legacy，
+            # 让 QEMU 走 SeaBIOS；其它型号保持 uefi 不动。
+            COMPOSE_EXTRA_SEDS=()
+            if [ "${MODEL}" = "DS3617xs" ]; then
+              COMPOSE_EXTRA_SEDS+=('s/^\([[:space:]]*BOOT_MODE:[[:space:]]*\).*/\1"legacy"/')
+              echo "[INFO] ${MODEL} 使用 3.x 内核，compose BOOT_MODE 替换为 legacy"
+            fi
+
             # ── DSM 自动安装（解析 pats.xlsx → 启容器 → 安装 → 停容器）──
-            # DS3617xs（6.2 / 3.10.105 内核）在 OVMF 下会 panic，靠
-            # 2in1_grubcfg_patch.sh 给内核命令行加 noefi 规避；不要改成
-            # BOOT_MODE legacy——该盘无 BIOS 引导链，SeaBIOS 会卡死
-            # （run 40709124278 实测）。
             dsm_setup "$MODEL" "$LINE_REQ" "$PAT_XLSX_URL" "$DSM_INSTALL_DIR" \
               "$WORKDIR" \
               "$AINAS2IN1_DIR/docker/docker-compose.yaml" "$DSM_INSTALL_DIR/docker-compose.yaml" \
               "_${IMG_GIB}g_Ainas2in1" "$SAFE_TAG" "180" \
-              "s#\./rr.img:/rr.img#${WORKDIR}/rr/rr.img:/rr.img#g"
+              "s#\./rr.img:/rr.img#${WORKDIR}/rr/rr.img:/rr.img#g" \
+              "${COMPOSE_EXTRA_SEDS[@]}"
 
             cd "$WORKDIR"
             echo "[INFO] 开始重命名并导出镜像（img.gz）"
