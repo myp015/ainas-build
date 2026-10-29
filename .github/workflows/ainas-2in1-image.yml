@@ -477,7 +477,9 @@ jobs:
             #   3. 清空 ARGUMENTS，避免 rr.img 被 QEMU 打开两次。
             COMPOSE_EXTRA_SEDS=()
             if [ "${MODEL}" = "DS3617xs" ]; then
-              COMPOSE_EXTRA_SEDS+=('s/^\([[:space:]]*BOOT_MODE:[[:space:]]*\).*/\1"legacy"/')
+              # DEBUG=Y 让 qemux 打印完整 QEMU 命令行和磁盘参数，
+              # 用于核对 CI(KVM) 与本地(TCG) 的盘布局是否一致
+              COMPOSE_EXTRA_SEDS+=('s/^\([[:space:]]*BOOT_MODE:[[:space:]]*\).*/\1"legacy"\n\1DEBUG: "Y"/')
               COMPOSE_EXTRA_SEDS+=("s#^\([[:space:]]*\)- .*rr\.img:/rr\.img.*#\1- ${WORKDIR}/rr/rr.img:/storage/alpine/data.raw\n\1- ${WORKDIR}/rr/rr.img:/storage/alpine/data.img#")
               COMPOSE_EXTRA_SEDS+=('s/^\([[:space:]]*DISK_FMT:[[:space:]]*\).*/\1"raw"/')
               COMPOSE_EXTRA_SEDS+=('s/^\([[:space:]]*DISK_SIZE:[[:space:]]*\).*/\1"18G"/')
@@ -508,6 +510,15 @@ jobs:
           echo "ARTIFACT=${ARTIFACT}"   >> "$GITHUB_ENV"
           echo "ARTIFACT_ZIP=$ZIP_NAME" >> "$GITHUB_ENV"
           echo "UPDATE_ZIP=$UPDATE_ZIP" >> "$GITHUB_ENV"
+
+      - name: 失败时上传 QEMU 屏幕（legacy 引导诊断）
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: dsm-screen
+          path: /tmp/dsm_screen.ppm
+          if-no-files-found: warn
+          retention-days: 3
 
       - name: 发布制品到 ainas-2in1 Release
         shell: bash
