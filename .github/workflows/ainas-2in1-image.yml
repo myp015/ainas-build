@@ -461,10 +461,28 @@ jobs:
             # noefi，panic 只是提前到 efi_init，仍然起不来）。
             # 故 3617 构建时把 compose 里的 BOOT_MODE 换成 legacy，
             # 让 QEMU 走 SeaBIOS；其它型号保持 uefi 不动。
+            #
+            # legacy 下还有第二个坑（本地 qemu 10.0.3 + SeaBIOS 1.16.3 复现）：
+            # qemux 会按 DISK_SIZE 自建一块空的 data.qcow2，再加上 ARGUMENTS
+            # 里的 rr.img，形成「空盘 + rr.img」双盘布局。此时 SeaBIOS 能选中
+            # rr.img（dl=0x80 实测正确），但 GRUB 的 boot.img 读不到 biosboot
+            # 分区里的 core.img，直接返回固件并回退到 Alpine 救援 ISO
+            # （run 40787234436 的日志：Hard Disk 后 3ms 就 Booting from DVD/CD）。
+            # 单盘（只有 rr.img，放在 qemux 主盘的 ahci3/bootindex=3 位置）时引导
+            # 正常，故按下面三步消除空主盘：
+            #   1. rr.img 挂成 qemux 主盘路径 /storage/alpine/data.raw（DISK_FMT=raw）；
+            #   2. 同一文件再挂一份 data.img —— hasDisk() 只看 .img/.qcow2，
+            #      命中后 install.sh 会把 BOOT 设成 none，既不建空盘也不下载
+            #      Alpine 救援 ISO（否则那张 CD 是 bootindex=1，会抢在硬盘前面）；
+            #   3. 清空 ARGUMENTS，避免 rr.img 被 QEMU 打开两次。
             COMPOSE_EXTRA_SEDS=()
             if [ "${MODEL}" = "DS3617xs" ]; then
               COMPOSE_EXTRA_SEDS+=('s/^\([[:space:]]*BOOT_MODE:[[:space:]]*\).*/\1"legacy"/')
-              echo "[INFO] ${MODEL} 使用 3.x 内核，compose BOOT_MODE 替换为 legacy"
+              COMPOSE_EXTRA_SEDS+=("s#^\([[:space:]]*\)- .*rr\.img:/rr\.img.*#\1- ${WORKDIR}/rr/rr.img:/storage/alpine/data.raw\n\1- ${WORKDIR}/rr/rr.img:/storage/alpine/data.img#")
+              COMPOSE_EXTRA_SEDS+=('s/^\([[:space:]]*DISK_FMT:[[:space:]]*\).*/\1"raw"/')
+              COMPOSE_EXTRA_SEDS+=('s/^\([[:space:]]*DISK_SIZE:[[:space:]]*\).*/\1"18G"/')
+              COMPOSE_EXTRA_SEDS+=('s/^\([[:space:]]*ARGUMENTS:[[:space:]]*\).*/\1""/')
+              echo "[INFO] ${MODEL} 使用 3.x 内核，compose 改为 legacy 引导且 rr.img 独占为唯一主盘"
             fi
 
             # ── DSM 自动安装（解析 pats.xlsx → 启容器 → 安装 → 停容器）──
