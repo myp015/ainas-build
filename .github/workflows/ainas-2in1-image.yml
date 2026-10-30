@@ -24,6 +24,10 @@ on:
         description: "DS918+"
         type: boolean
         default: false
+      model_ds3617xs:
+        description: "DS3617xs（仅 DSM 6.2.4，勾选 7.x 会报错）"
+        type: boolean
+        default: false
       model_ds920p:
         description: "DS920+"
         type: boolean
@@ -70,7 +74,7 @@ on:
         type: string
         default: ""
       dsm_version:
-        description: "DSM 版本编号（6.2.4 仅编译 DS918+，其余来自 pats.xlsx）"
+        description: "DSM 版本编号（6.2.4 支持 DS918+ / DS3617xs 及其它自定义 6.2 型号）"
         type: choice
         options:
           - "6.2.4"
@@ -138,17 +142,36 @@ jobs:
           set -euo pipefail
           MODELS=()
 
+          # 型号名大小写归一化：pats.xlsx 与 rr 内置型号表都区分大小写，
+          # 自定义输入写成全小写（如 ds3617xs）会匹配不到型号，先还原成标准写法；
+          # 不在表内的型号按用户输入原样使用。
+          KNOWN_MODELS=("DS918+" "DS920+" "DS923+" "DS925+" "DS3622xs+" "SA6400" "DS425+" "DVA3221" "DVA1622" "DS3617xs")
+          norm_model() {
+            local raw="$1" low cm
+            low="$(printf '%s' "$raw" | tr '[:upper:]' '[:lower:]')"
+            for cm in "${KNOWN_MODELS[@]}"; do
+              if [ "$(printf '%s' "$cm" | tr '[:upper:]' '[:lower:]')" = "$low" ]; then
+                printf '%s\n' "$cm"
+                return 0
+              fi
+            done
+            printf '%s\n' "$raw"
+          }
+
+          # DS3617xs 只有 DSM 6.2 的 PAT，7.x 勾选必然在 dsm_setup 阶段才失败，这里提前拦下
+          if [ "${{ inputs.dsm_version }}" != "6.2.4" ] && [ "${{ inputs.model_ds3617xs }}" = "true" ]; then
+            echo "[E] DS3617xs 仅支持 DSM 6.2.4，请将 DSM 版本改为 6.2.4"
+            exit 1
+          fi
+
           if [ "${{ inputs.dsm_version }}" = "6.2.4" ]; then
-            # DSM 6.2 型号白名单：只有 DS918+(apollolake) 有 6.2 版本
-            echo "[INFO] DSM 6.2 开启型号白名单：DS918+"
+            # DSM 6.2 型号白名单：DS918+(apollolake) / DS3617xs(broadwellnk)
+            echo "[INFO] DSM 6.2 开启型号白名单：DS918+ / DS3617xs"
             if [ "${{ inputs.all_models }}" = "全选" ]; then
-              MODELS+=("DS918+")
+              MODELS+=("DS918+" "DS3617xs")
             else
               [ "${{ inputs.model_ds918p }}"   = "true" ] && MODELS+=("DS918+")
-            fi
-            if [ ${#MODELS[@]} -eq 0 ] && [ "${{ inputs.build_update_zip }}" != "true" ]; then
-              echo "[E] DSM 6.2 仅支持 DS918+，请勾选后再执行"
-              exit 1
+              [ "${{ inputs.model_ds3617xs }}" = "true" ] && MODELS+=("DS3617xs")
             fi
           elif [ "${{ inputs.all_models }}" = "全选" ]; then
             echo "[INFO] 已开启全选，将编译所有支持的型号"
@@ -165,18 +188,16 @@ jobs:
             [ "${{ inputs.model_dva1622 }}"  = "true" ] && MODELS+=("DVA1622")
           fi
 
-          # 追加自定义型号（工作流未列出的型号）；6.2 走白名单，不接受自定义型号
+          # 追加自定义型号（工作流未列出的型号；6.2 也接受，如输入 ds3617xs）
           CUSTOM_RAW="${{ inputs.custom_models }}"
-          if [ "${{ inputs.dsm_version }}" = "6.2.4" ] && [ -n "$(printf '%s' "$CUSTOM_RAW" | tr -d '[:space:]')" ]; then
-            echo "[WARN] DSM 6.2 走型号白名单，自定义型号 ${CUSTOM_RAW} 已忽略"
-            CUSTOM_RAW=""
-          fi
           if [ -n "$(printf '%s' "$CUSTOM_RAW" | tr -d '[:space:]')" ]; then
             echo "[INFO] 检测到自定义型号输入: ${CUSTOM_RAW}"
             IFS=',' read -ra CUSTOM_ARR <<< "$CUSTOM_RAW"
             for cm in "${CUSTOM_ARR[@]}"; do
-              cm="$(echo "$cm" | xargs)"
-              [ -n "$cm" ] && MODELS+=("$cm")
+              cm="$(printf '%s' "$cm" | xargs)"
+              if [ -n "$cm" ]; then
+                MODELS+=("$(norm_model "$cm")")
+              fi
             done
           fi
           
