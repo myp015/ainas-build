@@ -46,7 +46,11 @@ on:
 
 jobs:
   grub:
-    runs-on: ubuntu-latest
+    # 固定 24.04：ubuntu-latest 已于 2026-10-19 迁移到 Ubuntu 26.04，
+    # 新版 binutils 的 `-Wl,-N` 会把 ELF 头映射进首个 PT_LOAD，
+    # 导致 grub 2.14 i386-pc 的 kernel.img 链接错位（.text 落在 0x9074）。
+    # 24.04 的 binutils 2.42 仍按旧行为产出，可避免该问题而不必改 grub 源码。
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout
         uses: actions/checkout@main
