@@ -353,14 +353,14 @@ jobs:
       - name: download to artifacts (compile)
         # v8 批量下载大 artifact 偶发 digest-mismatch（127 个 modules-* 全量下载）→
         # 降 v4（无 digest 校验，成熟稳定）。pattern 单行：v4 也不支持多行负 pattern。
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: output
           pattern: modules-*
           merge-multiple: true
 
       - name: download to artifacts (all)
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: output_all
           pattern: all-*
@@ -368,7 +368,7 @@ jobs:
 
       - name: download to artifacts (firmware)
         # Task#188+：固件也随 release 产物发布 → 下载 firmware.tgz
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: firmware_out
           pattern: firmware
@@ -376,7 +376,7 @@ jobs:
 
       - name: download to artifacts (abi probe)
         # 工具② 的 ABI 偏移指纹 dump（每个 target 几 KB）
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: abi_out
           pattern: abi-*

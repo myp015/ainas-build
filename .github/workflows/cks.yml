@@ -378,7 +378,7 @@ jobs:
       - name: download to artifacts
         # v8 批量下载大 artifact 偶发 digest-mismatch（Build cks #79 release job 实测）→
         # 降 v4（无 digest 校验，成熟稳定），与 modules.yml 主流程一致
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: output
           pattern: ainas-cks-*
@@ -439,21 +439,21 @@ jobs:
       - name: download to artifacts
         # v8 批量下载大 artifact 偶发 digest-mismatch（Build cks #79 release job 实测）→
         # 降 v4（无 digest 校验，成熟稳定），与 modules.yml 主流程一致
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: output
           pattern: ainas-cks-*
           merge-multiple: true
 
       - name: download kernel symvers
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: symvers
           pattern: ckssym-*
           merge-multiple: true
 
       - name: download ABI dumps
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: abi
           pattern: abi-*

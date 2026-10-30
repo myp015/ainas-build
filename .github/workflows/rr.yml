@@ -268,7 +268,7 @@ jobs:
           sudo timedatectl set-timezone "Asia/Shanghai"
 
       - name: Checkout ainas-2in1
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: myp015/ainas-2in1
           token: ${{ secrets.AiNas }}

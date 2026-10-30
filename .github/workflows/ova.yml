@@ -247,7 +247,7 @@ jobs:
           sudo timedatectl set-timezone "Asia/Shanghai"
 
       - name: checkout ainas-2in1
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: myp015/ainas-2in1
           token: ${{ secrets.AiNas }}
@@ -403,7 +403,7 @@ jobs:
 
        #- name: 上传失败调试镜像到 Actions 制品区
         #if: failure()
-       # uses: actions/upload-artifact@v4
+       # uses: actions/upload-artifact@v7
         #with:
           #name: rr-img-failed-${{ matrix.model }}
           #path: rr/rr-failed-${{ matrix.model }}.img.gz
