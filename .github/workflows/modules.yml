@@ -220,8 +220,8 @@ jobs:
 
           # Task#202（通用规则，取代 Task#148 针对 geminilakenk dmabuf 的特例）：
           # update/ 里存在的同名 .ko，一律删除 root 同名产物。
-          # 5.x 的 GPU 栈（drm/ttm/gpu-sched/dmabuf/drm_kms_helper/i915/amdgpu/
-          # radeon…）自 Task#202 起统一由 update/ 的 6.5 backport 栈提供；root 5.10
+          # 5.x 的 GPU 栈（drm/ttm/gpu-sched/dmabuf/drm_kms_helper/i915/amdgpu…）
+          # 自 Task#202 起统一由 update/ 的 6.5 backport 栈提供；root 5.10
           # 同名模块若残留，depmod 会把两份当成同一模块的不同版本，generic 依赖可能
           # 解析到 5.10 版 → 混合栈 ABI 断裂（v1000nk-7.2 Unknown symbol 实测）。
           # dmabuf 的额外理由：update 栈需要 dmabufbkpt_*，root 主线版为 0 bkpt，

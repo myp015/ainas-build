@@ -1,10 +1,10 @@
 #
-# Task#206 小矩阵验证：cks 5.10.55 的 AMD（amdgpu/radeon）迁入 6.5 backport 栈。
+# Task#206 小矩阵验证：cks 5.10.55 的 AMD（amdgpu）迁入 6.5 backport 栈。
 #
 # 只跑 build job 的「Make modules + 打包」两段（firmware/release 与本改动无关），
 # 目标是证明：
 #   1. `make defconfig-amd` + `make` 在 /b 下成功（无 Argument list too long）；
-#   2. root 5.10 不再产出 amdgpu/radeon（epyc 另含 udl/virtio-gpu/vmwgfx）；
+#   2. root 5.10 不再产出 amdgpu/radeon（epyc 另含 udl/virtio-gpu/vmwgfx；radeon 已整体移除）；
 #   3. update/ 出现 6.5 栈的 AMD 六件 + 原 i915 栈；
 #   4. 去重后 root 与 update 无同名 .ko，残留旧栈消费者带来的符号缺口归零；
 #   5. update/*.ko 的 vermagic 全为 5.10.55+。
@@ -113,11 +113,14 @@ jobs:
           makei915 "${ROOT_PATH}" "${VERSION}" "${PLATFORM}" "${ROOT_PATH}/dsm_linux" "${BUILD_ROOT}" "${ROOT_PATH}/modules/update" amd
 
           echo "assert: update/ 6.5 栈产物齐全"
-          for M in amdgpu.ko radeon.ko amdxcp.ko gpu-sched.ko drm_suballoc_helper.ko \
+          for M in amdgpu.ko amdxcp.ko gpu-sched.ko drm_suballoc_helper.ko \
                    drm.ko ttm.ko drm_kms_helper.ko i915.ko i915-compat.ko; do
             [ -e "${ROOT_PATH}/modules/update/${M}" ] || {
               echo "[E] update/ 缺少 ${M}" >&2; exit 1; }
           done
+          # Task#212：radeon 已从 amd-backport 栈移除，不应再有产物
+          [ ! -e "${ROOT_PATH}/modules/update/radeon.ko" ] || {
+            echo "[E] update/ 仍产出 radeon.ko（栈未去 radeon 化）" >&2; exit 1; }
           # drm_panel_orientation_quirks.ko 是条件产物：回移植栈的 kconfig 发现 5.10
           # 内核已把该子系统内建（CONFIG_DRM_PANEL_ORIENTATION_QUIRKS=y，如 epyc7002）
           # 时不会重复编成模块（重复导出会被内核拒载，Task#205 同类问题），此时
@@ -196,7 +199,7 @@ jobs:
             fi
           done
           [ "${DUP}" -eq 0 ] || exit 1
-          for M in amdgpu.ko radeon.ko gpu-sched.ko drm.ko ttm.ko drm_kms_helper.ko; do
+          for M in amdgpu.ko gpu-sched.ko drm.ko ttm.ko drm_kms_helper.ko; do
             [ ! -e "${ROOT_PATH}/output/modules/${M}" ] || {
               echo "[E] 打包产物 root 层仍有 ${M}" >&2; exit 1; }
             [ -e "${ROOT_PATH}/output/modules/update/${M}" ] || {

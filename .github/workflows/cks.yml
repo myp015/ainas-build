@@ -211,7 +211,7 @@ jobs:
 
           # Task#206：update/ 里存在的同名 .ko，一律删除 root 同名产物（与主流程
           # modules.yml Task#202 规则一致）。5.x 的 GPU/DRM 栈（drm/ttm/gpu-sched/
-          # dmabuf/drm_kms_helper/i915/amdgpu/radeon…）自本任务起统一由 update/ 的
+          # dmabuf/drm_kms_helper/i915/amdgpu…）自本任务起统一由 update/ 的
           # 6.5 backport 栈提供；root 5.10 同名模块若残留，eudev 平铺 update/ 后两份
           # 会被 depmod 当成同一模块的不同版本 → 混栈 ABI 断裂（本次 amdgpu/radeon
           # 115 条 Unknown symbol 的直接形态）。放在 thirdparty 合并之后，防止第三方

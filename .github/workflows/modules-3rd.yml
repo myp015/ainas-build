@@ -62,7 +62,7 @@ jobs:
           repository: myp015/intel-gpu-i915-backports
           token: ${{ secrets.AiNas }}
           path: intel-gpu-i915-backports
-          # Task#202：amdgpu/radeon 已并入 6.5 backport 栈（amd-backport 分支）。
+          # Task#202：amdgpu 已并入 6.5 backport 栈（amd-backport 分支；radeon 已于 Task#212 移除）。
           # 合入默认分支前必须显式指定，否则检出的是不含 amd 的 mainline-tracking-v6.5。
           ref: amd-backport
 
@@ -109,8 +109,8 @@ jobs:
           if [ -f "${KLIB_BUILD}/include/linux/module.h" ] && ! grep -q 'MODULE_INFO(description, _description " (Compiled by ainas' "${KLIB_BUILD}/include/linux/module.h"; then
             sed -i 's/#define MODULE_DESCRIPTION(_description) MODULE_INFO(description, _description)/#define MODULE_DESCRIPTION(_description) MODULE_INFO(description, _description " (Compiled by ainas for DSM)")/' "${KLIB_BUILD}/include/linux/module.h"
           fi
-          # Task#202：全部 5.10 平台统一 defconfig-amd —— Intel i915 与 AMD amdgpu/
-          # radeon 共用同一套 6.5 DRM 栈（drm/ttm/gpu-sched/dmabuf 只由 update/ 提供）。
+          # Task#202：全部 5.10 平台统一 defconfig-amd —— Intel i915 与 AMD amdgpu
+          # 共用同一套 6.5 DRM 栈（drm/ttm/gpu-sched/dmabuf 只由 update/ 提供）。
           # amdgpu.o 是 1462 个对象的 multi-object 链接，工作区路径下命令行约 180KB，
           # 超过 /bin/sh -c 的 MAX_ARG_STRLEN（128KB），make 会报
           # "/bin/sh: Argument list too long"（Error 127）。构建树复制到 /b 后
@@ -133,7 +133,7 @@ jobs:
 
           MODULES_INTERMEDIATES="${BUILD_ROOT}/intermediates"
           # 全平台统一 update/ 布局：Task#202 起 root 5.10 的 DRM/GPU 栈全部停编，
-          # GPU 栈（drm/ttm/gpu-sched/dmabuf/drm_kms_helper + i915 + amdgpu/radeon）
+          # GPU 栈（drm/ttm/gpu-sched/dmabuf/drm_kms_helper + i915 + amdgpu）
           # 统一由本栈提供。仍放 update/ 而非扁平 root，是因为：depmod 让 updates/
           # 自带 dirname 优先；若扁平输出会与 modules.yml 阶段 root 产物的同名 .ko
           # 互相覆盖（v1000nk-7.2 上机 radeon/gpu-sched Unknown symbol ttm_*/drm_*
