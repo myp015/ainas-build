@@ -74,7 +74,7 @@ on:
 
 jobs:
   resolve-release:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     outputs:
       tag: ${{ steps.pick.outputs.tag }}
       asset_url: ${{ steps.pick.outputs.asset_url }}
@@ -120,7 +120,7 @@ jobs:
   # 单独串行创建并确认 Release，避免 OVA matrix 任务并发创建同一标签。
   ensure-release:
     needs: resolve-release
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: 创建或确认 OVA Release
         shell: bash
@@ -161,7 +161,7 @@ jobs:
           exit 1
 
   select-models:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     outputs:
       models: ${{ steps.pick.outputs.models }}
     steps:
@@ -223,7 +223,7 @@ jobs:
   build:
     name: ${{ format('build ({0})', matrix.model) }}
     needs: [resolve-release, select-models, ensure-release]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       # max-parallel: 3
@@ -238,7 +238,7 @@ jobs:
       RR_TAG: ${{ needs.resolve-release.outputs.tag }}
       LINE: ${{ inputs.dsm_version }}
     steps:
-      - uses: actions/checkout@main
+      - uses: actions/checkout@v7
 
       - name: 初始化环境
         run: |

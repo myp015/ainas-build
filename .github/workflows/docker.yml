@@ -15,7 +15,7 @@ jobs:
       matrix:
         app: ["rr"]
 
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
@@ -24,7 +24,7 @@ jobs:
           token: ${{ secrets.AiNas }}
 
       - name: Checkout
-        uses: actions/checkout@main
+        uses: actions/checkout@v7
         with:
           repository: myp015/dockers
           token: ${{ secrets.AiNas }}

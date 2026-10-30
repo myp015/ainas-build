@@ -52,28 +52,28 @@ jobs:
           - version: 7.4
             platform: v1000nk
 
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout
-        uses: actions/checkout@main
+        uses: actions/checkout@v7
         with:
           token: ${{ secrets.AiNas }}
       - name: Checkout
-        uses: actions/checkout@main
+        uses: actions/checkout@v7
         with:
           repository: myp015/ainas-modules
           token: ${{ secrets.AiNas }}
           path: ainas-modules
 
       - name: Checkout
-        uses: actions/checkout@main
+        uses: actions/checkout@v7
         with:
           repository: myp015/ainas-cks
           token: ${{ secrets.AiNas }}
           path: ainas-cks
 
       - name: Checkout
-        uses: actions/checkout@main
+        uses: actions/checkout@v7
         with:
           repository: myp015/syno-modules
           token: ${{ secrets.AiNas }}
@@ -348,22 +348,22 @@ jobs:
             *.gz
 
   firmware:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: build
     steps:
       - name: Checkout
-        uses: actions/checkout@main
+        uses: actions/checkout@v7
         with:
           token: ${{ secrets.AiNas }}
       - name: Checkout
-        uses: actions/checkout@main
+        uses: actions/checkout@v7
         with:
           repository: myp015/ainas-cks
           token: ${{ secrets.AiNas }}
           path: ainas-cks
 
       - name: Checkout
-        uses: actions/checkout@main
+        uses: actions/checkout@v7
         with:
           repository: myp015/ainas-modules
           token: ${{ secrets.AiNas }}
@@ -402,15 +402,15 @@ jobs:
             firmware.tgz
 
   release:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: firmware
     steps:
       - name: Checkout
-        uses: actions/checkout@main
+        uses: actions/checkout@v7
         with:
           token: ${{ secrets.AiNas }}
       - name: Checkout ainas-cks
-        uses: actions/checkout@main
+        uses: actions/checkout@v7
         with:
           repository: myp015/ainas-cks
           token: ${{ secrets.AiNas }}
@@ -418,7 +418,7 @@ jobs:
       - name: Checkout ainas-modules
         # 发布门禁（gate_release.py）与 ABI 基线（scripts/ref/abi-baseline-cks.json）都在
         # ainas-modules 仓库里，release job 此前没 checkout 它 → 必须补上，否则门禁脚本不在场。
-        uses: actions/checkout@main
+        uses: actions/checkout@v7
         with:
           repository: myp015/ainas-modules
           token: ${{ secrets.AiNas }}

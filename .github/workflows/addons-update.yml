@@ -25,21 +25,21 @@ on:
 
 jobs:
   update:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout
-        uses: actions/checkout@main
+        uses: actions/checkout@v7
         with:
           token: ${{ secrets.AiNas }}
       - name: Checkout
-        uses: actions/checkout@main
+        uses: actions/checkout@v7
         with:
           repository: myp015/ainas-addons
           token: ${{ secrets.AiNas }}
           path: ainas-addons
 
       - name: Checkout
-        uses: actions/checkout@main
+        uses: actions/checkout@v7
         with:
           repository: myp015/ainas-rr-misc
           token: ${{ secrets.AiNas }}

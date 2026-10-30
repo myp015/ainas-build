@@ -28,12 +28,12 @@ jobs:
   # （modules.yml / lkms.yml 原本各自内联了 195 行逐字节相同的 include 块）
   # lkms.yml 额外合并 lkm_only（DSM 6.2 等仅 LKM 侧支持的组合），modules.yml 不读该键。
   setup:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     outputs:
       matrix: ${{ steps.gen.outputs.matrix }}
     steps:
       - name: Checkout
-        uses: actions/checkout@main
+        uses: actions/checkout@v7
         with:
           token: ${{ secrets.AiNas }}
       - name: Generate matrix
@@ -51,14 +51,14 @@ jobs:
       # 不取消其余 job：默认 fail-fast 会把剩下的全标 cancelled，等于丢掉整轮验收
       fail-fast: false
       matrix: ${{ fromJson(needs.setup.outputs.matrix) }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout
-        uses: actions/checkout@main
+        uses: actions/checkout@v7
         with:
           token: ${{ secrets.AiNas }}
       - name: Checkout ainas-lkm
-        uses: actions/checkout@main
+        uses: actions/checkout@v7
         with:
           token: ${{ secrets.AiNas }}
           repository: myp015/ainas-lkm
@@ -66,7 +66,7 @@ jobs:
           path: ainas-lkm
 
       - name: Checkout ainas-lkm5
-        uses: actions/checkout@main
+        uses: actions/checkout@v7
         with:
           token: ${{ secrets.AiNas }}
           repository: myp015/ainas-lkm5
@@ -113,11 +113,11 @@ jobs:
             output/*
 
   release:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: build
     steps:
       - name: Checkout
-        uses: actions/checkout@main
+        uses: actions/checkout@v7
         with:
           token: ${{ secrets.AiNas }}
       - name: Init Env

@@ -33,21 +33,21 @@ on:
 
 jobs:
   grub:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout
-        uses: actions/checkout@main
+        uses: actions/checkout@v7
         with:
           token: ${{ secrets.AiNas }}
       - name: Checkout
-        uses: actions/checkout@main
+        uses: actions/checkout@v7
         with:
           repository: myp015/ainas-buildroot
           token: ${{ secrets.AiNas }}
           path: ainas-buildroot
 
       - name: Checkout
-        uses: actions/checkout@main
+        uses: actions/checkout@v7
         with:
           repository: myp015/ainas-rr
           token: ${{ secrets.AiNas }}

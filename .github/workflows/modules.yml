@@ -23,12 +23,12 @@ jobs:
   # 平台×版本矩阵的单一来源：.github/matrix/build.json
   # （modules.yml / lkms.yml 原本各自内联了 195 行逐字节相同的 include 块）
   setup:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     outputs:
       matrix: ${{ steps.gen.outputs.matrix }}
     steps:
       - name: Checkout
-        uses: actions/checkout@main
+        uses: actions/checkout@v7
         with:
           token: ${{ secrets.AiNas }}
       - name: Generate matrix
@@ -45,21 +45,21 @@ jobs:
       # 避免一次网络抖动让全量验收整体取消（2026-09-23 epyc7003-7.4 教训）
       fail-fast: false
       matrix: ${{ fromJson(needs.setup.outputs.matrix) }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout
-        uses: actions/checkout@main
+        uses: actions/checkout@v7
         with:
           token: ${{ secrets.AiNas }}
       - name: Checkout
-        uses: actions/checkout@main
+        uses: actions/checkout@v7
         with:
           repository: myp015/syno-modules
           token: ${{ secrets.AiNas }}
           path: syno-modules
 
       - name: Checkout
-        uses: actions/checkout@main
+        uses: actions/checkout@v7
         with:
           repository: myp015/ainas-modules
           token: ${{ secrets.AiNas }}
@@ -258,22 +258,22 @@ jobs:
             all/*.tgz
 
   firmware:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: build
     steps:
       - name: Checkout
-        uses: actions/checkout@main
+        uses: actions/checkout@v7
         with:
           token: ${{ secrets.AiNas }}
       - name: Checkout
-        uses: actions/checkout@main
+        uses: actions/checkout@v7
         with:
           repository: myp015/syno-modules
           token: ${{ secrets.AiNas }}
           path: syno-modules
 
       - name: Checkout
-        uses: actions/checkout@main
+        uses: actions/checkout@v7
         with:
           repository: myp015/ainas-modules
           token: ${{ secrets.AiNas }}
@@ -316,15 +316,15 @@ jobs:
             firmware.tgz
 
   release:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: firmware
     steps:
       - name: Checkout
-        uses: actions/checkout@main
+        uses: actions/checkout@v7
         with:
           token: ${{ secrets.AiNas }}
       - name: Checkout syno-modules
-        uses: actions/checkout@main
+        uses: actions/checkout@v7
         with:
           repository: myp015/syno-modules
           token: ${{ secrets.AiNas }}
@@ -332,7 +332,7 @@ jobs:
       - name: Checkout ainas-modules
         # 发布门禁脚本（gate_release.py 与 scripts/abi-probe/）随 ainas-modules 仓库发布，
         # 与 build job 编译用的是同一个 commit（同仓库同 ref）。
-        uses: actions/checkout@main
+        uses: actions/checkout@v7
         with:
           repository: myp015/ainas-modules
           token: ${{ secrets.AiNas }}

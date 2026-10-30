@@ -54,10 +54,10 @@ jobs:
           - version: 7.4
             platform: v1000nk
 
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout
-        uses: actions/checkout@main
+        uses: actions/checkout@v7
         with:
           repository: myp015/intel-gpu-i915-backports
           token: ${{ secrets.AiNas }}
@@ -67,7 +67,7 @@ jobs:
           ref: amd-backport
 
       - name: Checkout ainas-modules
-        uses: actions/checkout@main
+        uses: actions/checkout@v7
         with:
           repository: myp015/ainas-modules
           token: ${{ secrets.AiNas }}
@@ -153,11 +153,11 @@ jobs:
             i915-*.tgz
 
   release:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: [i915]
     steps:
       - name: Checkout
-        uses: actions/checkout@main
+        uses: actions/checkout@v7
         with:
           repository: myp015/syno-modules
           token: ${{ secrets.AiNas }}

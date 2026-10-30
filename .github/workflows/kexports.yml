@@ -20,11 +20,11 @@ on:
 
 jobs:
   kexports:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     steps:
       - name: Checkout ainas-modules
-        uses: actions/checkout@main
+        uses: actions/checkout@v7
         with:
           repository: myp015/ainas-modules
           token: ${{ secrets.AiNas }}
@@ -33,7 +33,7 @@ jobs:
       - name: Checkout syno-modules
         # 只取 official/（hda1/rd 是 nm 的输入源，kexports 是落点）；
         # 排除 release/ modules/ thirdparty/ 可省下约 5G。
-        uses: actions/checkout@main
+        uses: actions/checkout@v7
         with:
           repository: myp015/syno-modules
           token: ${{ secrets.AiNas }}
@@ -44,7 +44,7 @@ jobs:
 
       - name: Checkout ainas-cks
         # 只取 kexports/ 落点（release/ 的 bzImage 由脚本用 gh api 按需下载，不拉 1.4G）。
-        uses: actions/checkout@main
+        uses: actions/checkout@v7
         with:
           repository: myp015/ainas-cks
           token: ${{ secrets.AiNas }}

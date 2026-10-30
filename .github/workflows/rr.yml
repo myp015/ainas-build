@@ -82,7 +82,7 @@ on:
 
 jobs:
   resolve-release:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     outputs:
       rr_tag: ${{ steps.pick.outputs.rr_tag }}
       rr_asset_url: ${{ steps.pick.outputs.rr_asset_url }}
@@ -128,7 +128,7 @@ jobs:
           echo "rr_asset_url=$RR_ASSET_URL" >> "$GITHUB_OUTPUT"
 
   select-models:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     outputs:
       models: ${{ steps.pick.outputs.models }}
     steps:
@@ -197,7 +197,7 @@ jobs:
   # 单独串行创建并确认 Release，避免原版/update matrix 任务同时创建/查询同一标签。
   ensure-release:
     needs: resolve-release
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: 创建或确认 RR Release
         shell: bash
@@ -241,7 +241,7 @@ jobs:
   build:
     name: ${{ matrix.model == '__UPDATE__' && 'build (update)' || (matrix.model == '__RR_ORIGINAL__' && 'build (rr-original)' || format('build ({0})', matrix.model)) }}
     needs: [resolve-release, select-models, ensure-release]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       # max-parallel: 3
@@ -259,7 +259,7 @@ jobs:
       LINE: ${{ inputs.dsm_version }}
     steps:
       - name: Checkout main repo
-        uses: actions/checkout@main
+        uses: actions/checkout@v7
 
       - name: 初始化环境
         run: |
