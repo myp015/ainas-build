@@ -226,6 +226,10 @@ jobs:
       ACTION_TOKEN: ${{ secrets.AiNas }}
       RR_ASSET_URL: ${{ needs.resolve-release.outputs.asset_url }}
       RR_TAG: ${{ needs.resolve-release.outputs.tag }}
+      # 构建容器镜像源为 myp015/rr（rootfs 取自 ainas-rr 的 initrd）。Docker Hub 上
+      # 该仓库只有 latest 与 26.10.x，RR release tag（如 26.9.0）没有对应镜像；
+      # 直接把 RR_TAG 当镜像 tag 会 pull 失败（run 41206762237 即此原因）。
+      RR_DOCKER_TAG: latest
       LINE: ${{ inputs.dsm_version }}
     steps:
       - uses: actions/checkout@v7
@@ -321,7 +325,7 @@ jobs:
           sudo rm -rf "$PART3_PATH"
 
           # ── 使用 RR Docker 编译镜像 ───────────────────────────────
-          docker_build rr "$MODEL" "$VERSION" "$LANGUAGE" "$ADDONS" "$TAG" \
+          docker_build rr "$MODEL" "$VERSION" "$LANGUAGE" "$ADDONS" "$RR_DOCKER_TAG" \
             "$WORKDIR"
 
           # ── 清理 p3 临时文件 ──────────────────────────────────────
@@ -362,7 +366,8 @@ jobs:
         env:
           MODEL: ${{ matrix.model }}
         run: |
-          set -uo pipefail   # 注意：这里不加 -e，收尾步骤要尽量把能做的都做完
+          # GitHub 调用 shell 时自带 -e，必须显式 +e 才能让收尾步骤把能做的都做完
+          set +e -uo pipefail
 
           WORKDIR="$PWD"
 
