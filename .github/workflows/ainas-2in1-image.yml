@@ -52,14 +52,6 @@ on:
         description: "DS425+"
         type: boolean
         default: false
-      model_dva3221:
-        description: "DVA3221"
-        type: boolean
-        default: false
-      model_dva1622:
-        description: "DVA1622"
-        type: boolean
-        default: false
       custom_models:
         description: "自定义型号(工作流未列出的,多个用逗号分隔,如 DS1621+,RS4021xs+)"
         type: string
@@ -175,7 +167,7 @@ jobs:
             fi
           elif [ "${{ inputs.all_models }}" = "全选" ]; then
             echo "[INFO] 已开启全选，将编译所有支持的型号"
-            MODELS+=("DS918+" "DS920+" "DS923+" "DS925+" "DS3622xs+" "SA6400" "DS425+" "DVA3221" "DVA1622")
+            MODELS+=("DS918+" "DS920+" "DS923+" "DS925+" "DS3622xs+" "SA6400" "DS425+")
           else
             [ "${{ inputs.model_ds918p }}"   = "true" ] && MODELS+=("DS918+")
             [ "${{ inputs.model_ds920p }}"   = "true" ] && MODELS+=("DS920+")
@@ -184,8 +176,6 @@ jobs:
             [ "${{ inputs.model_ds3622xsp }}" = "true" ] && MODELS+=("DS3622xs+")
             [ "${{ inputs.model_sa6400 }}"   = "true" ] && MODELS+=("SA6400")
             [ "${{ inputs.model_ds425p }}"   = "true" ] && MODELS+=("DS425+")
-            [ "${{ inputs.model_dva3221 }}"  = "true" ] && MODELS+=("DVA3221")
-            [ "${{ inputs.model_dva1622 }}"  = "true" ] && MODELS+=("DVA1622")
           fi
 
           # 追加自定义型号（工作流未列出的型号；6.2 也接受，如输入 ds3617xs）
@@ -514,3 +504,47 @@ jobs:
 
           bash "$GITHUB_WORKSPACE/.github/scripts/release_publish.sh" \
             "$RELEASE_TAG" "RR build artifacts for ${TAG}" "${ASSET_ARGS[@]}"
+
+      # 串口完整日志、套件检查输出、结论摘要统一由 dsm_setup 写到 /tmp/dsm-install/logs。
+      # 无论成功失败都上传 Actions artifact，便于后续分析（默认保留 90 天，这里显式 30 天）。
+      - name: 上传 DSM 构建日志（串口/套件检查）
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dsm-logs-${{ matrix.model == '__UPDATE__' && 'update' || matrix.model }}-${{ github.run_id }}
+          path: /tmp/dsm-install/logs
+          if-no-files-found: warn
+          retention-days: 30
+
+      # 套件检查或安装失败时，把日志压缩后附加到本次构建对应的 Release，
+      # 无需登录 runner 也能下载现场日志。成功构建不附加，避免污染制品列表。
+      - name: 失败时将 DSM 日志附加到 Release
+        if: failure()
+        continue-on-error: true
+        shell: bash
+        env:
+          ACTION_TOKEN: ${{ secrets.AiNas }}
+        run: |
+          set -euo pipefail
+          LOG_DIR=/tmp/dsm-install/logs
+          if [ ! -d "$LOG_DIR" ]; then
+            echo "[INFO] 无日志目录，跳过 Release 日志上传"
+            exit 0
+          fi
+          shopt -s nullglob
+          files=("$LOG_DIR"/*.log)
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "[INFO] 无日志文件，跳过 Release 日志上传"
+            exit 0
+          fi
+          if [ -z "${TAG:-}" ]; then
+            echo "[WARN] TAG 未设置（失败发生在 checkout rr 之前），跳过 Release 日志上传"
+            exit 0
+          fi
+          : "${ACTION_TOKEN:?缺少 ACTION_TOKEN}"
+          export GH_TOKEN="$ACTION_TOKEN"
+          export GH_REPO="myp015/ainas-2in1"
+          for f in "${files[@]}"; do
+            gzip -1 -c "$f" > "$f.gz"
+          done
+          gh release upload "ainas-2in1_${TAG}" "$LOG_DIR"/*.log.gz --clobber
