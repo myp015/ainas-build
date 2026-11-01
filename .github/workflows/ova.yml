@@ -4,11 +4,23 @@
 # This is free software, licensed under the MIT License.
 # See /LICENSE for more information.
 #
-
-name: Build RR-OVA 
+# 双源 OVA 工作流：可选择一个或同时两个 RR 源
+#   ainas → myp015/ainas-rr（镜像 myp015/rr），Release ainas-ova-<版本>（新增）
+#   RROrg → RROrg/rr（镜像 wjz304/rr），Release OVA_rr<版本>
+# 仅支持 DSM 7.x；p3 资产全部取自 rr.img（不调用 get*）。
+# 型号勾选项只用 7 个通用型号；其它型号请通过 custom_models 手动输入。
+name: Build RR-OVA
 on:
   workflow_dispatch:
     inputs:
+      rr_source:
+        description: "RR 源"
+        type: choice
+        options:
+          - ainas
+          - RROrg
+          - 两者同时
+        default: 两者同时
       all_models:
         description: "编译模式"
         type: choice
@@ -45,19 +57,19 @@ on:
         type: boolean
         default: false
       custom_models:
-        description: "自定义型号(工作流未列出的,多个用逗号分隔,如 DS1621+,RS4021xs+)"
+        description: "自定义型号(工作流未列出的,多个用逗号分隔,如 DS1621+,DVA3221,RS4021xs+)"
         type: string
         default: ""
       overwrite_base:
-        description: "覆盖 ova-base（默认复用 Release 中已存在的 base）"
+        description: "覆盖所选源的 ova-base（默认复用 Release 中已存在的 base）"
         type: boolean
         default: false
       rr_version:
-        description: "RR version (可选,留空=latest;示例:26.4.0 或 v26.4.0)"
+        description: "RR version (可选,留空=latest;指定版本必须在所选源中存在，不做回退)"
         type: string
         default: ""
       dsm_version:
-        description: "DSM 版本编号（从 pats.xlsx 获取，选择 >= 7.2.1 的所有版本）"
+        description: "DSM 版本编号（仅 7.x，从 pats.xlsx 获取）"
         type: choice
         options:
           - "7.2.1"
@@ -69,77 +81,69 @@ on:
         default: "7.4.1"
 
 jobs:
-  resolve-release:
+  # 一次性解析源版本、选择型号并生成 matrix 任务，下游只读 needs.plan.outputs。
+  plan:
     runs-on: ubuntu-24.04
     outputs:
-      tag: ${{ steps.pick.outputs.tag }}
-      asset_url: ${{ steps.pick.outputs.asset_url }}
+      sources: ${{ steps.plan.outputs.sources }}
+      active_sources: ${{ steps.plan.outputs.active_sources }}
+      tasks: ${{ steps.plan.outputs.tasks }}
     steps:
-      - id: pick
+      - uses: actions/checkout@v7
+
+      - name: 规划源与构建任务
+        id: plan
         shell: bash
-        run: |
-          set -euo pipefail
-          REQ_RAW="${{ inputs.rr_version }}"
-          REQ_TAG="$(printf '%s' "$REQ_RAW" | tr -d '[:space:]')"
-          REQ_TAG="${REQ_TAG#rr-}"
-          REQ_TAG="${REQ_TAG%.img.zip}"
-          REQ_TAG="${REQ_TAG#v}"
-
-          # 必须带凭据：runner 是共享出口 IP，匿名调用只有 60 次/小时，实测撞过 403
-          fetch_latest() {
-            curl -fsSL --connect-timeout 10 -H "Authorization: Bearer ${{ secrets.AiNas }}" "https://api.github.com/repos/RROrg/rr/releases/latest"
-          }
-          fetch_tag() {
-            local t="$1"
-            curl -fsSL --connect-timeout 10 -H "Authorization: Bearer ${{ secrets.AiNas }}" "https://api.github.com/repos/RROrg/rr/releases/tags/${t}"
-          }
-
-          if [ -z "$REQ_TAG" ] || [ "$REQ_TAG" = "latest" ]; then
-            JSON="$(fetch_latest)"
-          else
-            if ! JSON="$(fetch_tag "$REQ_TAG" 2>/dev/null)"; then
-              echo "[INFO] 指定版本 rr_version=${REQ_RAW} 未找到，回退到最新版本"
-              JSON="$(fetch_latest)"
-            fi
-          fi
-
-          RR_TAG="$(printf '%s' "$JSON" | jq -r '.tag_name' | sed 's/^v//')"
-          ASSET_URL="$(printf '%s' "$JSON" | jq -r '.assets[]? | select(.name | test("^rr-.*[.]img[.]zip$")) | .browser_download_url' | head -n1)"
-          if [ -z "$RR_TAG" ] || [ "$RR_TAG" = "null" ] || [ -z "$ASSET_URL" ] || [ "$ASSET_URL" = "null" ]; then
-            echo "[E] 下载失败 (rr_version=${REQ_RAW:-latest})"
-            exit 1
-          fi
-
-          echo "tag=$RR_TAG" >> "$GITHUB_OUTPUT"
-          echo "asset_url=$ASSET_URL" >> "$GITHUB_OUTPUT"
+        env:
+          GH_TOKEN: ${{ secrets.AiNas }}
+          RR_SOURCE: ${{ inputs.rr_source }}
+          RR_VERSION: ${{ inputs.rr_version }}
+          DSM_VERSION: ${{ inputs.dsm_version }}
+          ALL_MODELS: ${{ inputs.all_models }}
+          CUSTOM_MODELS: ${{ inputs.custom_models }}
+          MODEL_DS918P: ${{ inputs.model_ds918p }}
+          MODEL_DS920P: ${{ inputs.model_ds920p }}
+          MODEL_DS923P: ${{ inputs.model_ds923p }}
+          MODEL_DS925P: ${{ inputs.model_ds925p }}
+          MODEL_DS3622XSP: ${{ inputs.model_ds3622xsp }}
+          MODEL_SA6400: ${{ inputs.model_sa6400 }}
+          MODEL_DS425P: ${{ inputs.model_ds425p }}
+        run: bash .github/scripts/plan_sources.sh ova
 
   # 单独串行创建并确认 Release，避免 OVA matrix 任务并发创建同一标签。
   ensure-release:
-    needs: resolve-release
+    needs: plan
     runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: true
+      max-parallel: 1
+      matrix:
+        include: ${{ fromJSON(needs.plan.outputs.active_sources) }}
     steps:
       - name: 创建或确认 OVA Release
         shell: bash
         env:
           ACTION_TOKEN: ${{ secrets.AiNas }}
-          RR_TAG: ${{ needs.resolve-release.outputs.tag }}
+          RELEASE_TAG: ${{ matrix.release_tag }}
+          RELEASE_TITLE: ${{ matrix.release_title }}
+          RELEASE_NOTES: ${{ matrix.release_notes }}
+          SOURCE: ${{ matrix.source }}
         run: |
           set -euo pipefail
           : "${ACTION_TOKEN:?缺少 ACTION_TOKEN}"
-          : "${RR_TAG:?缺少 RR_TAG}"
+          : "${RELEASE_TAG:?缺少 RELEASE_TAG}"
           export GH_TOKEN="$ACTION_TOKEN"
           export GH_REPO="myp015/ainas-2in1"
-          RELEASE_TAG="OVA_rr${RR_TAG}"
           for attempt in $(seq 1 12); do
             if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
-              echo "[INFO] Release 已确认可见: $RELEASE_TAG"
+              echo "[INFO] Release 已确认可见: $RELEASE_TAG（源=${SOURCE}）"
               exit 0
             fi
-            echo "[INFO] 创建或确认 Release: $RELEASE_TAG (${attempt}/12)"
+            echo "[INFO] 创建或确认 Release: $RELEASE_TAG（源=${SOURCE}）(${attempt}/12)"
             set +e
             create_out=$(gh release create "$RELEASE_TAG" \
-              --title "$RELEASE_TAG" \
-              --notes "OVA build artifacts for ${RR_TAG}" \
+              --title "$RELEASE_TITLE" \
+              --notes "$RELEASE_NOTES" \
               --latest=false 2>&1)
             create_rc=$?
             set -e
@@ -156,15 +160,22 @@ jobs:
           echo "[E] Release ${RELEASE_TAG} 创建/查询连续失败" >&2
           exit 1
 
-  # 公共 base：下载 RR、解压、cpuinfo/initrd 补丁这些与型号无关的工作只做一次，
-  # 作为 Release 资产随 ainas-2in1 永久存放，各型号 job 从同一 Release 下载。
-  # 不在本 job 做 patch_part1（grub.cfg 与型号相关），也不跑 docker make。
+  # 公共 base：下载 RR、cpuinfo/initrd 补丁这些与型号无关的工作每个源只做一次，
+  # 作为 Release 资产永久存放。不在本 job 做 patch_part1（grub.cfg 与型号相关）。
   prepare-base:
+    needs: [plan, ensure-release]
     runs-on: ubuntu-24.04
-    needs: [resolve-release, ensure-release]
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.plan.outputs.active_sources) }}
     env:
-      RR_ASSET_URL: ${{ needs.resolve-release.outputs.asset_url }}
-      RR_TAG: ${{ needs.resolve-release.outputs.tag }}
+      RR_ASSET_URL: ${{ matrix.rr_asset_url }}
+      RR_TAG: ${{ matrix.rr_tag }}
+      TAG: ${{ matrix.rr_tag }}
+      RELEASE_TAG: ${{ matrix.release_tag }}
+      BASE_ASSET: ${{ matrix.base_asset }}
+      SOURCE: ${{ matrix.source }}
     steps:
       - uses: actions/checkout@v7
 
@@ -180,8 +191,6 @@ jobs:
           : "${RR_TAG:?缺少 RR_TAG}"
           export GH_TOKEN="$ACTION_TOKEN"
           export GH_REPO="myp015/ainas-2in1"
-          RELEASE_TAG="OVA_rr${RR_TAG}"
-          BASE_ASSET="ova-base-${RR_TAG}.img.zst"
 
           ASSET_NAMES="$(gh release view "$RELEASE_TAG" --json assets --jq '.assets[].name')"
           EXISTS="false"
@@ -191,7 +200,7 @@ jobs:
           fi
 
           if [ "$EXISTS" = "true" ] && [ "${OVERWRITE_BASE:-false}" != "true" ]; then
-            echo "[INFO] Release ${RELEASE_TAG} 已存在 ${BASE_ASSET}，复用（未勾选覆盖）"
+            echo "[INFO] Release ${RELEASE_TAG}（源=${SOURCE}）已存在 ${BASE_ASSET}，复用（未勾选覆盖）"
             echo "rebuild=false" >> "$GITHUB_OUTPUT"
           else
             echo "[INFO] 需要构建 base（exists=${EXISTS} overwrite=${OVERWRITE_BASE:-false}）"
@@ -240,6 +249,21 @@ jobs:
           sudo mkdir -p "$PART3_PATH"
           sudo mount "${DISK_LOOP}p3" "$PART3_PATH"
 
+          # addons/modules/lkms/cks 全部取自 rr.img：不调用 get* 覆盖 myp015 Release 资产
+          echo "[INFO] 源=${SOURCE}：使用 rr.img 内置资产"
+          for d in cks lkms addons modules; do
+            if [ ! -d "${PART3_PATH}/${d}" ] || [ -z "$(ls -A "${PART3_PATH}/${d}")" ]; then
+              echo "[E] rr.img 的 p3 缺少内置资产目录或为空: ${d}" >&2
+              exit 1
+            fi
+          done
+          for f in "addons/cpuinfo/all.tgz"; do
+            if [ ! -f "${PART3_PATH}/${f}" ]; then
+              echo "[E] rr.img 的 p3 缺少内置资产: ${f}" >&2
+              exit 1
+            fi
+          done
+
           patch_cpuinfo "${PART3_PATH}/addons" "patch-cpuinfo.py"
           patch_ram "$PART3_PATH" rr "$WORKDIR"
 
@@ -255,7 +279,6 @@ jobs:
 
       # 上传到 ainas-2in1 的 Release（与最终镜像放在一起），Release 资产默认永久保存。
       # 单文件超过 GitHub 2GB 上限时按 release_publish.sh 同样的 1900MB 规则分卷。
-      # 仅在需要构建（缺失或勾选覆盖）时执行，上传前删除同名旧资产以完成替换。
       - name: 上传公共 base 到 Release
         if: steps.check.outputs.rebuild == 'true'
         shell: bash
@@ -267,8 +290,6 @@ jobs:
           : "${RR_TAG:?缺少 RR_TAG}"
           export GH_TOKEN="$ACTION_TOKEN"
           export GH_REPO="myp015/ainas-2in1"
-          RELEASE_TAG="OVA_rr${RR_TAG}"
-          BASE_ASSET="ova-base-${RR_TAG}.img.zst"
 
           mv -f ova-base.img.zst "$BASE_ASSET"
           SIZE=$(stat -c%s "$BASE_ASSET")
@@ -293,87 +314,19 @@ jobs:
           gh release upload "$RELEASE_TAG" "${UPLOAD_FILES[@]}"
           echo "[INFO] base 已上传到 Release: ${RELEASE_TAG}"
 
-  select-models:
-    runs-on: ubuntu-24.04
-    outputs:
-      models: ${{ steps.pick.outputs.models }}
-    steps:
-      - id: pick
-        shell: bash
-        run: |
-          set -euo pipefail
-          MODELS=()
-
-          if [ "${{ inputs.all_models }}" = "全选" ]; then
-            echo "[INFO] 已开启全选，将编译所有支持的型号"
-            MODELS+=("DS918+" "DS920+" "DS923+" "DS925+" "DS3622xs+" "SA6400" "DS425+")
-          else
-            [ "${{ inputs.model_ds918p }}"    = "true" ] && MODELS+=("DS918+")
-            [ "${{ inputs.model_ds920p }}"    = "true" ] && MODELS+=("DS920+")
-            [ "${{ inputs.model_ds923p }}"    = "true" ] && MODELS+=("DS923+")
-            [ "${{ inputs.model_ds925p }}"    = "true" ] && MODELS+=("DS925+")
-            [ "${{ inputs.model_ds3622xsp }}" = "true" ] && MODELS+=("DS3622xs+")
-            [ "${{ inputs.model_sa6400 }}"    = "true" ] && MODELS+=("SA6400")
-            [ "${{ inputs.model_ds425p }}"    = "true" ] && MODELS+=("DS425+")
-          fi
-          
-          # 追加自定义型号（工作流未列出的型号）
-          CUSTOM_RAW="${{ inputs.custom_models }}"
-          if [ -n "$(printf '%s' "$CUSTOM_RAW" | tr -d '[:space:]')" ]; then
-            echo "[INFO] 检测到自定义型号输入: ${CUSTOM_RAW}"
-            IFS=',' read -ra CUSTOM_ARR <<< "$CUSTOM_RAW"
-            for cm in "${CUSTOM_ARR[@]}"; do
-              cm="$(echo "$cm" | xargs)"
-              [ -n "$cm" ] && MODELS+=("$cm")
-            done
-          fi
-
-          # 去重
-          UNIQ_MODELS=()
-          for m in "${MODELS[@]}"; do
-            skip=0
-            for u in "${UNIQ_MODELS[@]}"; do
-              [ "$u" = "$m" ] && { skip=1; break; }
-            done
-            [ $skip -eq 0 ] && UNIQ_MODELS+=("$m")
-          done
-          MODELS=("${UNIQ_MODELS[@]}")
-
-          if [ ${#MODELS[@]} -eq 0 ]; then
-            echo "[E] 请至少勾选一个型号"
-            exit 1
-          fi
-
-          JSON_OUT="["
-          for m in "${MODELS[@]}"; do
-            JSON_OUT+="\"$m\","
-          done
-          JSON_OUT="${JSON_OUT%,}]"
-          echo "models=$JSON_OUT" >> "$GITHUB_OUTPUT"
-
   build:
-    name: ${{ format('build ({0})', matrix.model) }}
-    needs: [resolve-release, select-models, ensure-release, prepare-base]
+    name: ${{ format('build ({0}/{1})', matrix.source, matrix.model) }}
+    needs: [plan, prepare-base]
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
-      # max-parallel: 3
       matrix:
-        model: ${{ fromJson(needs.select-models.outputs.models) }}
+        include: ${{ fromJSON(needs.plan.outputs.tasks) }}
     env:
       LANGUAGE: zh_CN
       KERNEL: official
       ADDONS: acpid,reboottoloader,addincards,cpuinfo,expands,diskcompat,lsiutil,nvmevolume,powersched,remotefs,storagepanel,smartctl,trivial,apppatch,vmtools
       ACTION_TOKEN: ${{ secrets.AiNas }}
-      RR_ASSET_URL: ${{ needs.resolve-release.outputs.asset_url }}
-      RR_TAG: ${{ needs.resolve-release.outputs.tag }}
-      # 原 checkout rr 步骤会通过 GITHUB_ENV 注入 TAG；该步骤已移除，必须在 env 显式提供，
-      # 否则 repack_rr、发布步骤与失败日志上传会因 TAG 未定义而失败。
-      TAG: ${{ needs.resolve-release.outputs.tag }}
-      # 构建容器镜像源为 myp015/rr（rootfs 取自 ainas-rr 的 initrd）。Docker Hub 上
-      # 该仓库只有 latest 与 26.10.x，RR release tag（如 26.9.0）没有对应镜像；
-      # 直接把 RR_TAG 当镜像 tag 会 pull 失败（run 41206762237 即此原因）。
-      RR_DOCKER_TAG: latest
       LINE: ${{ inputs.dsm_version }}
     steps:
       - uses: actions/checkout@v7
@@ -391,6 +344,36 @@ jobs:
           token: ${{ secrets.AiNas }}
           path: .2in1
 
+      - name: 加载源配置
+        shell: bash
+        env:
+          SOURCES_JSON: ${{ needs.plan.outputs.sources }}
+          SOURCE: ${{ matrix.source }}
+        run: |
+          set -euo pipefail
+          row="$(printf '%s' "${SOURCES_JSON}" | jq -r --arg s "${SOURCE}" \
+            '.[] | select(.source==$s) | [.release_tag,.release_title,.base_asset,.rr_tag,.rr_asset_url,.docker_image,.docker_tag,.source,.release_notes] | @tsv')"
+          if [ -z "${row}" ]; then
+            echo "[E] plan 输出中没有源 ${SOURCE} 的配置" >&2
+            exit 1
+          fi
+          IFS=$'\t' read -r RELEASE_TAG RELEASE_TITLE BASE_ASSET RR_TAG RR_ASSET_URL RR_DOCKER_IMAGE RR_DOCKER_TAG SOURCE_V RELEASE_NOTES <<< "${row}"
+          : "${RELEASE_TAG:?缺少 RELEASE_TAG}"
+          : "${BASE_ASSET:?缺少 BASE_ASSET}"
+          : "${RR_DOCKER_IMAGE:?缺少 RR_DOCKER_IMAGE}"
+          : "${RR_DOCKER_TAG:?缺少 RR_DOCKER_TAG}"
+          echo "[INFO] 源=${SOURCE_V} Release=${RELEASE_TAG} base=${BASE_ASSET} 镜像=${RR_DOCKER_IMAGE}:${RR_DOCKER_TAG}"
+          {
+            echo "TAG=${RR_TAG}"
+            echo "RR_TAG=${RR_TAG}"
+            echo "RELEASE_TAG=${RELEASE_TAG}"
+            echo "RELEASE_TITLE=${RELEASE_TITLE}"
+            echo "BASE_ASSET=${BASE_ASSET}"
+            echo "RR_DOCKER_IMAGE=${RR_DOCKER_IMAGE}"
+            echo "RR_DOCKER_TAG=${RR_DOCKER_TAG}"
+            echo "SOURCE=${SOURCE_V}"
+          } >> "$GITHUB_ENV"
+
       - name: 下载公共 base
         shell: bash
         env:
@@ -398,20 +381,20 @@ jobs:
         run: |
           set -euo pipefail
           : "${ACTION_TOKEN:?缺少 ACTION_TOKEN}"
-          : "${TAG:?缺少 TAG}"
+          : "${RELEASE_TAG:?缺少 RELEASE_TAG}"
+          : "${BASE_ASSET:?缺少 BASE_ASSET}"
           export GH_TOKEN="$ACTION_TOKEN"
           export GH_REPO="myp015/ainas-2in1"
-          RELEASE_TAG="OVA_rr${TAG}"
           mkdir -p base
           gh release download "$RELEASE_TAG" \
-            --pattern "ova-base-${TAG}.img.zst*" \
+            --pattern "${BASE_ASSET}*" \
             --dir base --clobber
-          if [ -f "base/ova-base-${TAG}.img.zst" ]; then
+          if [ -f "base/${BASE_ASSET}" ]; then
             echo "[INFO] base 为单文件"
           else
             # 超过 2GB 时 Release 只存分卷，编译步骤按文件名顺序流式合并解压
-            compgen -G "base/ova-base-${TAG}.img.zst.part.*" >/dev/null || {
-              echo "[E] Release ${RELEASE_TAG} 中未找到 base 资产" >&2
+            compgen -G "base/${BASE_ASSET}.part.*" >/dev/null || {
+              echo "[E] Release ${RELEASE_TAG} 中未找到 base 资产 ${BASE_ASSET}" >&2
               exit 1
             }
             echo "[INFO] base 为分卷，编译步骤将流式合并解压（不落盘合并文件）"
@@ -456,25 +439,25 @@ jobs:
           echo "SAFE_TAG=${SAFE_TAG}" >> "$GITHUB_ENV"
 
           ARTIFACT="${MODEL}_${VER_SLUG}_${SAFE_TAG}"
-          echo "[INFO] 型号=${MODEL} 目标DSM版本=${VERSION} DSM系列=${LINE_REQ} 制品版本=${VER_SLUG}"
+          echo "[INFO] 型号=${MODEL} 目标DSM版本=${VERSION} DSM系列=${LINE_REQ} 制品版本=${VER_SLUG} 源=${SOURCE}"
 
           # ── 系统依赖 ───────────────────────────────────────────────
           sudo apt-get update
           sudo apt-get install -y gettext cpio zstd dosfstools rsync qemu-utils
 
           # ── 恢复公共 base ──────────────────────────────────────────
-          # 下载 RR、解压、cpuinfo/initrd 补丁等与型号无关的步骤已在 prepare-base
+          # 下载 RR、cpuinfo/initrd 补丁等与型号无关的步骤已在 prepare-base
           # 完成；这里只解压并挂上分区，供型号相关步骤使用。
           mkdir -p rr
-          if [ -f "base/ova-base-${TAG}.img.zst" ]; then
-            zstd -d -q -f "base/ova-base-${TAG}.img.zst" -o rr/rr.img
+          if [ -f "base/${BASE_ASSET}" ]; then
+            zstd -d -q -f "base/${BASE_ASSET}" -o rr/rr.img
           else
             # 分卷直接流式解压，避免额外落盘一份合并文件占用 runner 磁盘
-            compgen -G "base/ova-base-${TAG}.img.zst.part.*" >/dev/null || {
-              echo "[E] 未找到公共 base: base/ova-base-${TAG}.img.zst" >&2
+            compgen -G "base/${BASE_ASSET}.part.*" >/dev/null || {
+              echo "[E] 未找到公共 base: base/${BASE_ASSET}" >&2
               exit 1
             }
-            cat base/ova-base-${TAG}.img.zst.part.* | zstd -d -q -f - -o rr/rr.img
+            cat base/${BASE_ASSET}.part.* | zstd -d -q -f - -o rr/rr.img
           fi
           rm -rf base
 
@@ -524,7 +507,6 @@ jobs:
           echo "ARTIFACT=${ARTIFACT}"    >> "$GITHUB_ENV"
           echo "ARTIFACT_ZIP=$ZIP_NAME"  >> "$GITHUB_ENV"
 
-
       - name: 安装失败时收尾并上传 rr.img
         if: failure()
         shell: bash
@@ -562,44 +544,31 @@ jobs:
           ls -lh "$OUT"
           echo "DEBUG_IMG=$OUT" >> "$GITHUB_ENV"
 
-       #- name: 上传失败调试镜像到 Actions 制品区
-        #if: failure()
-       # uses: actions/upload-artifact@v7
-        #with:
-          #name: rr-img-failed-${{ matrix.model }}
-          #path: rr/rr-failed-${{ matrix.model }}.img.gz
-          #retention-days: 7
-          #if-no-files-found: warn
-
-
-
-      - name: 发布制品到 ainas-2in1 Release
+      - name: 发布制品到 Release
         shell: bash
         env:
           ACTION_TOKEN: ${{ secrets.AiNas }}
         run: |
           set -euo pipefail
-          : "${TAG:?缺少 TAG}"
+          : "${RELEASE_TAG:?缺少 RELEASE_TAG}"
           : "${ACTION_TOKEN:?缺少 ACTION_TOKEN}"
 
           export GH_TOKEN="$ACTION_TOKEN"
           export GH_REPO="myp015/ainas-2in1"
-          RELEASE_TAG="OVA_rr${TAG}"
 
           # 分卷、Release 自愈、退避重试统一在 .github/scripts/release_publish.sh 里
           ASSET_ARGS=()
           [ -n "${ARTIFACT_ZIP:-}" ] && ASSET_ARGS+=("$GITHUB_WORKSPACE/$ARTIFACT_ZIP")
 
           bash "$GITHUB_WORKSPACE/.github/scripts/release_publish.sh" \
-            "$RELEASE_TAG" "OVA build artifacts for ${RR_TAG}" "${ASSET_ARGS[@]}"
+            "$RELEASE_TAG" "${RELEASE_NOTES:-OVA build artifacts}" "${ASSET_ARGS[@]}"
 
-      # 与 ainas-2in1-image.yml 保持一致：dsm_setup 把串口完整日志、套件检查
-      # 输出和结论摘要写到 /tmp/dsm-install/logs，成功失败都上传 Actions artifact。
+      # 串口完整日志、套件检查输出、结论摘要统一由 dsm_setup 写到 /tmp/dsm-install/logs。
       - name: 上传 DSM 构建日志（串口/套件检查）
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: dsm-logs-${{ matrix.model }}-${{ github.run_id }}
+          name: dsm-logs-${{ matrix.source }}-${{ matrix.model }}-${{ github.run_id }}
           path: /tmp/dsm-install/logs
           if-no-files-found: warn
           retention-days: 30
@@ -625,8 +594,8 @@ jobs:
             echo "[INFO] 无日志文件，跳过 Release 日志上传"
             exit 0
           fi
-          if [ -z "${TAG:-}" ]; then
-            echo "[WARN] TAG 未设置（失败发生在 checkout rr 之前），跳过 Release 日志上传"
+          if [ -z "${RELEASE_TAG:-}" ]; then
+            echo "[WARN] RELEASE_TAG 未设置（失败发生在加载源配置之前），跳过 Release 日志上传"
             exit 0
           fi
           : "${ACTION_TOKEN:?缺少 ACTION_TOKEN}"
@@ -635,5 +604,4 @@ jobs:
           for f in "${files[@]}"; do
             gzip -1 -c "$f" > "$f.gz"
           done
-          gh release upload "OVA_rr${TAG}" "$LOG_DIR"/*.log.gz --clobber
-
+          gh release upload "${RELEASE_TAG}" "$LOG_DIR"/*.log.gz --clobber
