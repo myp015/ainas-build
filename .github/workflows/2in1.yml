@@ -470,13 +470,12 @@ jobs:
           if [ -f "base/2in1-base-${TAG}.img.zst" ]; then
             echo "[INFO] base 为单文件"
           else
-            # 超过 2GB 时 Release 只存分卷，这里按文件名顺序合并
+            # 超过 2GB 时 Release 只存分卷，编译步骤按文件名顺序流式合并解压
             compgen -G "base/2in1-base-${TAG}.img.zst.part.*" >/dev/null || {
               echo "[E] Release ${RELEASE_TAG} 中未找到 base 资产" >&2
               exit 1
             }
-            cat base/2in1-base-${TAG}.img.zst.part.* > "base/2in1-base-${TAG}.img.zst"
-            echo "[INFO] base 分卷已合并"
+            echo "[INFO] base 为分卷，编译步骤将流式合并解压（不落盘合并文件）"
           fi
 
       - name: 编译镜像
@@ -551,9 +550,17 @@ jobs:
           # ── 恢复公共 base ──────────────────────────────────────────
           # 下载 RR、分区 label、资产包、addons/initrd 补丁等与型号无关的步骤
           # 已在 prepare-base 完成；这里只解压并挂上分区，供型号相关步骤使用。
-          [ -f "base/2in1-base-${TAG}.img.zst" ] || { echo "[E] 未找到公共 base: base/2in1-base-${TAG}.img.zst" >&2; exit 1; }
           mkdir -p rr
-          zstd -d -q -f "base/2in1-base-${TAG}.img.zst" -o rr/rr.img
+          if [ -f "base/2in1-base-${TAG}.img.zst" ]; then
+            zstd -d -q -f "base/2in1-base-${TAG}.img.zst" -o rr/rr.img
+          else
+            # 分卷直接流式解压，避免额外落盘一份合并文件占用 runner 磁盘
+            compgen -G "base/2in1-base-${TAG}.img.zst.part.*" >/dev/null || {
+              echo "[E] 未找到公共 base: base/2in1-base-${TAG}.img.zst" >&2
+              exit 1
+            }
+            cat base/2in1-base-${TAG}.img.zst.part.* | zstd -d -q -f - -o rr/rr.img
+          fi
           rm -rf base
 
           # rr.img 必须保持 attached：容器内 .bashrc 按分区 label 挂载 p1/p2/p3
