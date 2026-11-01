@@ -5,12 +5,12 @@
 # This is free software, licensed under the MIT License.
 # See /LICENSE for more information.
 #
-# 双源构建的规划脚本：解析 RR 源版本、选择型号、生成 matrix 任务。
+# 构建规划脚本：解析 RR 源版本、选择型号、生成 matrix 任务。
 # 用法：plan_sources.sh <2in1|rr|ova>
 #
 # 输入（环境变量）：
 #   GH_TOKEN          访问 GitHub API 的 token（必需）
-#   RR_SOURCE         ainas | RROrg | 两者同时
+#   RR_SOURCE         ainas | RROrg（单选，每次编译只用一个源）
 #   RR_VERSION        指定 RR 版本，留空或 latest 表示取最新
 #   DSM_VERSION       DSM 版本编号
 #   ALL_MODELS        全选 | 自选
@@ -20,9 +20,11 @@
 #   BUILD_RR_ORIGINAL rr：是否生成原版 RR 镜像
 #
 # 输出（GITHUB_OUTPUT）：
-#   sources         选中源的配置数组（每个源一个对象）
-#   active_sources  至少有一个任务的源（供 ensure-release/prepare-base matrix 使用）
-#   tasks           构建任务数组（source/model/kind）
+#   source / rr_tag / rr_asset_url / release_tag / release_title / release_notes
+#   base_asset / docker_image / docker_tag
+#                   选中源的配置；因为每次只允许一个源，直接作为标量输出，
+#                   下游 job 用 needs.plan.outputs.* 读取，不塞整串 JSON 到 env。
+#   tasks           构建任务数组（model/kind），供 build matrix 使用
 #
 # 所有 Release 都发布在 myp015/ainas-2in1 仓库。
 
@@ -53,11 +55,11 @@ if [ "${PRODUCT}" = "ova" ] && [ "${DSM_VERSION}" = "6.2.4" ]; then
 fi
 
 # ── 1. 源选择 ─────────────────────────────────────────────────────────
+# 每次编译只允许一个源：两个源同时编译会争用同名 base/Release 资产，也拉长构建时间。
 case "${RR_SOURCE:-}" in
   ainas|RROrg) SOURCES=("${RR_SOURCE}") ;;
-  两者同时) SOURCES=("ainas" "RROrg") ;;
   *)
-    echo "[E] rr_source 非法: ${RR_SOURCE:-<空>}（只允许 ainas / RROrg / 两者同时）" >&2
+    echo "[E] rr_source 非法: ${RR_SOURCE:-<空>}（只允许 ainas / RROrg，每次编译只能选一个源）" >&2
     exit 1
     ;;
 esac
@@ -295,25 +297,33 @@ with open(sys.argv[1], encoding="utf-8") as f:
             continue
         sources.append(dict(zip(src_fields, line.split("\t"))))
 
+# 单源：源配置作为 plan 的标量输出，build matrix 只保留 model/kind，
+# 任务名不会被一长串 URL 撑爆，也不再需要向 job env 注入整串 JSON。
+if len(sources) != 1:
+    raise SystemExit("[E] 每次编译只能有一个源，实际解析到 %d 个" % len(sources))
+src = sources[0]
+
 tasks = []
 with open(sys.argv[2], encoding="utf-8") as f:
     for line in f:
         line = line.rstrip("\n")
         if not line:
             continue
-        src, model, kind = line.split("\t")
-        tasks.append({"source": src, "model": model, "kind": kind})
-
-active_sources = [s for s in sources if any(t["source"] == s["source"] for t in tasks)]
+        _src, model, kind = line.split("\t")
+        tasks.append({"model": model, "kind": kind})
 
 def dump(v):
     return json.dumps(v, ensure_ascii=False, separators=(",", ":"))
 
+scalar_keys = [
+    "source", "rr_tag", "rr_asset_url", "release_tag", "release_title",
+    "base_asset", "docker_image", "docker_tag", "release_notes",
+]
 with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as f:
-    f.write("sources=" + dump(sources) + "\n")
-    f.write("active_sources=" + dump(active_sources) + "\n")
+    for k in scalar_keys:
+        f.write("%s=%s\n" % (k, src[k]))
     f.write("tasks=" + dump(tasks) + "\n")
 
-print("[INFO] 源: " + ", ".join(s["source"] for s in sources))
+print("[INFO] 源: %s（%s）" % (src["source"], src["repo"]))
 print("[INFO] 任务数: %d" % len(tasks))
 PY

@@ -5,7 +5,7 @@
 # See /LICENSE for more information.
 #
 
-# 双源 RR 工作流：可选择一个或同时两个 RR 源
+# 双源 RR 工作流：每次编译选择一个 RR 源
 #   ainas → myp015/ainas-rr（镜像 myp015/rr，支持 DSM 6.2）
 #   RROrg → RROrg/rr（镜像 wjz304/rr，不支持 DSM 6.2）
 # Release 命名：ainas → ainas-rr-<版本>；RROrg → rr-<版本>
@@ -15,13 +15,12 @@ on:
   workflow_dispatch:
     inputs:
       rr_source:
-        description: "RR 源"
+        description: "RR 源（每次编译只能选一个）"
         type: choice
         options:
           - ainas
           - RROrg
-          - 两者同时
-        default: 两者同时
+        default: ainas
       all_models:
         description: "编译模式"
         type: choice
@@ -95,8 +94,15 @@ jobs:
   plan:
     runs-on: ubuntu-24.04
     outputs:
-      sources: ${{ steps.plan.outputs.sources }}
-      active_sources: ${{ steps.plan.outputs.active_sources }}
+      source: ${{ steps.plan.outputs.source }}
+      rr_tag: ${{ steps.plan.outputs.rr_tag }}
+      rr_asset_url: ${{ steps.plan.outputs.rr_asset_url }}
+      release_tag: ${{ steps.plan.outputs.release_tag }}
+      release_title: ${{ steps.plan.outputs.release_title }}
+      release_notes: ${{ steps.plan.outputs.release_notes }}
+      base_asset: ${{ steps.plan.outputs.base_asset }}
+      docker_image: ${{ steps.plan.outputs.docker_image }}
+      docker_tag: ${{ steps.plan.outputs.docker_tag }}
       tasks: ${{ steps.plan.outputs.tasks }}
     steps:
       - uses: actions/checkout@v7
@@ -126,20 +132,15 @@ jobs:
   ensure-release:
     needs: plan
     runs-on: ubuntu-24.04
-    strategy:
-      fail-fast: true
-      max-parallel: 1
-      matrix:
-        include: ${{ fromJSON(needs.plan.outputs.active_sources) }}
     steps:
       - name: 创建或确认 Release
         shell: bash
         env:
           ACTION_TOKEN: ${{ secrets.AiNas }}
-          RELEASE_TAG: ${{ matrix.release_tag }}
-          RELEASE_TITLE: ${{ matrix.release_title }}
-          RELEASE_NOTES: ${{ matrix.release_notes }}
-          SOURCE: ${{ matrix.source }}
+          RELEASE_TAG: ${{ needs.plan.outputs.release_tag }}
+          RELEASE_TITLE: ${{ needs.plan.outputs.release_title }}
+          RELEASE_NOTES: ${{ needs.plan.outputs.release_notes }}
+          SOURCE: ${{ needs.plan.outputs.source }}
         run: |
           set -euo pipefail
           : "${ACTION_TOKEN:?缺少 ACTION_TOKEN}"
@@ -177,17 +178,13 @@ jobs:
   prepare-base:
     needs: [plan, ensure-release]
     runs-on: ubuntu-24.04
-    strategy:
-      fail-fast: false
-      matrix:
-        include: ${{ fromJSON(needs.plan.outputs.active_sources) }}
     env:
-      RR_ASSET_URL: ${{ matrix.rr_asset_url }}
-      RR_TAG: ${{ matrix.rr_tag }}
-      TAG: ${{ matrix.rr_tag }}
-      RELEASE_TAG: ${{ matrix.release_tag }}
-      BASE_ASSET: ${{ matrix.base_asset }}
-      SOURCE: ${{ matrix.source }}
+      RR_ASSET_URL: ${{ needs.plan.outputs.rr_asset_url }}
+      RR_TAG: ${{ needs.plan.outputs.rr_tag }}
+      TAG: ${{ needs.plan.outputs.rr_tag }}
+      RELEASE_TAG: ${{ needs.plan.outputs.release_tag }}
+      BASE_ASSET: ${{ needs.plan.outputs.base_asset }}
+      SOURCE: ${{ needs.plan.outputs.source }}
     steps:
       - uses: actions/checkout@v7
 
@@ -327,7 +324,7 @@ jobs:
           echo "[INFO] base 已上传到 Release: ${RELEASE_TAG}"
 
   build:
-    name: ${{ matrix.kind == 'update' && format('build ({0}/update)', matrix.source) || (matrix.kind == 'original' && format('build ({0}/rr-original)', matrix.source) || format('build ({0}/{1})', matrix.source, matrix.model)) }}
+    name: ${{ matrix.kind == 'update' && 'build (update)' || (matrix.kind == 'original' && 'build (rr-original)' || format('build ({0})', matrix.model)) }}
     needs: [plan, prepare-base]
     runs-on: ubuntu-24.04
     strategy:
@@ -341,6 +338,14 @@ jobs:
       ADDONS: acpid,reboottoloader,addincards,cpuinfo,expands,diskcompat,lsiutil,nvmevolume,powersched,remotefs,storagepanel,smartctl,trivial,apppatch,vmtools
       ACTION_TOKEN: ${{ secrets.AiNas }}
       LINE: ${{ inputs.dsm_version }}
+      SOURCE: ${{ needs.plan.outputs.source }}
+      TAG: ${{ needs.plan.outputs.rr_tag }}
+      RR_TAG: ${{ needs.plan.outputs.rr_tag }}
+      RELEASE_TAG: ${{ needs.plan.outputs.release_tag }}
+      RELEASE_NOTES: ${{ needs.plan.outputs.release_notes }}
+      BASE_ASSET: ${{ needs.plan.outputs.base_asset }}
+      RR_DOCKER_IMAGE: ${{ needs.plan.outputs.docker_image }}
+      RR_DOCKER_TAG: ${{ needs.plan.outputs.docker_tag }}
     steps:
       - name: Checkout main repo
         uses: actions/checkout@v7
@@ -357,36 +362,6 @@ jobs:
           repository: myp015/ainas-2in1
           token: ${{ secrets.AiNas }}
           path: .2in1
-
-      - name: 加载源配置
-        shell: bash
-        env:
-          SOURCES_JSON: ${{ needs.plan.outputs.sources }}
-          SOURCE: ${{ matrix.source }}
-        run: |
-          set -euo pipefail
-          row="$(printf '%s' "${SOURCES_JSON}" | jq -r --arg s "${SOURCE}" \
-            '.[] | select(.source==$s) | [.release_tag,.release_title,.base_asset,.rr_tag,.rr_asset_url,.docker_image,.docker_tag,.source,.release_notes] | @tsv')"
-          if [ -z "${row}" ]; then
-            echo "[E] plan 输出中没有源 ${SOURCE} 的配置" >&2
-            exit 1
-          fi
-          IFS=$'\t' read -r RELEASE_TAG RELEASE_TITLE BASE_ASSET RR_TAG RR_ASSET_URL RR_DOCKER_IMAGE RR_DOCKER_TAG SOURCE_V RELEASE_NOTES <<< "${row}"
-          : "${RELEASE_TAG:?缺少 RELEASE_TAG}"
-          : "${BASE_ASSET:?缺少 BASE_ASSET}"
-          : "${RR_DOCKER_IMAGE:?缺少 RR_DOCKER_IMAGE}"
-          : "${RR_DOCKER_TAG:?缺少 RR_DOCKER_TAG}"
-          echo "[INFO] 源=${SOURCE_V} Release=${RELEASE_TAG} base=${BASE_ASSET} 镜像=${RR_DOCKER_IMAGE}:${RR_DOCKER_TAG}"
-          {
-            echo "TAG=${RR_TAG}"
-            echo "RR_TAG=${RR_TAG}"
-            echo "RELEASE_TAG=${RELEASE_TAG}"
-            echo "RELEASE_TITLE=${RELEASE_TITLE}"
-            echo "BASE_ASSET=${BASE_ASSET}"
-            echo "RR_DOCKER_IMAGE=${RR_DOCKER_IMAGE}"
-            echo "RR_DOCKER_TAG=${RR_DOCKER_TAG}"
-            echo "SOURCE=${SOURCE_V}"
-          } >> "$GITHUB_ENV"
 
       - name: 下载公共 base
         shell: bash
