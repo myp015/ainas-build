@@ -9,7 +9,7 @@
 #   ainas → myp015/ainas-rr（镜像 myp015/rr）
 #   RROrg → RROrg/rr（镜像 wjz304/rr）
 # 两种源的 addons/modules/lkms/cks 全部取自 rr.img，不再调用 get* 覆盖。
-# Release 命名：ainas → ainas-2in1_<版本>；RROrg → AiNas2in1_<版本>
+# Release 命名：ainas → ainas-2in1_<版本>；RROrg → RROrg-2in1_<版本>
 # 型号勾选项只用 7 个通用型号；DVA 系列等请通过 custom_models 手动输入。
 name: Build RR-2in1
 on:
@@ -488,7 +488,9 @@ jobs:
           esac
           IMG_GIB=$(( ( $(gzip -l "${AINAS2IN1_DIR}/img/${GRUB_IMAGE}" | awk 'NR==2{print $2}') + 536870912 ) / 1073741824 ))
 
-          ARTIFACT="${MODEL}_${VER_SLUG}_${IMG_GIB}g_Ainas2in1_${SAFE_TAG}"
+          # 制品品牌随源区分：RROrg 源产物名带 RROrg-2in1，ainas 源保持 Ainas2in1
+          if [ "${SOURCE}" = "RROrg" ]; then ARTIFACT_BRAND="RROrg-2in1"; else ARTIFACT_BRAND="Ainas2in1"; fi
+          ARTIFACT="${MODEL}_${VER_SLUG}_${IMG_GIB}g_${ARTIFACT_BRAND}_${SAFE_TAG}"
           echo "[INFO] 型号=${MODEL} 目标DSM版本=${VERSION} DSM系列=${LINE_REQ} 制品版本=${VER_SLUG} 源=${SOURCE}"
 
           # ── 系统依赖 ───────────────────────────────────────────────
@@ -568,7 +570,7 @@ jobs:
             dsm_setup "$MODEL" "$LINE_REQ" "$PAT_XLSX_URL" "$DSM_INSTALL_DIR" \
               "$WORKDIR" \
               "$AINAS2IN1_DIR/docker/docker-compose.yaml" "$DSM_INSTALL_DIR/docker-compose.yaml" \
-              "_${IMG_GIB}g_Ainas2in1" "$SAFE_TAG" "180" \
+              "_${IMG_GIB}g_${ARTIFACT_BRAND}" "$SAFE_TAG" "180" \
               "s#\./rr.img:/rr.img#${WORKDIR}/rr/rr.img:/rr.img#g"
 
             cd "$WORKDIR"

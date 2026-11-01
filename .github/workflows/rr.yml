@@ -8,7 +8,7 @@
 # 双源 RR 工作流：每次编译选择一个 RR 源
 #   ainas → myp015/ainas-rr（镜像 myp015/rr，支持 DSM 6.2）
 #   RROrg → RROrg/rr（镜像 wjz304/rr，不支持 DSM 6.2）
-# Release 命名：ainas → ainas-rr-<版本>；RROrg → rr-<版本>
+# Release 命名：ainas → ainas-rr-<版本>；RROrg → RROrg-rr-<版本>
 # 型号勾选项只用 7 个通用型号；DVA 系列等请通过 custom_models 手动输入。
 name: Build RR
 on:
@@ -460,11 +460,13 @@ jobs:
           VER_BUILD="${VERSION#*-}"
           VER_BUILD="${VER_BUILD%%-*}"
           VER_SLUG="${VER_MAIN_NODOT}_${VER_BUILD}"
+          # 制品品牌随源区分：RROrg 源产物名带 RROrg-rr，ainas 源保持 rr
+          if [ "${SOURCE}" = "RROrg" ]; then ARTIFACT_BRAND="RROrg-rr"; else ARTIFACT_BRAND="rr"; fi
           if [ "${MODEL}" = "__RR_ORIGINAL__" ]; then
-            ARTIFACT_NAME="rr-${RR_TAG}"
+            ARTIFACT_NAME="${ARTIFACT_BRAND}-${RR_TAG}"
             echo "[INFO] 原版 RR 镜像任务：ARTIFACT_NAME=${ARTIFACT_NAME}"
           else
-            ARTIFACT_NAME="${MODEL}_${VER_SLUG}_rr"
+            ARTIFACT_NAME="${MODEL}_${VER_SLUG}_${ARTIFACT_BRAND}"
           fi
           echo "[INFO] 型号=${MODEL} 目标DSM版本=${VERSION} DSM系列=${LINE_REQ} 版本slug=${VER_SLUG} 源=${SOURCE}"
 
@@ -530,7 +532,7 @@ jobs:
 
           if [ "${MODEL}" = "__RR_ORIGINAL__" ]; then
             # 原版 RR 镜像：官方压缩命令 zip -9，命名 rr-<版本>.img.zip，打包 rr.img + exe（不含 user-config.yml）
-            ARTIFACT_ZIP="rr-${RR_TAG}.img.zip"
+            ARTIFACT_ZIP="${ARTIFACT_BRAND}-${RR_TAG}.img.zip"
             rm -f "${ARTIFACT_NAME}.img"
             zip -9 -q "$ARTIFACT_ZIP" rr.img
             if [ -d "ainas" ]; then

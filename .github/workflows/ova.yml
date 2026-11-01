@@ -6,7 +6,7 @@
 #
 # 双源 OVA 工作流：每次编译选择一个 RR 源
 #   ainas → myp015/ainas-rr（镜像 myp015/rr），Release ainas-ova-<版本>（新增）
-#   RROrg → RROrg/rr（镜像 wjz304/rr），Release OVA_rr<版本>
+#   RROrg → RROrg/rr（镜像 wjz304/rr），Release RROrg-ova-<版本>
 # 仅支持 DSM 7.x；p3 资产全部取自 rr.img（不调用 get*）。
 # 型号勾选项只用 7 个通用型号；其它型号请通过 custom_models 手动输入。
 name: Build RR-OVA
@@ -413,7 +413,13 @@ jobs:
           SAFE_TAG="${TAG//./_}"
           echo "SAFE_TAG=${SAFE_TAG}" >> "$GITHUB_ENV"
 
-          ARTIFACT="${MODEL}_${VER_SLUG}_${SAFE_TAG}"
+          # 制品品牌随源区分：RROrg 源产物名带 RROrg-ova，ainas 源保持原命名
+          if [ "${SOURCE}" = "RROrg" ]; then
+            ARTIFACT_BRAND="_RROrg-ova"
+          else
+            ARTIFACT_BRAND=""
+          fi
+          ARTIFACT="${MODEL}_${VER_SLUG}${ARTIFACT_BRAND}_${SAFE_TAG}"
           echo "[INFO] 型号=${MODEL} 目标DSM版本=${VERSION} DSM系列=${LINE_REQ} 制品版本=${VER_SLUG} 源=${SOURCE}"
 
           # ── 系统依赖 ───────────────────────────────────────────────
@@ -470,7 +476,7 @@ jobs:
           dsm_setup "$MODEL" "$LINE_REQ" "$PAT_XLSX_URL" "$DSM_INSTALL_DIR" \
             "$WORKDIR" \
             "$AINAS2IN1_DIR/docker/vm-docker-compose.yaml" "$WORKDIR/rr/docker-compose.yaml" \
-            "" "$SAFE_TAG" "360" \
+            "${ARTIFACT_BRAND}" "$SAFE_TAG" "360" \
             "s#file=/rr.img#file=/storage/alpine/rr.img#g"
 
           # ── 导出 OVA 制品 ─────────────────────────────────────────
