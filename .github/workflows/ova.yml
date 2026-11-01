@@ -47,7 +47,11 @@ on:
       custom_models:
         description: "自定义型号(工作流未列出的,多个用逗号分隔,如 DS1621+,RS4021xs+)"
         type: string
-        default: ""      
+        default: ""
+      overwrite_base:
+        description: "覆盖 ova-base（默认复用 Release 中已存在的 base）"
+        type: boolean
+        default: false
       rr_version:
         description: "RR version (可选,留空=latest;示例:26.4.0 或 v26.4.0)"
         type: string
@@ -152,6 +156,143 @@ jobs:
           echo "[E] Release ${RELEASE_TAG} 创建/查询连续失败" >&2
           exit 1
 
+  # 公共 base：下载 RR、解压、cpuinfo/initrd 补丁这些与型号无关的工作只做一次，
+  # 作为 Release 资产随 ainas-2in1 永久存放，各型号 job 从同一 Release 下载。
+  # 不在本 job 做 patch_part1（grub.cfg 与型号相关），也不跑 docker make。
+  prepare-base:
+    runs-on: ubuntu-24.04
+    needs: [resolve-release, ensure-release]
+    env:
+      RR_ASSET_URL: ${{ needs.resolve-release.outputs.asset_url }}
+      RR_TAG: ${{ needs.resolve-release.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: 检查是否复用已有 base
+        id: check
+        shell: bash
+        env:
+          ACTION_TOKEN: ${{ secrets.AiNas }}
+          OVERWRITE_BASE: ${{ inputs.overwrite_base }}
+        run: |
+          set -euo pipefail
+          : "${ACTION_TOKEN:?缺少 ACTION_TOKEN}"
+          : "${RR_TAG:?缺少 RR_TAG}"
+          export GH_TOKEN="$ACTION_TOKEN"
+          export GH_REPO="myp015/ainas-2in1"
+          RELEASE_TAG="OVA_rr${RR_TAG}"
+          BASE_ASSET="ova-base-${RR_TAG}.img.zst"
+
+          ASSET_NAMES="$(gh release view "$RELEASE_TAG" --json assets --jq '.assets[].name')"
+          EXISTS="false"
+          if printf '%s\n' "$ASSET_NAMES" | grep -Fxq "$BASE_ASSET" \
+             || printf '%s\n' "$ASSET_NAMES" | grep -Fxq "${BASE_ASSET}.part.000"; then
+            EXISTS="true"
+          fi
+
+          if [ "$EXISTS" = "true" ] && [ "${OVERWRITE_BASE:-false}" != "true" ]; then
+            echo "[INFO] Release ${RELEASE_TAG} 已存在 ${BASE_ASSET}，复用（未勾选覆盖）"
+            echo "rebuild=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "[INFO] 需要构建 base（exists=${EXISTS} overwrite=${OVERWRITE_BASE:-false}）"
+            echo "rebuild=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: checkout ainas-2in1
+        if: steps.check.outputs.rebuild == 'true'
+        uses: actions/checkout@v7
+        with:
+          repository: myp015/ainas-2in1
+          token: ${{ secrets.AiNas }}
+          path: .2in1
+
+      - name: 下载 RR 镜像
+        if: steps.check.outputs.rebuild == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          : "${RR_TAG:?缺少 RR_TAG}"
+          : "${RR_ASSET_URL:?缺少 RR_ASSET_URL}"
+          FILENAME="rr-${RR_TAG}.zip"
+          curl -fsSL --connect-timeout 10 "$RR_ASSET_URL" -o "$FILENAME"
+          echo "FILENAME=${FILENAME}" >> "$GITHUB_ENV"
+
+      - name: 构建公共 base
+        if: steps.check.outputs.rebuild == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          WORKDIR="$PWD"
+          AINAS2IN1_DIR="${WORKDIR}/.2in1"
+          PART3_PATH="/mnt/p3"
+
+          . "$AINAS2IN1_DIR/script/2in1func.sh"
+
+          sudo apt-get update
+          sudo apt-get install -y gettext cpio zstd dosfstools rsync qemu-utils
+
+          unzip "$FILENAME" -d rr rr.img
+
+          # ── p3：cpuinfo + initrd 补丁（与型号无关）─────────────────
+          DISK_LOOP=$(sudo losetup -f)
+          sudo losetup -P "$DISK_LOOP" rr/rr.img
+          sudo mkdir -p "$PART3_PATH"
+          sudo mount "${DISK_LOOP}p3" "$PART3_PATH"
+
+          patch_cpuinfo "${PART3_PATH}/addons" "patch-cpuinfo.py"
+          patch_ram "$PART3_PATH" rr "$WORKDIR"
+
+          sudo umount "$PART3_PATH"
+          sudo losetup --detach "$DISK_LOOP"
+          sudo rm -rf "$PART3_PATH"
+
+          rm -rf "$AINAS2IN1_DIR"
+
+          # 预压缩；Release 单文件超过 2GB 时上传前再分卷
+          zstd -3 -T0 -q -f rr/rr.img -o ova-base.img.zst
+          ls -lh ova-base.img.zst
+
+      # 上传到 ainas-2in1 的 Release（与最终镜像放在一起），Release 资产默认永久保存。
+      # 单文件超过 GitHub 2GB 上限时按 release_publish.sh 同样的 1900MB 规则分卷。
+      # 仅在需要构建（缺失或勾选覆盖）时执行，上传前删除同名旧资产以完成替换。
+      - name: 上传公共 base 到 Release
+        if: steps.check.outputs.rebuild == 'true'
+        shell: bash
+        env:
+          ACTION_TOKEN: ${{ secrets.AiNas }}
+        run: |
+          set -euo pipefail
+          : "${ACTION_TOKEN:?缺少 ACTION_TOKEN}"
+          : "${RR_TAG:?缺少 RR_TAG}"
+          export GH_TOKEN="$ACTION_TOKEN"
+          export GH_REPO="myp015/ainas-2in1"
+          RELEASE_TAG="OVA_rr${RR_TAG}"
+          BASE_ASSET="ova-base-${RR_TAG}.img.zst"
+
+          mv -f ova-base.img.zst "$BASE_ASSET"
+          SIZE=$(stat -c%s "$BASE_ASSET")
+          echo "[INFO] base 大小=${SIZE} 字节"
+          UPLOAD_FILES=()
+          if [ "$SIZE" -ge 2147483648 ]; then
+            echo "[INFO] 超过 GitHub 单文件 2GB 上限，按 1900MB 分卷"
+            rm -f "${BASE_ASSET}.part."*
+            split -b 1900M -d -a 3 "$BASE_ASSET" "${BASE_ASSET}.part."
+            UPLOAD_FILES=("${BASE_ASSET}".part.*)
+          else
+            UPLOAD_FILES=("$BASE_ASSET")
+          fi
+
+          # 先删除同名旧资产，避免单文件/分卷形态切换后残留旧内容
+          gh release view "$RELEASE_TAG" --json assets --jq '.assets[].name' | while read -r name; do
+            case "$name" in
+              "$BASE_ASSET"|"$BASE_ASSET".part.*) gh release delete-asset "$RELEASE_TAG" "$name" --yes ;;
+            esac
+          done
+
+          gh release upload "$RELEASE_TAG" "${UPLOAD_FILES[@]}"
+          echo "[INFO] base 已上传到 Release: ${RELEASE_TAG}"
+
   select-models:
     runs-on: ubuntu-24.04
     outputs:
@@ -212,7 +353,7 @@ jobs:
 
   build:
     name: ${{ format('build ({0})', matrix.model) }}
-    needs: [resolve-release, select-models, ensure-release]
+    needs: [resolve-release, select-models, ensure-release, prepare-base]
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
@@ -226,6 +367,9 @@ jobs:
       ACTION_TOKEN: ${{ secrets.AiNas }}
       RR_ASSET_URL: ${{ needs.resolve-release.outputs.asset_url }}
       RR_TAG: ${{ needs.resolve-release.outputs.tag }}
+      # 原 checkout rr 步骤会通过 GITHUB_ENV 注入 TAG；该步骤已移除，必须在 env 显式提供，
+      # 否则 repack_rr、发布步骤与失败日志上传会因 TAG 未定义而失败。
+      TAG: ${{ needs.resolve-release.outputs.tag }}
       # 构建容器镜像源为 myp015/rr（rootfs 取自 ainas-rr 的 initrd）。Docker Hub 上
       # 该仓库只有 latest 与 26.10.x，RR release tag（如 26.9.0）没有对应镜像；
       # 直接把 RR_TAG 当镜像 tag 会 pull 失败（run 41206762237 即此原因）。
@@ -247,16 +391,32 @@ jobs:
           token: ${{ secrets.AiNas }}
           path: .2in1
 
-      - name: checkout rr
+      - name: 下载公共 base
         shell: bash
+        env:
+          ACTION_TOKEN: ${{ secrets.AiNas }}
         run: |
           set -euo pipefail
-          : "${RR_TAG:?缺少 RR_TAG}"
-          : "${RR_ASSET_URL:?缺少 RR_ASSET_URL}"
-          FILENAME="rr-${RR_TAG}.zip"
-          curl -fsSL --connect-timeout 10 "$RR_ASSET_URL" -o "$FILENAME"
-          echo "TAG=$RR_TAG"        >> "$GITHUB_ENV"
-          echo "FILENAME=$FILENAME" >> "$GITHUB_ENV"
+          : "${ACTION_TOKEN:?缺少 ACTION_TOKEN}"
+          : "${TAG:?缺少 TAG}"
+          export GH_TOKEN="$ACTION_TOKEN"
+          export GH_REPO="myp015/ainas-2in1"
+          RELEASE_TAG="OVA_rr${TAG}"
+          mkdir -p base
+          gh release download "$RELEASE_TAG" \
+            --pattern "ova-base-${TAG}.img.zst*" \
+            --dir base --clobber
+          if [ -f "base/ova-base-${TAG}.img.zst" ]; then
+            echo "[INFO] base 为单文件"
+          else
+            # 超过 2GB 时 Release 只存分卷，这里按文件名顺序合并
+            compgen -G "base/ova-base-${TAG}.img.zst.part.*" >/dev/null || {
+              echo "[E] Release ${RELEASE_TAG} 中未找到 base 资产" >&2
+              exit 1
+            }
+            cat base/ova-base-${TAG}.img.zst.part.* > "base/ova-base-${TAG}.img.zst"
+            echo "[INFO] base 分卷已合并"
+          fi
 
       - name: 编译镜像
         shell: bash
@@ -302,27 +462,22 @@ jobs:
           # ── 系统依赖 ───────────────────────────────────────────────
           sudo apt-get update
           sudo apt-get install -y gettext cpio zstd dosfstools rsync qemu-utils
-          unzip "$FILENAME" -d rr rr.img
 
-          # ── GRUB 修补 ──────────────────────────────────────────────
-          patch_part1 rr/rr.img "$PART1_PATH" rr "$MODEL"
+          # ── 恢复公共 base ──────────────────────────────────────────
+          # 下载 RR、解压、cpuinfo/initrd 补丁等与型号无关的步骤已在 prepare-base
+          # 完成；这里只解压并挂上分区，供型号相关步骤使用。
+          [ -f "base/ova-base-${TAG}.img.zst" ] || { echo "[E] 未找到公共 base: base/ova-base-${TAG}.img.zst" >&2; exit 1; }
+          mkdir -p rr
+          zstd -d -q -f "base/ova-base-${TAG}.img.zst" -o rr/rr.img
+          rm -rf base
 
-          # ── 挂载 p3 分区 ───────────────────────────────────────────
+          # rr.img 必须保持 attached：容器内 .bashrc 按分区 label 挂载 p1/p2/p3
           DISK_LOOP=$(sudo losetup -f)
           sudo losetup -P "$DISK_LOOP" rr/rr.img
-          sudo rm -rf "$PART3_PATH"
-          sudo mkdir -p "$PART3_PATH"
-          sudo mount "${DISK_LOOP}p3" "$PART3_PATH"
+          sudo mkdir -p "$PART1_PATH" "$PART3_PATH"
 
-          # ── cpuinfo 修补 ───────────────────────────────────────────
-          patch_cpuinfo "${PART3_PATH}/addons" "patch-cpuinfo.py"
-
-          # ── initrd 修补与重打包 ────────────────────────────────────
-          patch_ram "$PART3_PATH" rr "$WORKDIR"
-
-
-          sudo umount "$PART3_PATH"
-          sudo rm -rf "$PART3_PATH"
+          # ── GRUB 修补（只有 grub.cfg 与型号相关，必须在型号 job 内做）──
+          patch_part1 rr/rr.img "$PART1_PATH" rr "$MODEL"
 
           # ── 使用 RR Docker 编译镜像 ───────────────────────────────
           docker_build rr "$MODEL" "$VERSION" "$LANGUAGE" "$ADDONS" "$RR_DOCKER_TAG" \

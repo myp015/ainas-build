@@ -59,7 +59,11 @@ on:
       custom_models:
         description: "自定义型号(工作流未列出的,多个用逗号分隔,如 DS1621+,RS4021xs+)"
         type: string
-        default: ""      
+        default: ""
+      overwrite_base:
+        description: "覆盖 rr-base（默认复用 Release 中已存在的 base）"
+        type: boolean
+        default: false
       build_update_zip:
         description: "编译升级包（updateall-*.zip）默认开启，可取消"
         type: boolean
@@ -259,9 +263,146 @@ jobs:
           echo "[E] Release ${RELEASE_TAG} 创建/查询连续失败" >&2
           exit 1
 
+  # 公共 base：下载 RR、解压、cpuinfo/initrd 补丁这些与型号无关的工作只做一次，
+  # 作为 Release 资产随 ainas-2in1 永久存放，各型号 job 从同一 Release 下载。
+  # 不在本 job 做 patch_part1（grub.cfg 与型号/原版/update 场景相关），也不跑 docker。
+  prepare-base:
+    runs-on: ubuntu-24.04
+    needs: [resolve-release, ensure-release]
+    env:
+      RR_ASSET_URL: ${{ needs.resolve-release.outputs.rr_asset_url }}
+      RR_TAG: ${{ needs.resolve-release.outputs.rr_tag }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: 检查是否复用已有 base
+        id: check
+        shell: bash
+        env:
+          ACTION_TOKEN: ${{ secrets.AiNas }}
+          OVERWRITE_BASE: ${{ inputs.overwrite_base }}
+        run: |
+          set -euo pipefail
+          : "${ACTION_TOKEN:?缺少 ACTION_TOKEN}"
+          : "${RR_TAG:?缺少 RR_TAG}"
+          export GH_TOKEN="$ACTION_TOKEN"
+          export GH_REPO="myp015/ainas-2in1"
+          RELEASE_TAG="ainas-rr-${RR_TAG}"
+          BASE_ASSET="rr-base-${RR_TAG}.img.zst"
+
+          ASSET_NAMES="$(gh release view "$RELEASE_TAG" --json assets --jq '.assets[].name')"
+          EXISTS="false"
+          if printf '%s\n' "$ASSET_NAMES" | grep -Fxq "$BASE_ASSET" \
+             || printf '%s\n' "$ASSET_NAMES" | grep -Fxq "${BASE_ASSET}.part.000"; then
+            EXISTS="true"
+          fi
+
+          if [ "$EXISTS" = "true" ] && [ "${OVERWRITE_BASE:-false}" != "true" ]; then
+            echo "[INFO] Release ${RELEASE_TAG} 已存在 ${BASE_ASSET}，复用（未勾选覆盖）"
+            echo "rebuild=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "[INFO] 需要构建 base（exists=${EXISTS} overwrite=${OVERWRITE_BASE:-false}）"
+            echo "rebuild=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: checkout ainas-2in1
+        if: steps.check.outputs.rebuild == 'true'
+        uses: actions/checkout@v7
+        with:
+          repository: myp015/ainas-2in1
+          token: ${{ secrets.AiNas }}
+          path: .2in1
+
+      - name: 下载 RR 镜像
+        if: steps.check.outputs.rebuild == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          : "${RR_TAG:?缺少 RR_TAG}"
+          : "${RR_ASSET_URL:?缺少 RR_ASSET_URL}"
+          RR_FILENAME="rr-${RR_TAG}.img.zip"
+          curl -fsSL --connect-timeout 10 "$RR_ASSET_URL" -o "$RR_FILENAME"
+          echo "RR_FILENAME=${RR_FILENAME}" >> "$GITHUB_ENV"
+
+      - name: 构建公共 base
+        if: steps.check.outputs.rebuild == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          WORKDIR="$PWD"
+          AINAS2IN1_DIR="${WORKDIR}/.2in1"
+          PART3_PATH="/mnt/p3"
+
+          . "$AINAS2IN1_DIR/script/2in1func.sh"
+
+          sudo apt-get update
+          sudo apt-get install -y gettext cpio zstd dosfstools rsync qemu-utils
+
+          unzip "$RR_FILENAME" -d rr rr.img
+
+          # ── p3：cpuinfo + initrd 补丁（与型号无关）─────────────────
+          DISK_LOOP=$(sudo losetup -f)
+          sudo losetup -P "$DISK_LOOP" rr/rr.img
+          sudo mkdir -p "$PART3_PATH"
+          sudo mount "${DISK_LOOP}p3" "$PART3_PATH"
+
+          patch_cpuinfo "${PART3_PATH}/addons" "patch-cpuinfo.py"
+          patch_ram "$PART3_PATH" rr "$WORKDIR" verify
+
+          sudo umount "$PART3_PATH"
+          sudo losetup --detach "$DISK_LOOP"
+          sudo rm -rf "$PART3_PATH"
+
+          rm -rf "$AINAS2IN1_DIR"
+
+          # 预压缩；Release 单文件超过 2GB 时上传前再分卷
+          zstd -3 -T0 -q -f rr/rr.img -o rr-base.img.zst
+          ls -lh rr-base.img.zst
+
+      # 上传到 ainas-2in1 的 Release（与最终镜像放在一起），Release 资产默认永久保存。
+      # 单文件超过 GitHub 2GB 上限时按 release_publish.sh 同样的 1900MB 规则分卷。
+      # 仅在需要构建（缺失或勾选覆盖）时执行，上传前删除同名旧资产以完成替换。
+      - name: 上传公共 base 到 Release
+        if: steps.check.outputs.rebuild == 'true'
+        shell: bash
+        env:
+          ACTION_TOKEN: ${{ secrets.AiNas }}
+        run: |
+          set -euo pipefail
+          : "${ACTION_TOKEN:?缺少 ACTION_TOKEN}"
+          : "${RR_TAG:?缺少 RR_TAG}"
+          export GH_TOKEN="$ACTION_TOKEN"
+          export GH_REPO="myp015/ainas-2in1"
+          RELEASE_TAG="ainas-rr-${RR_TAG}"
+          BASE_ASSET="rr-base-${RR_TAG}.img.zst"
+
+          mv -f rr-base.img.zst "$BASE_ASSET"
+          SIZE=$(stat -c%s "$BASE_ASSET")
+          echo "[INFO] base 大小=${SIZE} 字节"
+          UPLOAD_FILES=()
+          if [ "$SIZE" -ge 2147483648 ]; then
+            echo "[INFO] 超过 GitHub 单文件 2GB 上限，按 1900MB 分卷"
+            rm -f "${BASE_ASSET}.part."*
+            split -b 1900M -d -a 3 "$BASE_ASSET" "${BASE_ASSET}.part."
+            UPLOAD_FILES=("${BASE_ASSET}".part.*)
+          else
+            UPLOAD_FILES=("$BASE_ASSET")
+          fi
+
+          # 先删除同名旧资产，避免单文件/分卷形态切换后残留旧内容
+          gh release view "$RELEASE_TAG" --json assets --jq '.assets[].name' | while read -r name; do
+            case "$name" in
+              "$BASE_ASSET"|"$BASE_ASSET".part.*) gh release delete-asset "$RELEASE_TAG" "$name" --yes ;;
+            esac
+          done
+
+          gh release upload "$RELEASE_TAG" "${UPLOAD_FILES[@]}"
+          echo "[INFO] base 已上传到 Release: ${RELEASE_TAG}"
+
   build:
     name: ${{ matrix.model == '__UPDATE__' && 'build (update)' || (matrix.model == '__RR_ORIGINAL__' && 'build (rr-original)' || format('build ({0})', matrix.model)) }}
-    needs: [resolve-release, select-models, ensure-release]
+    needs: [resolve-release, select-models, ensure-release, prepare-base]
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
@@ -298,17 +439,32 @@ jobs:
           token: ${{ secrets.AiNas }}
           path: .2in1
 
-      - name: 下载 RR 镜像资源
+      - name: 下载公共 base
         shell: bash
+        env:
+          ACTION_TOKEN: ${{ secrets.AiNas }}
         run: |
           set -euo pipefail
+          : "${ACTION_TOKEN:?缺少 ACTION_TOKEN}"
           : "${RR_TAG:?缺少 RR_TAG}"
-          : "${RR_ASSET_URL:?缺少 RR_ASSET_URL}"
-          RR_FILENAME="rr-${RR_TAG}.img.zip"
-          echo "[INFO] 正在下载 RR 镜像资源：${RR_FILENAME}"
-          curl -fsSL --connect-timeout 10 "$RR_ASSET_URL" -o "$RR_FILENAME"
-          # RR_TAG 已由 job env 提供，无需再写 GITHUB_ENV
-          echo "RR_FILENAME=$RR_FILENAME" >> "$GITHUB_ENV"
+          export GH_TOKEN="$ACTION_TOKEN"
+          export GH_REPO="myp015/ainas-2in1"
+          RELEASE_TAG="ainas-rr-${RR_TAG}"
+          mkdir -p base
+          gh release download "$RELEASE_TAG" \
+            --pattern "rr-base-${RR_TAG}.img.zst*" \
+            --dir base --clobber
+          if [ -f "base/rr-base-${RR_TAG}.img.zst" ]; then
+            echo "[INFO] base 为单文件"
+          else
+            # 超过 2GB 时 Release 只存分卷，这里按文件名顺序合并
+            compgen -G "base/rr-base-${RR_TAG}.img.zst.part.*" >/dev/null || {
+              echo "[E] Release ${RELEASE_TAG} 中未找到 base 资产" >&2
+              exit 1
+            }
+            cat base/rr-base-${RR_TAG}.img.zst.part.* > "base/rr-base-${RR_TAG}.img.zst"
+            echo "[INFO] base 分卷已合并"
+          fi
 
       - name: 编译镜像
         shell: bash
@@ -320,38 +476,21 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y gettext cpio zstd dosfstools rsync qemu-utils
 
-          # ── UPDATE 独立任务：应用 initrd patch 后打包 updateall ──
+          # ── 恢复公共 base ──────────────────────────────────────────
+          # 下载 RR、解压、cpuinfo/initrd 补丁等与型号无关的步骤已在 prepare-base
+          # 完成；这里只解压，供后续按型号/场景收尾。
+          [ -f "base/rr-base-${RR_TAG}.img.zst" ] || { echo "[E] 未找到公共 base: base/rr-base-${RR_TAG}.img.zst" >&2; exit 1; }
+          mkdir -p rr
+          zstd -d -q -f "base/rr-base-${RR_TAG}.img.zst" -o rr/rr.img
+          rm -rf base
+
+          # ── UPDATE 独立任务：base 已含 initrd patch，直接打包 updateall ──
+          # update-list.yml 只取 p1 的 RR_VERSION/EFI 与 p3 的 initrd 等通用文件，
+          # grub.cfg 不在升级包内，因此原 update 分支里的 grub 修补在本流程中无实际作用。
           if [ "${MODEL}" = "__UPDATE__" ]; then
             WORKDIR="$PWD"
             AINAS2IN1_DIR="${WORKDIR}/.2in1"
-            PART3_PATH="/mnt/p3"
-            : "${RR_FILENAME:?缺少 RR_FILENAME}"
-            echo "[INFO] UPDATE 任务：解压 RR 镜像，应用 initrd patch，再打包 updateall"
-            unzip "$RR_FILENAME" -d rr rr.img
-
-            # 挂载 p3，修补 initrd（menu.sh 订单验证 patch 等）
-            . "$AINAS2IN1_DIR/script/2in1func.sh"
-            DISK_LOOP=$(sudo losetup -f)
-            sudo losetup -P "$DISK_LOOP" rr/rr.img
-            sudo mkdir -p "$PART3_PATH"
-            sudo mount "${DISK_LOOP}p3" "$PART3_PATH"
-
-            # ── grub.cfg 修补（update 场景 model 空 → Boot DSM）──
-            echo "[INFO] 修补 grub.cfg（update 场景 model=Boot DSM）"
-            sudo mkdir -p /mnt/p1
-            sudo mount -o rw "${DISK_LOOP}p1" /mnt/p1
-            sudo env MODEL_ENV="" python3 "$AINAS2IN1_DIR/script/patch-grub-cfg.py" /mnt/p1/boot/grub/grub.cfg
-            sudo umount /mnt/p1
-
-            # ── cpuinfo 插件修补 ──────────────────────────────
-            patch_cpuinfo "${PART3_PATH}/addons" "patch-cpuinfo.py"
-
-            # ── initrd 修补与重打包 ───────────────────────────
-            patch_ram "$PART3_PATH" rr "$WORKDIR"
-            sudo umount "$PART3_PATH"
-            sudo losetup --detach "$DISK_LOOP"
-
-            echo "[INFO] 打包 updateall-<版本号>.zip（RR 版，不分 dt/nodt）"
+            echo "[INFO] UPDATE 任务：打包 updateall-<版本号>.zip（RR 版，不分 dt/nodt）"
             bash "$AINAS2IN1_DIR/script/2in1_build_update.sh" rr/rr.img "$GITHUB_WORKSPACE" "" "rr"
             UPDATE_ZIP="$(ls -1 updateall-*.zip 2>/dev/null | head -n1)"
             echo "UPDATE_ZIP=$UPDATE_ZIP" >> "$GITHUB_ENV"
@@ -391,9 +530,7 @@ jobs:
           fi
           echo "[INFO] 型号=${MODEL} 目标DSM版本=${VERSION} DSM系列=${LINE_REQ} 版本slug=${VER_SLUG}"
 
-          unzip "$RR_FILENAME" -d rr rr.img
-
-          # ── GRUB 修补 ─────────────────────────────────────────────
+          # ── GRUB 修补（只有 grub.cfg 与型号/场景相关，必须在型号 job 内做）──
           # RR 原版镜像任务无型号，MODEL_ENV 置空 → patch 脚本默认 model=Boot DSM
           # 官方 p1 没有 .locale，gettext 会回退原始 msgid；显式设为中文，
           # 确保 zh_CN/rr.mo 中的 AiNas 文案生效；后续可在菜单切换其他语言。
@@ -406,23 +543,12 @@ jobs:
           fi
           patch_part1 rr/rr.img "$PART1_PATH" rr "$GRUB_MODEL_ENV" "$GRUB_LOCALE"
 
-          # ── 挂载 p3 分区 ──────────────────────────────────────────
+          # rr.img 必须保持 attached：容器内 .bashrc 按分区 label 挂载 p1/p2/p3
           DISK_LOOP=$(sudo losetup -f)
           sudo losetup -P "$DISK_LOOP" rr/rr.img
-          sudo rm -rf "$PART3_PATH"
-          sudo mkdir -p "$PART3_PATH"
-          sudo mount "${DISK_LOOP}p3" "$PART3_PATH"
+          sudo mkdir -p "$PART1_PATH" "$PART3_PATH"
 
-          # ── cpuinfo 修补 ──────────────────────────────────────────
-          patch_cpuinfo "${PART3_PATH}/addons" "patch-cpuinfo.py"
-
-          # ── initrd 修补与重打包 ───────────────────────────────────
-          patch_ram "$PART3_PATH" rr "$WORKDIR" verify
-
-          sudo umount "$PART3_PATH"
-          sudo rm -rf "$PART3_PATH"
-
-          # RR 原版镜像任务：释放 loop
+          # RR 原版镜像任务：跳过 Docker 编译，释放 loop
           if [ "${MODEL}" = "__RR_ORIGINAL__" ]; then
             sudo losetup --detach "$DISK_LOOP"
           fi
