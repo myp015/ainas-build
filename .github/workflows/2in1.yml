@@ -61,6 +61,10 @@ on:
         description: "编译升级包（updateall-*.zip）默认开启"
         type: boolean
         default: true
+      overwrite_base:
+        description: "覆盖 2in1-base（默认复用 Release 中已存在的 base）"
+        type: boolean
+        default: false
       rr_version:
         description: "RR version (可选，留空=latest；示例：26.4.0 或 v26.4.0)"
         type: string
@@ -244,7 +248,38 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      - name: 检查是否复用已有 base
+        id: check
+        shell: bash
+        env:
+          ACTION_TOKEN: ${{ secrets.AiNas }}
+          OVERWRITE_BASE: ${{ inputs.overwrite_base }}
+        run: |
+          set -euo pipefail
+          : "${ACTION_TOKEN:?缺少 ACTION_TOKEN}"
+          : "${TAG:?缺少 TAG}"
+          export GH_TOKEN="$ACTION_TOKEN"
+          export GH_REPO="myp015/ainas-2in1"
+          RELEASE_TAG="AiNas2in1_${TAG}"
+          BASE_ASSET="2in1-base-${TAG}.img.zst"
+
+          ASSET_NAMES="$(gh release view "$RELEASE_TAG" --json assets --jq '.assets[].name')"
+          EXISTS="false"
+          if printf '%s\n' "$ASSET_NAMES" | grep -Fxq "$BASE_ASSET" \
+             || printf '%s\n' "$ASSET_NAMES" | grep -Fxq "${BASE_ASSET}.part.000"; then
+            EXISTS="true"
+          fi
+
+          if [ "$EXISTS" = "true" ] && [ "${OVERWRITE_BASE:-false}" != "true" ]; then
+            echo "[INFO] Release ${RELEASE_TAG} 已存在 ${BASE_ASSET}，复用（未勾选覆盖）"
+            echo "rebuild=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "[INFO] 需要构建 base（exists=${EXISTS} overwrite=${OVERWRITE_BASE:-false}）"
+            echo "rebuild=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: checkout ainas-2in1
+        if: steps.check.outputs.rebuild == 'true'
         uses: actions/checkout@v7
         with:
           repository: myp015/ainas-2in1
@@ -252,6 +287,7 @@ jobs:
           path: .2in1
 
       - name: 下载 RR 镜像
+        if: steps.check.outputs.rebuild == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -262,6 +298,7 @@ jobs:
           echo "FILENAME=${FILENAME}" >> "$GITHUB_ENV"
 
       - name: 构建公共 base
+        if: steps.check.outputs.rebuild == 'true'
         shell: bash
         env:
           AINAS_TOKEN: ${{ secrets.AiNas }}
@@ -343,7 +380,9 @@ jobs:
 
       # 上传到 ainas-2in1 的 Release（与最终镜像放在一起），Release 资产默认永久保存。
       # 单文件超过 GitHub 2GB 上限时按 release_publish.sh 同样的 1900MB 规则分卷。
+      # 仅在需要构建（缺失或勾选覆盖）时执行，上传前删除同名旧资产以完成替换。
       - name: 上传公共 base 到 Release
+        if: steps.check.outputs.rebuild == 'true'
         shell: bash
         env:
           ACTION_TOKEN: ${{ secrets.AiNas }}
