@@ -181,7 +181,7 @@ release_tag_for() {
   local src="$1" tag="$2"
   case "${PRODUCT}:${src}" in
     2in1:ainas) printf 'ainas-2in1_%s\n' "${tag}" ;;
-    2in1:RROrg) printf 'RROrg2in1_%s\n' "${tag}" ;;
+    2in1:RROrg) printf 'RROrg-2in1_%s\n' "${tag}" ;;
     rr:ainas)   printf 'ainas-rr-%s\n' "${tag}" ;;
     rr:RROrg)   printf 'RROrg-rr-%s\n' "${tag}" ;;
     ova:ainas)  printf 'ainas-ova-%s\n' "${tag}" ;;
@@ -193,7 +193,7 @@ release_title_for() {
   local src="$1" tag="$2"
   case "${PRODUCT}:${src}" in
     2in1:ainas) printf 'ainas-2in1_%s\n' "${tag}" ;;
-    2in1:RROrg) printf 'RROrg2in1_%s\n' "${tag}" ;;
+    2in1:RROrg) printf 'RROrg-2in1_%s\n' "${tag}" ;;
     rr:ainas)   printf 'ainas-rr_%s\n' "${tag}" ;;
     rr:RROrg)   printf 'RROrg-rr_%s\n' "${tag}" ;;
     ova:ainas)  printf 'ainas-ova_%s\n' "${tag}" ;;

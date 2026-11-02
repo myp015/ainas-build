@@ -9,7 +9,7 @@
 #   ainas → myp015/ainas-rr（镜像 myp015/rr）
 #   RROrg → RROrg/rr（镜像 wjz304/rr）
 # 两种源的 addons/modules/lkms/cks 全部取自 rr.img，不再调用 get* 覆盖。
-# Release 命名：ainas → ainas-2in1_<版本>；RROrg → RROrg2in1_<版本>
+# Release 命名：ainas → ainas-2in1_<版本>；RROrg → RROrg-2in1_<版本>
 # 型号勾选项只用 7 个通用型号；DVA 系列等请通过 custom_models 手动输入。
 name: Build RR-2in1
 on:
