@@ -159,7 +159,7 @@ jobs:
             if [ "$create_rc" -eq 0 ]; then
               echo "[INFO] Release 创建成功，等待 API 可见"
             else
-              echo "$create_out"
+              echo "[WARN] Release 暂不可用，继续重试：$(printf '%s' "$create_out" | tail -n1)"
               if ! echo "$create_out" | grep -qiE 'already exists|already_exists|Validation Failed|HTTP 429|HTTP 502|HTTP 503|HTTP 504|rate limit|secondary rate'; then
                 exit "$create_rc"
               fi
@@ -249,15 +249,20 @@ jobs:
           # getLKMs 需要 token 访问 myp015 的 Release
           . "$AINAS2IN1_DIR/script/2in1func.sh" "$ACTION_TOKEN"
 
-          sudo apt-get update
-          sudo apt-get install -y gettext cpio zstd dosfstools rsync qemu-utils
+          echo "[INFO] 安装构建依赖"
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq gettext cpio zstd dosfstools rsync qemu-utils >/dev/null
 
-          unzip "$FILENAME" -d rr rr.img
+          unzip -q "$FILENAME" -d rr rr.img
 
           # ── 改分区 label ──────────────────────────────────────────
           GRUB_LOOP=$(sudo losetup -f)
           sudo mkdir -p "$PART1_PATH" "$PART3_PATH"
           sudo losetup -P "$GRUB_LOOP" rr/rr.img
+
+          # 分区节点异步创建，等待就绪后再挂载
+          for _ in $(seq 1 40); do [ -b "${GRUB_LOOP}p3" ] && break; sleep 0.25; done
+          [ -b "${GRUB_LOOP}p3" ] || { echo "[E] 镜像分区未就绪：${GRUB_LOOP}p3" >&2; exit 1; }
           sudo e2label "${GRUB_LOOP}p2" RDGZ
           sudo e2label "${GRUB_LOOP}p3" RAMDISK
           sudo fatlabel "${GRUB_LOOP}p1" AiNasloader
@@ -266,6 +271,10 @@ jobs:
           # ── p3：bzImage 改名 + 资产包 + addons/cpuinfo/initrd 补丁 ──
           DISK_LOOP=$(sudo losetup -f)
           sudo losetup -P "$DISK_LOOP" rr/rr.img
+
+          # 分区节点异步创建，等待就绪后再挂载
+          for _ in $(seq 1 40); do [ -b "${DISK_LOOP}p3" ] && break; sleep 0.25; done
+          [ -b "${DISK_LOOP}p3" ] || { echo "[E] 镜像分区未就绪：${DISK_LOOP}p3" >&2; exit 1; }
           sudo mount "${DISK_LOOP}p3" "$PART3_PATH"
 
           if [ -f "$PART3_PATH/bzImage-rr" ]; then
@@ -316,6 +325,10 @@ jobs:
           # 该文件与型号无关，在这里生成后 update job 不再需要 patch_part1。
           PL1=$(sudo losetup -f)
           sudo losetup -P "$PL1" rr/rr.img
+
+          # 分区节点异步创建，等待就绪后再挂载
+          for _ in $(seq 1 40); do [ -b "${PL1}p1" ] && break; sleep 0.25; done
+          [ -b "${PL1}p1" ] || { echo "[E] 镜像分区未就绪：${PL1}p1" >&2; exit 1; }
           sudo mount "${PL1}p1" "$PART1_PATH"
           if [ -f "$PART1_PATH/RR_VERSION" ]; then
             sudo cp -f "$PART1_PATH/RR_VERSION" "$PART1_PATH/AINAS_VERSION"
@@ -335,7 +348,6 @@ jobs:
 
           # 预压缩；Release 单文件超过 2GB 时上传前再分卷
           zstd -3 -T0 -q -f rr/rr.img -o 2in1-base.img.zst
-          ls -lh 2in1-base.img.zst
 
       # 上传到 ainas-2in1 的 Release（与最终镜像放在一起），Release 资产默认永久保存。
       # 单文件超过 GitHub 2GB 上限时按 release_publish.sh 同样的 1900MB 规则分卷。
@@ -495,8 +507,9 @@ jobs:
 
           # ── 系统依赖 ───────────────────────────────────────────────
           # pigz 用于镜像压缩：gzip -1 单线程约 144s，pigz 可降到数十秒
-          sudo apt-get update
-          sudo apt-get install -y gettext cpio zstd dosfstools rsync qemu-utils pigz
+          echo "[INFO] 安装构建依赖"
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq gettext cpio zstd dosfstools rsync qemu-utils pigz >/dev/null
 
           # ── 恢复公共 base ──────────────────────────────────────────
           # 下载 RR、分区 label、资产包、addons/initrd 补丁等与型号无关的步骤
@@ -517,6 +530,10 @@ jobs:
           # rr.img 必须保持 attached：容器内 .bashrc 按分区 label 挂载 p1/p2/p3
           DISK_LOOP=$(sudo losetup -f)
           sudo losetup -P "$DISK_LOOP" rr/rr.img
+
+          # 分区节点异步创建，等待就绪后再挂载
+          for _ in $(seq 1 40); do [ -b "${DISK_LOOP}p3" ] && break; sleep 0.25; done
+          [ -b "${DISK_LOOP}p3" ] || { echo "[E] 镜像分区未就绪：${DISK_LOOP}p3" >&2; exit 1; }
           sudo mkdir -p "$PART1_PATH" "$PART3_PATH"
 
           # ── docker_build 的 initrd 依赖 ────────────────────────────

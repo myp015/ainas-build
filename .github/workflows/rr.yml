@@ -246,14 +246,19 @@ jobs:
 
           . "$AINAS2IN1_DIR/script/2in1func.sh"
 
-          sudo apt-get update
-          sudo apt-get install -y gettext cpio zstd dosfstools rsync qemu-utils
+          echo "[INFO] 安装构建依赖"
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq gettext cpio zstd dosfstools rsync qemu-utils >/dev/null
 
-          unzip "$RR_FILENAME" -d rr rr.img
+          unzip -q "$RR_FILENAME" -d rr rr.img
 
           # ── p3：cpuinfo + initrd 补丁（与型号无关）─────────────────
           DISK_LOOP=$(sudo losetup -f)
           sudo losetup -P "$DISK_LOOP" rr/rr.img
+
+          # 分区节点异步创建，等待就绪后再挂载
+          for _ in $(seq 1 40); do [ -b "${DISK_LOOP}p3" ] && break; sleep 0.25; done
+          [ -b "${DISK_LOOP}p3" ] || { echo "[E] 镜像分区未就绪：${DISK_LOOP}p3" >&2; exit 1; }
           sudo mkdir -p "$PART3_PATH"
           sudo mount "${DISK_LOOP}p3" "$PART3_PATH"
 
@@ -284,7 +289,6 @@ jobs:
 
           # 预压缩；Release 单文件超过 2GB 时上传前再分卷
           zstd -3 -T0 -q -f rr/rr.img -o rr-base.img.zst
-          ls -lh rr-base.img.zst
 
       # 上传到 ainas-2in1 的 Release（与最终镜像放在一起），Release 资产默认永久保存。
       # 单文件超过 GitHub 2GB 上限时按 release_publish.sh 同样的 1900MB 规则分卷。
@@ -398,9 +402,9 @@ jobs:
           set -euo pipefail
 
           # ── 系统依赖 ───────────────────────────────────────────────
-          echo "[INFO] 正在安装构建依赖"
-          sudo apt-get update
-          sudo apt-get install -y gettext cpio zstd dosfstools rsync qemu-utils
+          echo "[INFO] 安装构建依赖"
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq gettext cpio zstd dosfstools rsync qemu-utils >/dev/null
 
           # ── 恢复公共 base ──────────────────────────────────────────
           # 下载 RR、cpuinfo/initrd 补丁等与型号无关的步骤已在 prepare-base 完成，
@@ -469,6 +473,10 @@ jobs:
           if [ "${MODEL}" != "__RR_ORIGINAL__" ]; then
             DISK_LOOP=$(sudo losetup -f)
             sudo losetup -P "$DISK_LOOP" rr/rr.img
+
+            # 分区节点异步创建，等待就绪后再挂载
+            for _ in $(seq 1 40); do [ -b "${DISK_LOOP}p3" ] && break; sleep 0.25; done
+            [ -b "${DISK_LOOP}p3" ] || { echo "[E] 镜像分区未就绪：${DISK_LOOP}p3" >&2; exit 1; }
             sudo mkdir -p "$PART1_PATH" "$PART3_PATH"
 
             # ── 使用 RR Docker 编译镜像 ─────────────────────────────
@@ -555,9 +563,7 @@ jobs:
               done
             fi
           fi
-          echo "[INFO] ${ARTIFACT_ZIP} 内容:"
-          zipinfo -1 "$ARTIFACT_ZIP" | sed 's/^/  /'
-          echo "[INFO] exe 数量: $(zipinfo -1 "$ARTIFACT_ZIP" | grep -c '\.exe$')"
+          echo "[INFO] 产物 ${ARTIFACT_ZIP} 已生成（$(du -h "$ARTIFACT_ZIP" | cut -f1)，含 exe $(zipinfo -1 "$ARTIFACT_ZIP" | grep -c '\.exe$') 个）"
 
           echo "ARTIFACT_NAME=${ARTIFACT_NAME}" >> "$GITHUB_ENV"
           echo "ARTIFACT_ZIP=$ARTIFACT_ZIP" >> "$GITHUB_ENV"

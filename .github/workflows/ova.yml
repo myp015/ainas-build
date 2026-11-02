@@ -151,7 +151,7 @@ jobs:
             if [ "$create_rc" -eq 0 ]; then
               echo "[INFO] Release 创建成功，等待 API 可见"
             else
-              echo "$create_out"
+              echo "[WARN] Release 暂不可用，继续重试：$(printf '%s' "$create_out" | tail -n1)"
               if ! echo "$create_out" | grep -qiE 'already exists|already_exists|Validation Failed|HTTP 429|HTTP 502|HTTP 503|HTTP 504|rate limit|secondary rate'; then
                 exit "$create_rc"
               fi
@@ -235,14 +235,19 @@ jobs:
 
           . "$AINAS2IN1_DIR/script/2in1func.sh"
 
-          sudo apt-get update
-          sudo apt-get install -y gettext cpio zstd dosfstools rsync qemu-utils
+          echo "[INFO] 安装构建依赖"
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq gettext cpio zstd dosfstools rsync qemu-utils >/dev/null
 
-          unzip "$FILENAME" -d rr rr.img
+          unzip -q "$FILENAME" -d rr rr.img
 
           # ── p3：cpuinfo + initrd 补丁（与型号无关）─────────────────
           DISK_LOOP=$(sudo losetup -f)
           sudo losetup -P "$DISK_LOOP" rr/rr.img
+
+          # 分区节点异步创建，等待就绪后再挂载
+          for _ in $(seq 1 40); do [ -b "${DISK_LOOP}p3" ] && break; sleep 0.25; done
+          [ -b "${DISK_LOOP}p3" ] || { echo "[E] 镜像分区未就绪：${DISK_LOOP}p3" >&2; exit 1; }
           sudo mkdir -p "$PART3_PATH"
           sudo mount "${DISK_LOOP}p3" "$PART3_PATH"
 
@@ -275,7 +280,6 @@ jobs:
 
           # 预压缩；Release 单文件超过 2GB 时上传前再分卷
           zstd -3 -T0 -q -f rr/rr.img -o ova-base.img.zst
-          ls -lh ova-base.img.zst
 
       # 上传到 ainas-2in1 的 Release（与最终镜像放在一起），Release 资产默认永久保存。
       # 单文件超过 GitHub 2GB 上限时按 release_publish.sh 同样的 1900MB 规则分卷。
@@ -426,8 +430,9 @@ jobs:
           echo "[INFO] 型号=${MODEL} 目标DSM版本=${VERSION} DSM系列=${LINE_REQ} 制品版本=${VER_SLUG} 源=${SOURCE}"
 
           # ── 系统依赖 ───────────────────────────────────────────────
-          sudo apt-get update
-          sudo apt-get install -y gettext cpio zstd dosfstools rsync qemu-utils
+          echo "[INFO] 安装构建依赖"
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq gettext cpio zstd dosfstools rsync qemu-utils >/dev/null
 
           # ── 恢复公共 base ──────────────────────────────────────────
           # 下载 RR、cpuinfo/initrd 补丁等与型号无关的步骤已在 prepare-base
@@ -454,6 +459,10 @@ jobs:
           # rr.img 必须保持 attached：容器内 .bashrc 按分区 label 挂载 p1/p2/p3
           DISK_LOOP=$(sudo losetup -f)
           sudo losetup -P "$DISK_LOOP" rr/rr.img
+
+          # 分区节点异步创建，等待就绪后再挂载
+          for _ in $(seq 1 40); do [ -b "${DISK_LOOP}p3" ] && break; sleep 0.25; done
+          [ -b "${DISK_LOOP}p3" ] || { echo "[E] 镜像分区未就绪：${DISK_LOOP}p3" >&2; exit 1; }
           sudo mkdir -p "$PART1_PATH" "$PART3_PATH"
 
           # ── 使用 RR Docker 编译镜像 ───────────────────────────────
@@ -526,7 +535,7 @@ jobs:
 
           OUT="$WORKDIR/rr/rr-failed-${MODEL}.img.gz"
           gzip -1 -c "$WORKDIR/rr/rr.img" > "$OUT"
-          ls -lh "$OUT"
+          echo "[INFO] 失败镜像已保存: $(basename "$OUT")（$(du -h "$OUT" | cut -f1)）"
           echo "DEBUG_IMG=$OUT" >> "$GITHUB_ENV"
 
       - name: 发布制品到 Release
