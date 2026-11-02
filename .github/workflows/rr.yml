@@ -278,7 +278,7 @@ jobs:
           # lkm 也直接用 rr.img 内置的（不做 ainas-lkm 覆盖）
           echo "[INFO] 源=${SOURCE}：lkms/cks/addons/modules 均取自 rr.img"
 
-          patch_cpuinfo "${PART3_PATH}/addons" "patch-cpuinfo.py"
+          patch_cpuinfo "${PART3_PATH}/addons" "rr"
           patch_ram "$PART3_PATH" rr "$WORKDIR" verify
 
           sudo umount "$PART3_PATH"

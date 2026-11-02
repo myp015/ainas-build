@@ -313,7 +313,7 @@ jobs:
 
           # MODEL 仅用于日志，patch_addons_disk 本身不区分型号
           patch_addons_disk "$PART3_PATH" "BASE"
-          patch_cpuinfo "${PART3_PATH}/addons" "2in1_patch-cpuinfo.py" verify
+          patch_cpuinfo "${PART3_PATH}/addons" "2in1" verify
           patch_ram "$PART3_PATH" 2in1 "$WORKDIR" "$TAG"
 
           sudo umount "$PART3_PATH"
