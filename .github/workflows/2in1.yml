@@ -570,7 +570,7 @@ jobs:
              && [ "${OVERWRITE_UPDATE:-false}" != "true" ]; then
             echo "[INFO] Release ${RELEASE_TAG} 已存在 ${UPDATE_ASSET}，复用（未勾选覆盖）"
           else
-            bash "$AINAS2IN1_DIR/script/2in1_build_update.sh" rr/rr.img "$GITHUB_WORKSPACE" "" "2in1"
+            AINAS2IN1_DIR="$AINAS2IN1_DIR" bash -c "$(declare -f pack_update); pack_update \"\$@\"" _ rr/rr.img "$GITHUB_WORKSPACE" "" "2in1"
             RAW_UPDATE_ZIP="$(find . -maxdepth 1 -name 'updateall-*.zip' -print -quit)"
             [ -n "$RAW_UPDATE_ZIP" ] && [ -f "$RAW_UPDATE_ZIP" ] || {
               echo "[E] 未生成 updateall-*.zip" >&2
