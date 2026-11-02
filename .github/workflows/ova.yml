@@ -474,6 +474,8 @@ jobs:
           sudo mount "${DISK_LOOP}p3" "$PART3_PATH"
           sudo rm -rf "$PART3_PATH/dl" "$PART3_PATH/auxfiles" "$PART3_PATH/logs"
           trim_p3_assets "$PART3_PATH" "$MODEL"
+          # ova 无原版 RR 任务，所有型号统一精简主菜单
+          rr_menu_apply "$PART3_PATH" slim
           sudo umount "$PART3_PATH"
           sudo losetup --detach "$DISK_LOOP"
           rm -f "$WORKDIR/2in1func.sh"
