@@ -15,9 +15,17 @@ on:
   workflow_dispatch:
     inputs:
       push:
-        description: "push"
+        description: "push 到 myp015/ainas-rr"
         default: false
         type: boolean
+      push_build:
+        description: "push 到 myp015/ainas-build 的 ainas/grub<ver>.img.gz"
+        default: false
+        type: boolean
+      img_size:
+        description: "镜像大小（MiB）"
+        default: "3700"
+        type: string
       grubver:
         description: "grub version"
         default: "grub-2.14"
@@ -64,11 +72,16 @@ jobs:
           sudo apt install -y libfreetype6-dev unifont fonts-dejavu libfuse-dev libzfslinux-dev liblzma-dev libdevmapper-dev
 
       - name: Make Grub
+        env:
+          IMG_SIZE: ${{ inputs.img_size }}
         run: |
-          . ainas-buildroot/grub_rr.sh "${{ inputs.grubver}}" "${{ inputs.bioslst}}" "${{ inputs.namestr}}"
+          case "${IMG_SIZE}" in
+            ''|*[!0-9]*) echo "[E] img_size 必须是正整数（单位 MiB）：${IMG_SIZE}"; exit 1 ;;
+          esac
+          . ainas-buildroot/grub_rr.sh "${{ inputs.grubver}}" "${{ inputs.bioslst}}" "${{ inputs.namestr}}" "${IMG_SIZE}"
 
       - name: Upload artifact
-        if: success() && inputs.push == false
+        if: success() && inputs.push == false && inputs.push_build == false
         uses: actions/upload-artifact@v7
         with:
           name: grub
@@ -80,7 +93,8 @@ jobs:
         if: success() && inputs.push == true
         run: |
 
-          [ -f "grub.img.gz" ] && mv -f grub.img.gz rr/files/initrd/opt/rr/grub.img.gz
+          # 用 cp 而非 mv：push_build 步骤可能还要用同一个 grub.img.gz
+          [ -f "grub.img.gz" ] && cp -f grub.img.gz rr/files/initrd/opt/rr/grub.img.gz
 
           cd rr
           echo "Git push ..."
@@ -90,4 +104,27 @@ jobs:
             git add ${status}
             git commit -m "update $(date +%Y-%m-%d" "%H:%M:%S)"
             git push -f
+          fi
+
+      - name: Push 到 ainas-build
+        if: success() && inputs.push_build == true
+        run: |
+          set -euo pipefail
+          GRUBVER="${{ inputs.grubver }}"
+          case "${GRUBVER}" in
+            grub-*) ;;
+            *) echo "[E] grubver 必须形如 grub-2.14：${GRUBVER}"; exit 1 ;;
+          esac
+          IMG_FILE="ainas/grub${GRUBVER#grub-}.img.gz"
+
+          [ -f grub.img.gz ] || { echo "[E] 未找到 grub.img.gz"; exit 1; }
+
+          git pull --rebase
+          cp -f grub.img.gz "${IMG_FILE}"
+          git add "${IMG_FILE}"
+          if git diff --cached --quiet; then
+            echo "[INFO] ${IMG_FILE} 无变化，跳过提交"
+          else
+            git commit -m "chore(grub): 更新 ${IMG_FILE} ($(date '+%Y-%m-%d %H:%M:%S'))"
+            git push
           fi
