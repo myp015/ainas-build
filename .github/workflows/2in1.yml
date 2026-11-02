@@ -555,10 +555,14 @@ jobs:
               "$WORKDIR" "$REPACK_STAGE_DIR"
           fi
 
-          # ── 清理 p3 临时文件 ──────────────────────────────────────
+          # ── 清理 p3 临时文件 + 按型号裁剪资产 ────────────────────
           sudo mkdir -p "$PART3_PATH"
           sudo mount "${DISK_LOOP}p3" "$PART3_PATH"
           sudo rm -rf "$PART3_PATH/dl" "$PART3_PATH/auxfiles" "$PART3_PATH/logs"
+          # update 包是通用包（任何型号升级都用它），保留全平台资产。
+          if [ "${UPDATE_ONLY}" != "true" ]; then
+            trim_p3_assets "$PART3_PATH" "$MODEL"
+          fi
           sudo umount "$PART3_PATH"
           sudo losetup --detach "$DISK_LOOP"
 

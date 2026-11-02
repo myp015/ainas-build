@@ -494,10 +494,11 @@ jobs:
             docker_build rr "$MODEL" "$VERSION" "$LANGUAGE" "$ADDONS" "$RR_DOCKER_TAG" \
               "$WORKDIR"
 
-            # ── 清理 p3 临时文件 ────────────────────────────────────
+            # ── 清理 p3 临时文件 + 按型号裁剪资产 ───────────────────
             sudo mkdir -p "$PART3_PATH"
             sudo mount "${DISK_LOOP}p3" "$PART3_PATH"
             sudo rm -rf "$PART3_PATH/dl" "$PART3_PATH/auxfiles" "$PART3_PATH/logs"
+            trim_p3_assets "$PART3_PATH" "$MODEL"
             sudo umount "$PART3_PATH"
             sudo losetup --detach "$DISK_LOOP"
             rm -f "$WORKDIR/2in1func.sh"
