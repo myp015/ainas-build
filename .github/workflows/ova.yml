@@ -226,18 +226,14 @@ jobs:
       - name: 构建公共 base
         if: steps.check.outputs.rebuild == 'true'
         shell: bash
-        env:
-          ACTION_TOKEN: ${{ secrets.AiNas }}
         run: |
           set -euo pipefail
-          : "${ACTION_TOKEN:?缺少 ACTION_TOKEN}"
 
           WORKDIR="$PWD"
           AINAS2IN1_DIR="${WORKDIR}/.2in1"
           PART3_PATH="/mnt/p3"
 
-          # getLKMs 需要 token 访问 myp015 的 Release
-          . "$AINAS2IN1_DIR/script/2in1func.sh" "$ACTION_TOKEN"
+          . "$AINAS2IN1_DIR/script/2in1func.sh"
 
           sudo apt-get update
           sudo apt-get install -y gettext cpio zstd dosfstools rsync qemu-utils
@@ -265,16 +261,8 @@ jobs:
             fi
           done
 
-          # RROrg 的 rr.img 自带 lkm 不含分区保护（partition guard）：安装阶段
-          # updater 会改写 img 的分区结构，导致 /dev/synoboot2 打不开（errno 6）
-          # → updater 返回 21 → scemd 错误码 13（err_patch）。RROrg 源统一改用
-          # ainas-lkm 的 rp-lkms 覆盖 p3/lkms；其余 cks/addons/modules 仍取自 rr.img。
-          if [ "${SOURCE}" = "RROrg" ]; then
-            echo "[INFO] 源=RROrg：用 myp015/ainas-lkm 的 rp-lkms 覆盖 ${PART3_PATH}/lkms"
-            getLKMs "${PART3_PATH}/lkms"
-          else
-            echo "[INFO] 源=${SOURCE}：使用 rr.img 内置资产"
-          fi
+          # lkm 也直接用 rr.img 内置的（不做 ainas-lkm 覆盖）
+          echo "[INFO] 源=${SOURCE}：lkms/cks/addons/modules 均取自 rr.img"
 
           patch_cpuinfo "${PART3_PATH}/addons" "patch-cpuinfo.py"
           patch_ram "$PART3_PATH" rr "$WORKDIR"
