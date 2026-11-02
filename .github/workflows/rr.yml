@@ -64,10 +64,10 @@ on:
         description: "覆盖所选源的 rr-base（默认复用 Release 中已存在的 base）"
         type: boolean
         default: false
-      build_update_zip:
-        description: "编译升级包（updateall-*.zip）默认开启，可取消"
+      overwrite_update:
+        description: "覆盖所选 update 包（默认复用 Release 中已存在的 updateall-*.zip）"
         type: boolean
-        default: true
+        default: false
       build_rr_original:
         description: "生成原版 RR 镜像（rr-版本号.img.zip，跳过 Docker 编译）默认开启，可取消"
         type: boolean
@@ -117,7 +117,6 @@ jobs:
           DSM_VERSION: ${{ inputs.dsm_version }}
           ALL_MODELS: ${{ inputs.all_models }}
           CUSTOM_MODELS: ${{ inputs.custom_models }}
-          BUILD_UPDATE_ZIP: ${{ inputs.build_update_zip }}
           BUILD_RR_ORIGINAL: ${{ inputs.build_rr_original }}
           MODEL_DS918P: ${{ inputs.model_ds918p }}
           MODEL_DS920P: ${{ inputs.model_ds920p }}
@@ -281,8 +280,7 @@ jobs:
           sudo losetup --detach "$DISK_LOOP"
           sudo rm -rf "$PART3_PATH"
 
-          rm -rf "$AINAS2IN1_DIR"
-
+          # .2in1 保留给后续升级包步骤使用，结束时统一清理
           # 预压缩；Release 单文件超过 2GB 时上传前再分卷
           zstd -3 -T0 -q -f rr/rr.img -o rr-base.img.zst
           ls -lh rr-base.img.zst
@@ -324,8 +322,100 @@ jobs:
           gh release upload "$RELEASE_TAG" "${UPLOAD_FILES[@]}"
           echo "[INFO] base 已上传到 Release: ${RELEASE_TAG}"
 
+      # 升级包与 base 一样属于“准备阶段”：每个源/Release 只生成一次，
+      # 已存在则跳过；只有缺失或勾选 overwrite_update 时才重新打包并覆盖上传。
+      - name: 检查是否复用已有 update 包
+        id: update_check
+        shell: bash
+        env:
+          ACTION_TOKEN: ${{ secrets.AiNas }}
+          OVERWRITE_UPDATE: ${{ inputs.overwrite_update }}
+        run: |
+          set -euo pipefail
+          : "${ACTION_TOKEN:?缺少 ACTION_TOKEN}"
+          : "${RELEASE_TAG:?缺少 RELEASE_TAG}"
+          export GH_TOKEN="$ACTION_TOKEN"
+          export GH_REPO="myp015/ainas-2in1"
+
+          ASSET_NAMES="$(gh release view "$RELEASE_TAG" --json assets --jq '.assets[].name')"
+          EXISTS="false"
+          if printf '%s\n' "$ASSET_NAMES" | grep -Eq '^updateall-.*\.zip$'; then
+            EXISTS="true"
+          fi
+
+          if [ "$EXISTS" = "true" ] && [ "${OVERWRITE_UPDATE:-false}" != "true" ]; then
+            echo "[INFO] Release ${RELEASE_TAG} 已存在 updateall-*.zip，跳过（未勾选覆盖）"
+            echo "build=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "[INFO] 需要构建升级包（exists=${EXISTS} overwrite=${OVERWRITE_UPDATE:-false}）"
+            echo "build=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: checkout ainas-2in1（打包升级包）
+        if: steps.update_check.outputs.build == 'true' && steps.check.outputs.rebuild == 'false'
+        uses: actions/checkout@v7
+        with:
+          repository: myp015/ainas-2in1
+          token: ${{ secrets.AiNas }}
+          path: .2in1
+
+      - name: 下载公共 base（打包升级包）
+        if: steps.update_check.outputs.build == 'true' && steps.check.outputs.rebuild == 'false'
+        shell: bash
+        env:
+          ACTION_TOKEN: ${{ secrets.AiNas }}
+        run: |
+          set -euo pipefail
+          : "${ACTION_TOKEN:?缺少 ACTION_TOKEN}"
+          : "${RELEASE_TAG:?缺少 RELEASE_TAG}"
+          : "${BASE_ASSET:?缺少 BASE_ASSET}"
+          export GH_TOKEN="$ACTION_TOKEN"
+          export GH_REPO="myp015/ainas-2in1"
+
+          command -v zstd >/dev/null 2>&1 || { sudo apt-get update; sudo apt-get install -y zstd; }
+          mkdir -p base rr
+          gh release download "$RELEASE_TAG" \
+            --pattern "${BASE_ASSET}*" \
+            --dir base --clobber
+          if [ -f "base/${BASE_ASSET}" ]; then
+            echo "[INFO] base 为单文件"
+            zstd -d -q -f "base/${BASE_ASSET}" -o rr/rr.img
+          else
+            compgen -G "base/${BASE_ASSET}.part.*" >/dev/null || {
+              echo "[E] Release ${RELEASE_TAG} 中未找到 base 资产 ${BASE_ASSET}" >&2
+              exit 1
+            }
+            echo "[INFO] base 为分卷，流式合并解压"
+            cat base/${BASE_ASSET}.part.* | zstd -d -q -f - -o rr/rr.img
+          fi
+          rm -rf base
+
+      - name: 构建并上传升级包
+        if: steps.update_check.outputs.build == 'true'
+        shell: bash
+        env:
+          ACTION_TOKEN: ${{ secrets.AiNas }}
+          UPDATE_KIND: rr
+        run: |
+          set -euo pipefail
+          : "${ACTION_TOKEN:?缺少 ACTION_TOKEN}"
+          : "${RELEASE_TAG:?缺少 RELEASE_TAG}"
+          export GH_TOKEN="$ACTION_TOKEN"
+          export GH_REPO="myp015/ainas-2in1"
+
+          bash .2in1/script/2in1_build_update.sh rr/rr.img "$PWD" "" "$UPDATE_KIND"
+          RAW_UPDATE_ZIP="$(find . -maxdepth 1 -name 'updateall-*.zip' -print -quit)"
+          [ -n "$RAW_UPDATE_ZIP" ] && [ -f "$RAW_UPDATE_ZIP" ] || {
+            echo "[E] 未生成 updateall-*.zip" >&2
+            exit 1
+          }
+          bash .github/scripts/release_publish.sh \
+            "$RELEASE_TAG" "RR build artifacts" "$PWD/$RAW_UPDATE_ZIP"
+
+          rm -rf .2in1
+
   build:
-    name: ${{ matrix.kind == 'update' && 'build (update)' || (matrix.kind == 'original' && 'build (rr-original)' || format('build ({0})', matrix.model)) }}
+    name: ${{ matrix.kind == 'original' && 'build (rr-original)' || format('build ({0})', matrix.model) }}
     needs: [plan, prepare-base]
     runs-on: ubuntu-24.04
     strategy:
@@ -417,26 +507,6 @@ jobs:
             cat base/${BASE_ASSET}.part.* | zstd -d -q -f - -o rr/rr.img
           fi
           rm -rf base
-
-          # ── UPDATE 独立任务：base 已含 initrd patch，直接打包 updateall ──
-          # update-list.yml 只取 p1 的 RR_VERSION/EFI 与 p3 的 initrd 等通用文件，
-          # grub.cfg 不在升级包内，因此原 update 分支里的 grub 修补在本流程中无实际作用。
-          if [ "${MODEL}" = "__UPDATE__" ]; then
-            WORKDIR="$PWD"
-            AINAS2IN1_DIR="${WORKDIR}/.2in1"
-            echo "[INFO] UPDATE 任务：打包 updateall-<版本号>.zip（RR 版，不分 dt/nodt）"
-            bash "$AINAS2IN1_DIR/script/2in1_build_update.sh" rr/rr.img "$GITHUB_WORKSPACE" "" "rr"
-            RAW_UPDATE_ZIP="$(find . -maxdepth 1 -name 'updateall-*.zip' -print -quit)"
-            if [ -z "$RAW_UPDATE_ZIP" ] || [ ! -f "$RAW_UPDATE_ZIP" ]; then
-              echo "[E] 未生成 updateall-*.zip" >&2
-              exit 1
-            fi
-            UPDATE_ZIP="$(basename "$RAW_UPDATE_ZIP")"
-            echo "UPDATE_ZIP=$UPDATE_ZIP" >> "$GITHUB_ENV"
-
-            # 无需上传镜像，直接结束
-            exit 0
-          fi
 
           # ── 目录与常量 ────────────────────────────────────────────
           WORKDIR="$PWD"
@@ -573,7 +643,6 @@ jobs:
           # 分卷、Release 自愈、退避重试统一在 .github/scripts/release_publish.sh 里
           ASSET_ARGS=()
           [ -n "${ARTIFACT_ZIP:-}" ] && ASSET_ARGS+=("$GITHUB_WORKSPACE/$ARTIFACT_ZIP")
-          [ -n "${UPDATE_ZIP:-}" ] && ASSET_ARGS+=("$GITHUB_WORKSPACE/$UPDATE_ZIP")
 
           bash "$GITHUB_WORKSPACE/.github/scripts/release_publish.sh" \
             "$RELEASE_TAG" "${RELEASE_NOTES:-RR build artifacts}" "${ASSET_ARGS[@]}"

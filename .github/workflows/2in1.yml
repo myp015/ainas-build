@@ -61,10 +61,10 @@ on:
         description: "自定义型号(工作流未列出的,多个用逗号分隔,如 DS1621+,DVA3221,DS3617xs)"
         type: string
         default: ""
-      build_update_zip:
-        description: "编译升级包（updateall-*.zip）默认开启"
+      overwrite_update:
+        description: "覆盖所选 update 包（默认复用 Release 中已存在的 updateall-*.zip）"
         type: boolean
-        default: true
+        default: false
       overwrite_base:
         description: "覆盖所选源的 2in1-base（默认复用 Release 中已存在的 base）"
         type: boolean
@@ -114,7 +114,6 @@ jobs:
           DSM_VERSION: ${{ inputs.dsm_version }}
           ALL_MODELS: ${{ inputs.all_models }}
           CUSTOM_MODELS: ${{ inputs.custom_models }}
-          BUILD_UPDATE_ZIP: ${{ inputs.build_update_zip }}
           MODEL_DS918P: ${{ inputs.model_ds918p }}
           MODEL_DS920P: ${{ inputs.model_ds920p }}
           MODEL_DS923P: ${{ inputs.model_ds923p }}
@@ -332,8 +331,7 @@ jobs:
           sudo umount "$PART1_PATH"
           sudo losetup --detach "$PL1"
 
-          rm -rf "$AINAS2IN1_DIR"
-
+          # .2in1 保留给后续升级包步骤使用，结束时统一清理
           # 预压缩；Release 单文件超过 2GB 时上传前再分卷
           zstd -3 -T0 -q -f rr/rr.img -o 2in1-base.img.zst
           ls -lh 2in1-base.img.zst
@@ -376,8 +374,100 @@ jobs:
           gh release upload "$RELEASE_TAG" "${UPLOAD_FILES[@]}"
           echo "[INFO] base 已上传到 Release: ${RELEASE_TAG}"
 
+      # 升级包与 base 一样属于“准备阶段”：每个源/Release 只生成一次，
+      # 已存在则跳过；只有缺失或勾选 overwrite_update 时才重新打包并覆盖上传。
+      - name: 检查是否复用已有 update 包
+        id: update_check
+        shell: bash
+        env:
+          ACTION_TOKEN: ${{ secrets.AiNas }}
+          OVERWRITE_UPDATE: ${{ inputs.overwrite_update }}
+        run: |
+          set -euo pipefail
+          : "${ACTION_TOKEN:?缺少 ACTION_TOKEN}"
+          : "${RELEASE_TAG:?缺少 RELEASE_TAG}"
+          export GH_TOKEN="$ACTION_TOKEN"
+          export GH_REPO="myp015/ainas-2in1"
+
+          ASSET_NAMES="$(gh release view "$RELEASE_TAG" --json assets --jq '.assets[].name')"
+          EXISTS="false"
+          if printf '%s\n' "$ASSET_NAMES" | grep -Eq '^updateall-.*\.zip$'; then
+            EXISTS="true"
+          fi
+
+          if [ "$EXISTS" = "true" ] && [ "${OVERWRITE_UPDATE:-false}" != "true" ]; then
+            echo "[INFO] Release ${RELEASE_TAG} 已存在 updateall-*.zip，跳过（未勾选覆盖）"
+            echo "build=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "[INFO] 需要构建升级包（exists=${EXISTS} overwrite=${OVERWRITE_UPDATE:-false}）"
+            echo "build=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: checkout ainas-2in1（打包升级包）
+        if: steps.update_check.outputs.build == 'true' && steps.check.outputs.rebuild == 'false'
+        uses: actions/checkout@v7
+        with:
+          repository: myp015/ainas-2in1
+          token: ${{ secrets.AiNas }}
+          path: .2in1
+
+      - name: 下载公共 base（打包升级包）
+        if: steps.update_check.outputs.build == 'true' && steps.check.outputs.rebuild == 'false'
+        shell: bash
+        env:
+          ACTION_TOKEN: ${{ secrets.AiNas }}
+        run: |
+          set -euo pipefail
+          : "${ACTION_TOKEN:?缺少 ACTION_TOKEN}"
+          : "${RELEASE_TAG:?缺少 RELEASE_TAG}"
+          : "${BASE_ASSET:?缺少 BASE_ASSET}"
+          export GH_TOKEN="$ACTION_TOKEN"
+          export GH_REPO="myp015/ainas-2in1"
+
+          command -v zstd >/dev/null 2>&1 || { sudo apt-get update; sudo apt-get install -y zstd; }
+          mkdir -p base rr
+          gh release download "$RELEASE_TAG" \
+            --pattern "${BASE_ASSET}*" \
+            --dir base --clobber
+          if [ -f "base/${BASE_ASSET}" ]; then
+            echo "[INFO] base 为单文件"
+            zstd -d -q -f "base/${BASE_ASSET}" -o rr/rr.img
+          else
+            compgen -G "base/${BASE_ASSET}.part.*" >/dev/null || {
+              echo "[E] Release ${RELEASE_TAG} 中未找到 base 资产 ${BASE_ASSET}" >&2
+              exit 1
+            }
+            echo "[INFO] base 为分卷，流式合并解压"
+            cat base/${BASE_ASSET}.part.* | zstd -d -q -f - -o rr/rr.img
+          fi
+          rm -rf base
+
+      - name: 构建并上传升级包
+        if: steps.update_check.outputs.build == 'true'
+        shell: bash
+        env:
+          ACTION_TOKEN: ${{ secrets.AiNas }}
+          UPDATE_KIND: 2in1
+        run: |
+          set -euo pipefail
+          : "${ACTION_TOKEN:?缺少 ACTION_TOKEN}"
+          : "${RELEASE_TAG:?缺少 RELEASE_TAG}"
+          export GH_TOKEN="$ACTION_TOKEN"
+          export GH_REPO="myp015/ainas-2in1"
+
+          bash .2in1/script/2in1_build_update.sh rr/rr.img "$PWD" "" "$UPDATE_KIND"
+          RAW_UPDATE_ZIP="$(find . -maxdepth 1 -name 'updateall-*.zip' -print -quit)"
+          [ -n "$RAW_UPDATE_ZIP" ] && [ -f "$RAW_UPDATE_ZIP" ] || {
+            echo "[E] 未生成 updateall-*.zip" >&2
+            exit 1
+          }
+          bash .github/scripts/release_publish.sh \
+            "$RELEASE_TAG" "RR build artifacts" "$PWD/$RAW_UPDATE_ZIP"
+
+          rm -rf .2in1
+
   build:
-    name: ${{ matrix.kind == 'update' && 'build (update)' || format('build ({0})', matrix.model) }}
+    name: ${{ format('build ({0})', matrix.model) }}
     needs: [plan, prepare-base]
     runs-on: ubuntu-24.04
     strategy:
@@ -460,20 +550,7 @@ jobs:
           # 流程函数库（patch_* / docker_* / repack_* / dsm_setup）
           . "$AINAS2IN1_DIR/script/2in1func.sh"
 
-          # ── UPDATE 特殊处理 ────────────────────────────────────────
-          # 升级包只出一份，不再按 DT / 非 DT 平台区分：update-list.yml 只取 p1/p3 的通用文件，
-          # patch_ram（2in1 变体）与 patch_addons_disk 都不依赖型号，被 patch_part1 改写的
-          # grub.cfg 也不在 update 包里 —— 两个任务的产物本来就逐字节等价。
-          # 占位型号仅用于跑通主流程；6.2 没有 epyc7002，故按版本线挑一个存在的型号。
-          UPDATE_ONLY="false"
-          if [ "${MODEL}" = "__UPDATE__" ]; then
-            UPDATE_ONLY="true"
-            if [ "${LINE:-7.3.2}" = "6.2.4" ]; then
-              MODEL="DS918+"
-            else
-              MODEL="SA6400"
-            fi
-          fi
+          # 升级包已移到 prepare-base 统一生成，本 job 只编译型号镜像
 
           # DSM 版本映射由上面 source 的 2in1func.sh 提供（pick_dsm_version）
 
@@ -537,76 +614,51 @@ jobs:
           # ── docker_build 的 initrd 依赖 ────────────────────────────
           # docker_build 会读取 /tmp/initrd_work/opt/ainas 与 root/.bashrc。
           # base 里已由 patch_ram 生成 initrd-ainas，这里重新解包即可（约 10-20s）。
-          if [ "${UPDATE_ONLY}" != "true" ]; then
-            sudo mount "${DISK_LOOP}p3" "$PART3_PATH"
-            sudo rm -rf /tmp/initrd_work
-            unpackInitrd "${PART3_PATH}/initrd-ainas" /tmp/initrd_work
-            sudo umount "$PART3_PATH"
-          fi
+          sudo mount "${DISK_LOOP}p3" "$PART3_PATH"
+          sudo rm -rf /tmp/initrd_work
+          unpackInitrd "${PART3_PATH}/initrd-ainas" /tmp/initrd_work
+          sudo umount "$PART3_PATH"
 
           # ── GRUB 修补（只有 grub.cfg 与型号相关，必须在型号 job 内做）──
-          if [ "${UPDATE_ONLY}" != "true" ]; then
-            patch_part1 rr/rr.img "$PART1_PATH" 2in1 "$MODEL" "$LINE_SHORT"
-          fi
+          patch_part1 rr/rr.img "$PART1_PATH" 2in1 "$MODEL" "$LINE_SHORT"
 
-          # ── 使用 RR Docker 编译镜像（非 UPDATE 模式）─────────────
-          if [ "${UPDATE_ONLY}" != "true" ]; then
-            docker_build 2in1 "$MODEL" "$VERSION" "$LANGUAGE" "$ADDONS" "$RR_DOCKER_TAG" \
-              "$WORKDIR" "$REPACK_STAGE_DIR"
-          fi
+          # ── 使用 RR Docker 编译镜像 ───────────────────────────────
+          docker_build 2in1 "$MODEL" "$VERSION" "$LANGUAGE" "$ADDONS" "$RR_DOCKER_TAG" \
+            "$WORKDIR" "$REPACK_STAGE_DIR"
 
           # ── 清理 p3 临时文件 + 按型号裁剪资产 ────────────────────
           sudo mkdir -p "$PART3_PATH"
           sudo mount "${DISK_LOOP}p3" "$PART3_PATH"
           sudo rm -rf "$PART3_PATH/dl" "$PART3_PATH/auxfiles" "$PART3_PATH/logs"
-          # update 包是通用包（任何型号升级都用它），保留全平台资产。
-          if [ "${UPDATE_ONLY}" != "true" ]; then
-            trim_p3_assets "$PART3_PATH" "$MODEL"
-          fi
+          trim_p3_assets "$PART3_PATH" "$MODEL"
           sudo umount "$PART3_PATH"
           sudo losetup --detach "$DISK_LOOP"
 
-          # ── UPDATE 包构建 ─────────────────────────────────────────
-          UPDATE_ZIP=""
           ZIP_NAME=""
 
-          if [ "${UPDATE_ONLY}" = "true" ]; then
-            bash "$AINAS2IN1_DIR/script/2in1_build_update.sh" rr/rr.img "$GITHUB_WORKSPACE" ""
-            # find 无匹配时返回 0 且输出为空（`ls | head` 在 pipefail 下会因 ls 的退出码中断）
-            RAW_UPDATE_ZIP="$(find . -maxdepth 1 -name 'updateall-*.zip' -print -quit)"
-            if [ -n "$RAW_UPDATE_ZIP" ] && [ -f "$RAW_UPDATE_ZIP" ]; then
-              # 保持 updateall-*.zip 原名上传，不再重命名
-              UPDATE_ZIP="$(basename "$RAW_UPDATE_ZIP")"
-            else
-              echo "[E] 未生成 updateall-*.zip" >&2
-              exit 1
-            fi
-          else
-            # ── 2in1 镜像重打包 ───────────────────────────────────
-            repack_2in1 "$WORKDIR" "$REPACK_STAGE_DIR"
+          # ── 2in1 镜像重打包 ───────────────────────────────────────
+          repack_2in1 "$WORKDIR" "$REPACK_STAGE_DIR"
 
-            # ── DSM 自动安装（解析 pats.xlsx → 启容器 → 安装 → 停容器）──
-            dsm_setup "$MODEL" "$LINE_REQ" "$PAT_XLSX_URL" "$DSM_INSTALL_DIR" \
-              "$WORKDIR" \
-              "$AINAS2IN1_DIR/docker/docker-compose.yaml" "$DSM_INSTALL_DIR/docker-compose.yaml" \
-              "_${IMG_GIB}g_${ARTIFACT_BRAND}" "$SAFE_TAG" "180" \
-              "s#\./rr.img:/rr.img#${WORKDIR}/rr/rr.img:/rr.img#g"
+          # ── DSM 自动安装（解析 pats.xlsx → 启容器 → 安装 → 停容器）──
+          dsm_setup "$MODEL" "$LINE_REQ" "$PAT_XLSX_URL" "$DSM_INSTALL_DIR" \
+            "$WORKDIR" \
+            "$AINAS2IN1_DIR/docker/docker-compose.yaml" "$DSM_INSTALL_DIR/docker-compose.yaml" \
+            "_${IMG_GIB}g_${ARTIFACT_BRAND}" "$SAFE_TAG" "180" \
+            "s#\./rr.img:/rr.img#${WORKDIR}/rr/rr.img:/rr.img#g"
 
-            cd "$WORKDIR"
-            echo "[INFO] 开始重命名并导出镜像（img.gz）"
-            mv -f rr/rr.img "${ARTIFACT}.img"
-            echo "[INFO] 开始 gzip 压缩: ${ARTIFACT}.img -> ${ARTIFACT}.img.gz"
-            pigz -1 -p "$(nproc)" -c "${ARTIFACT}.img" > "${ARTIFACT}.img.gz"
-            echo "[INFO] gzip 压缩完成: ${ARTIFACT}.img.gz"
-            ZIP_NAME="${ARTIFACT}.img.gz"
-          fi
+          cd "$WORKDIR"
+          echo "[INFO] 开始重命名并导出镜像（img.gz）"
+          mv -f rr/rr.img "${ARTIFACT}.img"
+          echo "[INFO] 开始 gzip 压缩: ${ARTIFACT}.img -> ${ARTIFACT}.img.gz"
+          pigz -1 -p "$(nproc)" -c "${ARTIFACT}.img" > "${ARTIFACT}.img.gz"
+          echo "[INFO] gzip 压缩完成: ${ARTIFACT}.img.gz"
+          ZIP_NAME="${ARTIFACT}.img.gz"
 
           rm -f "$WORKDIR/2in1func.sh"
           rm -rf "$AINAS2IN1_DIR" "${REPACK_STAGE_DIR:-}"
 
           echo "ARTIFACT=${ARTIFACT}"   >> "$GITHUB_ENV"
           echo "ARTIFACT_ZIP=$ZIP_NAME" >> "$GITHUB_ENV"
-          echo "UPDATE_ZIP=$UPDATE_ZIP" >> "$GITHUB_ENV"
 
       - name: 发布制品到 Release
         shell: bash
@@ -623,7 +675,6 @@ jobs:
           # 分卷、Release 自愈、退避重试统一在 .github/scripts/release_publish.sh 里
           ASSET_ARGS=()
           [ -n "${ARTIFACT_ZIP:-}" ] && ASSET_ARGS+=("$GITHUB_WORKSPACE/$ARTIFACT_ZIP")
-          [ -n "${UPDATE_ZIP:-}" ] && ASSET_ARGS+=("$GITHUB_WORKSPACE/$UPDATE_ZIP")
 
           bash "$GITHUB_WORKSPACE/.github/scripts/release_publish.sh" \
             "$RELEASE_TAG" "${RELEASE_NOTES:-RR build artifacts}" "${ASSET_ARGS[@]}"
@@ -634,7 +685,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: dsm-logs-${{ matrix.kind == 'update' && 'update' || matrix.model }}-${{ github.run_id }}
+          name: dsm-logs-${{ matrix.model }}-${{ github.run_id }}
           path: /tmp/dsm-install/logs
           if-no-files-found: warn
           retention-days: 30

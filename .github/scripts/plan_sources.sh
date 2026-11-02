@@ -16,7 +16,6 @@
 #   ALL_MODELS        全选 | 自选
 #   CUSTOM_MODELS     自定义型号（逗号分隔）
 #   MODEL_*           各型号勾选状态（字符串 true/false）
-#   BUILD_UPDATE_ZIP  2in1/rr：是否编译升级包
 #   BUILD_RR_ORIGINAL rr：是否生成原版 RR 镜像
 #
 # 输出（GITHUB_OUTPUT）：
@@ -46,7 +45,6 @@ ALL_MODELS="${ALL_MODELS:-全选}"
 CUSTOM_MODELS="${CUSTOM_MODELS:-}"
 DSM_VERSION="${DSM_VERSION:-}"
 RR_VERSION="${RR_VERSION:-}"
-BUILD_UPDATE_ZIP="${BUILD_UPDATE_ZIP:-false}"
 BUILD_RR_ORIGINAL="${BUILD_RR_ORIGINAL:-false}"
 
 if [ "${PRODUCT}" = "ova" ] && [ "${DSM_VERSION}" = "6.2.4" ]; then
@@ -154,12 +152,11 @@ done
 MODELS=("${UNIQ_MODELS[@]}")
 
 if [ "${#MODELS[@]}" -eq 0 ]; then
-  if [ "${PRODUCT}" = "ova" ]; then
+  # rr 允许只编原版 RR 镜像；其余产品必须至少勾选一个型号
+  if [ "${PRODUCT}" = "rr" ] && [ "${BUILD_RR_ORIGINAL}" = "true" ]; then
+    :
+  else
     echo "[E] 请至少勾选一个型号" >&2
-    exit 1
-  fi
-  if [ "${BUILD_UPDATE_ZIP}" != "true" ] && [ "${BUILD_RR_ORIGINAL}" != "true" ]; then
-    echo "[E] 请至少勾选一个型号，或勾选 update 包/原版 RR 编译" >&2
     exit 1
   fi
 fi
@@ -266,10 +263,6 @@ for src in "${SOURCES[@]}"; do
   for m in "${MODELS[@]}"; do
     printf '%s\t%s\t%s\n' "${src}" "${m}" "normal" >>"${TASKS_TSV}"
   done
-  # ── 任务：升级包（2in1/rr）──
-  if [ "${PRODUCT}" != "ova" ] && [ "${BUILD_UPDATE_ZIP}" = "true" ]; then
-    printf '%s\t%s\t%s\n' "${src}" "__UPDATE__" "update" >>"${TASKS_TSV}"
-  fi
   # ── 任务：原版 RR 镜像（仅 rr）──
   if [ "${PRODUCT}" = "rr" ] && [ "${BUILD_RR_ORIGINAL}" = "true" ]; then
     printf '%s\t%s\t%s\n' "${src}" "__RR_ORIGINAL__" "original" >>"${TASKS_TSV}"
