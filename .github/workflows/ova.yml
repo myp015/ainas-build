@@ -416,11 +416,11 @@ jobs:
           SAFE_TAG="${TAG//./_}"
           echo "SAFE_TAG=${SAFE_TAG}" >> "$GITHUB_ENV"
 
-          # 制品品牌随源区分：RROrg 源产物名带 RROrg-ova，ainas 源保持原命名
+          # 制品品牌随源区分：RROrg → RROrg，ainas → ainas
           if [ "${SOURCE}" = "RROrg" ]; then
-            ARTIFACT_BRAND="_RROrg-ova"
+            ARTIFACT_BRAND="_RROrg"
           else
-            ARTIFACT_BRAND=""
+            ARTIFACT_BRAND="_ainas"
           fi
           ARTIFACT="${MODEL}_${VER_SLUG}${ARTIFACT_BRAND}_${SAFE_TAG}"
           echo "[INFO] 型号=${MODEL} 目标DSM版本=${VERSION} DSM系列=${LINE_REQ} 制品版本=${VER_SLUG} 源=${SOURCE}"

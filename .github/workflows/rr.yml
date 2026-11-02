@@ -461,8 +461,8 @@ jobs:
           VER_BUILD="${VERSION#*-}"
           VER_BUILD="${VER_BUILD%%-*}"
           VER_SLUG="${VER_MAIN_NODOT}_${VER_BUILD}"
-          # 制品品牌随源区分：RROrg 源产物名带 RROrg-rr，ainas 源保持 rr
-          if [ "${SOURCE}" = "RROrg" ]; then ARTIFACT_BRAND="RROrg-rr"; else ARTIFACT_BRAND="rr"; fi
+          # 制品品牌随源区分：RROrg → RROrg_rr，ainas → ainas_rr
+          if [ "${SOURCE}" = "RROrg" ]; then ARTIFACT_BRAND="RROrg_rr"; else ARTIFACT_BRAND="ainas_rr"; fi
           if [ "${MODEL}" = "__RR_ORIGINAL__" ]; then
             ARTIFACT_NAME="${ARTIFACT_BRAND}-${RR_TAG}"
             echo "[INFO] 原版 RR 镜像任务：ARTIFACT_NAME=${ARTIFACT_NAME}"
