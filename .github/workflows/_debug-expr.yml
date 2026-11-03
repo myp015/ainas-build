@@ -1,0 +1,31 @@
+name: debug-expr
+on:
+  workflow_dispatch:
+    inputs:
+      rr_source:
+        type: choice
+        options:
+          - ainas
+          - RROrg
+          - both
+        default: ainas
+jobs:
+  plan:
+    runs-on: ubuntu-24.04
+    outputs:
+      source_mode: ${{ steps.a.outputs.source_mode }}
+    steps:
+      - id: a
+        run: echo "source_mode=both" >>"$GITHUB_OUTPUT"
+  j_needs:
+    needs: plan
+    if: needs.plan.outputs.source_mode == 'both'
+    runs-on: ubuntu-24.04
+    steps:
+      - run: echo "j_needs ran: [${{ needs.plan.outputs.source_mode }}]"
+  j_inputs:
+    needs: plan
+    if: inputs.rr_source == 'both'
+    runs-on: ubuntu-24.04
+    steps:
+      - run: echo "j_inputs ran"
