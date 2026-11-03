@@ -379,8 +379,11 @@ jobs:
           run_one base false "${CMD_DIR}/base.commands"
 
           # 2) modtest：挂模块盘，逐模块 insmod
+          # 脚本本身在模块盘上，必须先由命令文件挂载，不能靠脚本自举
           if [ "${RUN_MODULE_TEST}" = "true" ]; then
-            printf '%s\n' 'sh /mnt/modtest/payload/run-module-tests.sh' \
+            printf '%s\n' \
+              'dev=$(blkid -L MODTEST 2>/dev/null); if [ -z "$dev" ]; then for d in /dev/sd? /dev/vd?; do if [ -b "$d" ] && blkid "$d" 2>/dev/null | grep -q MODTEST; then dev="$d"; break; fi; done; fi; echo "MODTEST_DEV=$dev"; mkdir -p /mnt/modtest; mount -t ext4 -o rw "$dev" /mnt/modtest' \
+              'sh /mnt/modtest/payload/run-module-tests.sh' \
               > "${CMD_DIR}/modtest.commands"
             run_one modtest true "${CMD_DIR}/modtest.commands"
           fi

@@ -27,37 +27,49 @@ PROGRESS="${RESULTS}/progress"
 log() { echo "[modtest] $*"; }
 
 # ── 1. 挂载模块盘 ─────────────────────────────────────────────────────
+# 脚本自身就在模块盘上，无法自举挂载：CI 的命令文件会先挂载到 /mnt/modtest
+# 再执行本脚本。这里检测已挂载则直接使用；未挂载时按 LABEL 探测并挂载（兜底）。
 mkdir -p "${MOUNT}"
 DEV=""
-if command -v blkid >/dev/null 2>&1; then
-  DEV="$(blkid -L MODTEST 2>/dev/null || true)"
-  [ -n "${DEV}" ] || DEV="$(blkid 2>/dev/null | grep 'LABEL="MODTEST"' | cut -d: -f1 | head -n1)"
-fi
-if [ -z "${DEV}" ]; then
-  for d in /dev/sd? /dev/vd? /dev/hd?; do
-    [ -b "${d}" ] || continue
-    if dd if="${d}" bs=1024 skip=1024 count=1 2>/dev/null | strings | grep -q MODTEST; then
-      DEV="${d}"
-      break
-    fi
-  done
-fi
-if [ -z "${DEV}" ] || [ ! -b "${DEV}" ]; then
-  log "ERROR: 未找到 MODTEST 模块盘"
-  echo "@@MODTEST_DONE@@ total=0 loaded=0 ok=0 fail=0 skip=0 status=no_disk"
-  exit 1
-fi
-
-mkdir -p "${MOUNT}/results"
-if ! mount -t ext4 -o rw "${DEV}" "${MOUNT}" 2>/dev/null; then
-  modprobe ext4 >/dev/null 2>&1 || true
-  if ! mount -t ext4 -o rw "${DEV}" "${MOUNT}" 2>/dev/null; then
-    log "ERROR: 挂载 ${DEV} 失败"
-    echo "@@MODTEST_DONE@@ total=0 loaded=0 ok=0 fail=0 skip=0 status=mount_failed"
+if [ -f "${PAYLOAD}/module-list.tsv" ]; then
+  log "模块盘已由调用方挂载: ${MOUNT}"
+else
+  if command -v blkid >/dev/null 2>&1; then
+    DEV="$(blkid -L MODTEST 2>/dev/null || true)"
+    [ -n "${DEV}" ] || DEV="$(blkid 2>/dev/null | grep 'LABEL="MODTEST"' | cut -d: -f1 | head -n1)"
+  fi
+  if [ -z "${DEV}" ]; then
+    for d in /dev/sd? /dev/vd? /dev/hd?; do
+      [ -b "${d}" ] || continue
+      if blkid "${d}" 2>/dev/null | grep -q 'LABEL="MODTEST"'; then
+        DEV="${d}"
+        break
+      fi
+    done
+  fi
+  if [ -z "${DEV}" ] || [ ! -b "${DEV}" ]; then
+    log "ERROR: 未找到 MODTEST 模块盘"
+    echo "@@MODTEST_DONE@@ total=0 loaded=0 ok=0 fail=0 skip=0 status=no_disk"
     exit 1
   fi
+
+  mkdir -p "${MOUNT}/results"
+  if ! mount -t ext4 -o rw "${DEV}" "${MOUNT}" 2>/dev/null; then
+    modprobe ext4 >/dev/null 2>&1 || true
+    if ! mount -t ext4 -o rw "${DEV}" "${MOUNT}" 2>/dev/null; then
+      log "ERROR: 挂载 ${DEV} 失败"
+      echo "@@MODTEST_DONE@@ total=0 loaded=0 ok=0 fail=0 skip=0 status=mount_failed"
+      exit 1
+    fi
+  fi
+  log "模块盘已挂载: ${DEV}"
 fi
-log "模块盘已挂载: ${DEV}"
+
+[ -f "${PAYLOAD}/module-list.tsv" ] || {
+  log "ERROR: 模块盘上缺少 module-list.tsv"
+  echo "@@MODTEST_DONE@@ total=0 loaded=0 ok=0 fail=0 skip=0 status=no_list"
+  exit 1
+}
 
 mkdir -p "${RESULTS}"
 : >"${OUT}"
