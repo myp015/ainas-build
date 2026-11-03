@@ -120,12 +120,23 @@ def load_module_list(path):
         if len(parts) < 6:
             die("module-list.tsv 行格式非法: %r" % line)
         idx, name, rel, depends, srcver, policy = parts[:6]
+        # "-" 是清单里空字段的占位符（见 make_module_list.sh）
+        srcver = "" if srcver == "-" else srcver
         entries.append({"idx": int(idx), "name": name, "rel": rel,
                         "depends": depends, "srcver": srcver, "policy": policy})
     return entries
 
 
 def load_allowlist(path):
+    """读取白名单。
+
+    当前格式（8 列，TAB 分隔）：
+        platform  line  kver  model  kernel  name  category  reason
+    兼容旧的 7 列格式（无 kernel 列，等价 kernel=*）：
+        platform  line  kver  model  name  category  reason
+    kernel 列用于区分 official/custom：custom 构建的镜像与测试包同源，
+    任何身份/版本差异都是真缺陷，不应被 official 的豁免顺带掩盖。
+    """
     rows = []
     if not path:
         return rows
@@ -134,17 +145,19 @@ def load_allowlist(path):
         if not s or s.startswith("#"):
             continue
         parts = s.split("\t")
-        if len(parts) < 5:
-            die("白名单行格式非法: %r" % line)
-        if len(parts) >= 7:
-            category = parts[5]
-            reason = " ".join(parts[6:])
+        if len(parts) >= 8:
+            platform, ln, kver, model, kernel = parts[:5]
+            name, category, reason = parts[5], parts[6], " ".join(parts[7:])
+        elif len(parts) >= 7:
+            platform, ln, kver, model, name = parts[:5]
+            kernel, category, reason = "*", parts[5], " ".join(parts[6:])
         elif len(parts) == 6:
-            category, reason = "ENV", parts[5]
+            platform, ln, kver, model, name = parts[:5]
+            kernel, category, reason = "*", "ENV", parts[5]
         else:
-            category, reason = "ENV", ""
-        rows.append({"platform": parts[0], "line": parts[1], "kver": parts[2],
-                     "model": parts[3], "name": parts[4],
+            die("白名单行格式非法: %r" % line)
+        rows.append({"platform": platform, "line": ln, "kver": kver,
+                     "model": model, "kernel": kernel, "name": name,
                      "category": category, "reason": reason})
     return rows
 
@@ -156,6 +169,7 @@ def allowlisted(row, ctx):
             and match(row["line"], ctx["line"])
             and match(row["kver"], ctx["kver"])
             and match(row["model"], ctx["model"])
+            and match(row["kernel"], ctx["kernel"])
             and fnmatch.fnmatchcase(ctx["name"], row["name"])
             and row["category"] == ctx["category"])
 
@@ -204,11 +218,14 @@ def analyze(args):
             details = m.group(5)
             src_m = SRC_RE.search(details)
             pkg_m = PKG_RE.search(details)
+            pkg_val = pkg_m.group(1) if pkg_m else ""
+            if pkg_val == "-":
+                pkg_val = ""
             records.append({
                 "idx": int(m.group(1)), "name": m.group(2), "state": m.group(3),
                 "rc": m.group(4), "details": details,
                 "src": src_m.group(1) if src_m else "-",
-                "pkg": pkg_m.group(1) if pkg_m else "",
+                "pkg": pkg_val,
                 "err": "",
             })
             continue
@@ -252,6 +269,13 @@ def analyze(args):
             warnings_by_name[key] = warnings_by_name.get(key, 0) + 1
 
     allow_rows = load_allowlist(args.allowlist)
+
+    def is_allowed(name, category):
+        ctx = {"platform": args.platform, "line": args.line, "kver": args.kver,
+               "model": args.model, "kernel": args.kernel, "name": name,
+               "category": category}
+        return any(allowlisted(row, ctx) for row in allow_rows)
+
     failures, skips, stale = [], [], []
     hazard = 0
 
@@ -265,20 +289,19 @@ def analyze(args):
             sys_src = r["src"]
             if pkg_set and sys_src not in (None, "", "-") and sys_src not in pkg_set:
                 stale.append({**r, "category": "STALE_LOADED",
+                              "allowed": is_allowed(r["name"], "STALE_LOADED"),
                               "err": "运行时 srcversion=%s 不在包内 %s"
                                      % (sys_src, sorted(pkg_set))})
             continue
         if state != "INSMOD_FAIL" and state != "MISSING":
             # 未知状态按失败处理，避免静默
-            failures.append({**r, "category": "OTHER",
+            failures.append({**r, "category": "OTHER", "allowed": False,
                              "err": "未知状态: %s" % state})
             continue
 
         category = "MISSING" if state == "MISSING" else classify(r["err"])
-        ctx = {"platform": args.platform, "line": args.line, "kver": args.kver,
-               "model": args.model, "name": r["name"], "category": category}
         allowed = (category in ALLOWABLE_CATEGORIES
-                   and any(allowlisted(row, ctx) for row in allow_rows))
+                   and is_allowed(r["name"], category))
         item = {**r, "category": category, "allowed": allowed}
         if allowed:
             skips.append(item)
@@ -305,8 +328,10 @@ def analyze(args):
     skip = sum(1 for r in records if r["state"] in ("SKIP_UPDATE", "SKIP_HAZARD"))
 
     gates = []
-    def gate(gid, okflag, detail):
-        gates.append({"id": gid, "pass": bool(okflag), "detail": detail})
+    def gate(gid, okflag, detail, warn=False):
+        # warn=True 表示"报告但不阻断"：pass 恒真，输出 [WARN]
+        gates.append({"id": gid, "pass": True if warn else bool(okflag),
+                      "detail": detail, "level": "warn" if warn else "fail"})
 
     declared = done_kv or {}
     counts_ok = True
@@ -330,22 +355,38 @@ def analyze(args):
              ": " + ", ".join("%s(%s)" % (f["name"], f["category"]) for f in hard[:8])
              if hard else ""))
 
-    stale_fail = stale if not args.allow_stale_loaded else []
-    gate("G-M3", not stale_fail,
-         "STALE_LOADED %d 条（pkg 与运行内核不一致）" % len(stale))
+    # G-M3：运行中模块的 srcversion 不是测试包那一版。
+    #   - 非预装（镜像由本次模块包构建）：硬失败 —— 说明测的不是这一版；
+    #   - 预装（成品 OVA）：告警 —— 镜像内的模块取自 base rr.img 的构建，
+    #     与当前测试包本来就可能不同版本；已加载模块也不参与 insmod 测试。
+    #     差异仍逐条列进 summary/JSON，供判断 base 镜像是否过期。
+    stale_fail = [] if args.allow_stale_loaded else \
+        [s for s in stale if not s["allowed"]]
+    stale_detail = ("STALE_LOADED %d 条（pkg 与运行内核不一致）" % len(stale) + (
+        ": " + ", ".join("%s(src=%s pkg=%s)" % (s["name"], s["src"], s["pkg"])
+                         for s in stale_fail[:8]) if stale_fail else ""))
+    if args.prebuilt:
+        gate("G-M3", True, stale_detail + "（预装模式按告警处理）", warn=bool(stale_fail))
+    else:
+        gate("G-M3", not stale_fail, stale_detail)
 
     gate("G-M4", not kernel_faults,
          "内核崩溃/异常归因 %d 条" % len(kernel_faults))
 
     # P0-4 安装集核对
+    # guest 侧每行：<文件名>[TAB<srcversion>]（modinfo 不可用时只有文件名）
     installed_chunks = parse_section(lines, "installed")
-    installed = set()
+    installed, inst_src = set(), {}
     for c in installed_chunks:
         for line in c:
             s = line.strip()
             if not s or s.startswith("@@P|") or s.startswith("root@"):
                 continue
-            installed.add(s)
+            parts = s.split("\t", 1)
+            name = parts[0].strip()
+            installed.add(name)
+            if len(parts) > 1 and parts[1].strip() not in ("", "-"):
+                inst_src.setdefault(name, set()).add(parts[1].strip())
     boot_chunks = parse_section(lines, "bootloaded")
     boot_loaded = set()
     for c in boot_chunks:
@@ -355,25 +396,61 @@ def analyze(args):
                 continue
             boot_loaded.add(s.replace("-", "_"))
 
-    pkg_rel = {e["rel"] for e in module_list}
-    install_gap = sorted(pkg_rel - installed) if installed else []
-    install_extra = sorted(installed - pkg_rel)
-    if args.skip_install_check:
-        install_ok = True
-        install_detail = "已按参数跳过安装集核对"
-    else:
-        install_ok = bool(installed) and not install_gap
-        install_detail = ("installed=%d boot_loaded=%d gap=%d extra=%d"
-                          % (len(installed), len(boot_loaded),
-                             len(install_gap), len(install_extra)))
-    gate("G-M5", install_ok, install_detail)
+    # 安装目录只按文件名可见（root 与 update/ 同名无法区分），故按 basename 比较。
+    pkg_base, pkg_base_src = set(), {}
+    for e in module_list:
+        base = os.path.basename(e["rel"])
+        pkg_base.add(base)
+        if e["srcver"]:
+            pkg_base_src.setdefault(base, set()).add(e["srcver"])
+    install_gap = sorted(pkg_base - installed) if installed else []
+    install_extra = sorted(installed - pkg_base)
 
-    # 基线比较
-    baseline_new, baseline_gone, baseline_info = [], [], None
+    # 安装模块身份：装到系统里的 .ko 必须是本次测试包那一版（证明重建生效）。
+    identity = []
+    for name in sorted(set(inst_src) & pkg_base):
+        want = pkg_base_src.get(name)
+        if not want:
+            continue
+        have = inst_src[name]
+        if not (want & have):
+            identity.append({"name": name, "pkg": sorted(want),
+                             "installed": sorted(have)})
+
+    # 基线（失败集合 + 安装集缺口）在 G-M5 就要用，故此处先加载。
     baseline = None
     if args.baseline and os.path.isfile(args.baseline):
         with open(args.baseline, encoding="utf-8") as f:
             baseline = json.load(f)
+
+    # 预装模式：镜像内模块必然可能来自 base rr.img 的旧构建，缺口/身份只作告警；
+    # 非预装：缺口相对基线增量必须为 0（存量缺口是包内全量 vs 安装子集的结构差异，
+    # DSM 只安装官方映射子集，不能用全量相等当判据）。
+    new_gap = []
+    if baseline and args.module_limit == 0:
+        new_gap = sorted(set(install_gap) - set(baseline.get("install_gap", [])))
+    identity_bad = [x for x in identity
+                    if not is_allowed(x["name"], "INSTALLED_MISMATCH")]
+    probe_ok = bool(installed) and bool(boot_loaded)
+    install_ok = probe_ok and not new_gap and not identity_bad
+    install_detail = ("installed=%d boot_loaded=%d gap=%d extra=%d "
+                      "identity_mismatch=%d new_gap=%d"
+                      % (len(installed), len(boot_loaded), len(install_gap),
+                         len(install_extra), len(identity_bad), len(new_gap)))
+    if args.skip_install_check:
+        gate("G-M5", True, "已按参数跳过安装集核对")
+    elif args.prebuilt:
+        # 只有"相对基线新增缺口/安装身份不一致"值得告警；存量 gap/extra 是
+        # "DSM 安装子集 vs 包内全量"的结构差异，纯信息。
+        actionable = bool(new_gap) or bool(identity_bad)
+        gate("G-M5", probe_ok,
+             install_detail + ("（预装模式：差异只作告警）" if actionable else ""),
+             warn=probe_ok and actionable)
+    else:
+        gate("G-M5", install_ok, install_detail)
+
+    # G-M6 基线回归（失败集合新增 / 清单缩水）
+    baseline_new, baseline_gone, baseline_info = [], [], None
     shrink_ok = True
     if baseline and args.module_limit == 0:
         expected = int(baseline.get("module_count", 0))
@@ -428,7 +505,8 @@ def analyze(args):
         "context": {"source": args.source, "model": args.model,
                     "kernel": args.kernel, "platform": args.platform,
                     "line": args.line, "kver": args.kver,
-                    "profile": args.profile, "logs": args.logs},
+                    "profile": args.profile, "prebuilt": bool(args.prebuilt),
+                    "logs": args.logs},
         "totals": {"total": total, "loaded": loaded, "ok": ok,
                    "fail": fail, "skip": skip, "hazard": hazard},
         "declared": declared,
@@ -437,13 +515,16 @@ def analyze(args):
                        "err", "symbols")} for f in hard],
         "allowlisted": [{k: f.get(k) for k in
                          ("idx", "name", "category", "err")} for f in skips],
-        "stale_loaded": [{k: f.get(k) for k in ("name", "src", "pkg", "err")}
+        "stale_loaded": [{k: f.get(k) for k in
+                          ("name", "src", "pkg", "err", "allowed")}
                          for f in stale],
         "kernel_faults": kernel_faults,
         "dmesg_warnings": warning_faults,
         "firmware_fail": firmware_fail,
         "install": {"installed": len(installed), "boot_loaded": len(boot_loaded),
-                    "gap": install_gap, "extra": install_extra},
+                    "gap": install_gap, "extra": install_extra,
+                    "identity_mismatch": identity,
+                    "new_gap": new_gap},
         "baseline": {"new": baseline_new, "gone": baseline_gone},
         "kernel_identity": kernel_id,
         "package_meta": meta,
@@ -499,8 +580,11 @@ def emit(args, result):
     lines.append("")
     lines.append("## 门禁")
     for g in result["gates"]:
-        lines.append("- [%s] %s %s" % ("PASS" if g["pass"] else "FAIL",
-                                       g["id"], g["detail"]))
+        if g.get("level") == "warn":
+            mark = "WARN"
+        else:
+            mark = "PASS" if g["pass"] else "FAIL"
+        lines.append("- [%s] %s %s" % (mark, g["id"], g["detail"]))
     lines.append("")
     lines.append("## 失败明细")
     if result["failures"]:
@@ -519,7 +603,11 @@ def emit(args, result):
     lines.append("")
     lines.append("## STALE_LOADED（%d）" % len(result["stale_loaded"]))
     for f in result["stale_loaded"]:
-        lines.append("- %s: %s" % (f["name"], f.get("err", "")))
+        if f.get("allowed"):
+            tag = "白名单"
+        else:
+            tag = "WARN" if result["context"].get("prebuilt") else "FAIL"
+        lines.append("- %s [%s] %s" % (f["name"], tag, f.get("err", "")))
     lines.append("")
     lines.append("## 内核崩溃/告警")
     for f in result["kernel_faults"]:
@@ -533,11 +621,20 @@ def emit(args, result):
     lines.append("")
     inst = result["install"]
     lines.append("## 安装集")
-    lines.append("- installed=%d boot_loaded=%d gap=%d extra=%d"
+    lines.append("- installed=%d boot_loaded=%d gap=%d extra=%d "
+                 "identity_mismatch=%d new_gap=%d"
                  % (inst["installed"], inst["boot_loaded"],
-                    len(inst["gap"]), len(inst["extra"])))
+                    len(inst["gap"]), len(inst["extra"]),
+                    len(inst["identity_mismatch"]), len(inst["new_gap"])))
     if inst["gap"]:
-        lines.append("- 包内有但未安装: %s" % ", ".join(inst["gap"][:20]))
+        lines.append("- 包内有但未安装（DSM 只装映射子集，属常态）: %s"
+                     % ", ".join(inst["gap"][:20]))
+    if inst["new_gap"]:
+        lines.append("- 相对基线新增缺口: %s" % ", ".join(inst["new_gap"][:20]))
+    for x in inst["identity_mismatch"]:
+        lines.append("- 安装版与测试包不一致: %s（pkg=%s installed=%s）"
+                     % (x["name"], ",".join(x["pkg"]),
+                        ",".join(x["installed"])))
     lines.append("")
     lines.append("## 基线")
     lines.append("- 新增失败: %s" % (result["baseline"]["new"] or "无"))
@@ -560,6 +657,7 @@ def emit(args, result):
     candidate["failures"] = [{k: f.get(k) for k in ("name", "category", "err")}
                              for f in result["failures"]]
     candidate["module_count"] = len(load_module_list(args.module_list))
+    candidate["install_gap"] = result["install"]["gap"]
     with open(prefix + "-baseline-candidate.json", "w", encoding="utf-8") as f:
         json.dump(candidate, f, ensure_ascii=False, indent=2)
 
@@ -585,6 +683,9 @@ def main(argv):
     p.add_argument("--module-limit", type=int, default=0)
     p.add_argument("--allow-stale-loaded", action="store_true")
     p.add_argument("--allow-shrink", action="store_true")
+    p.add_argument("--prebuilt", action="store_true",
+                   help="预装成品 OVA 模式：镜像模块可能来自 base rr.img 旧构建，"
+                        "STALE/安装集差异降级为告警")
     p.add_argument("--skip-install-check", action="store_true",
                    help="仅用于回放历史日志（无 installed 段）")
     p.add_argument("--emit-baseline", default="")
@@ -641,7 +742,7 @@ def make_fixture(logs_dir, records, done=True, dmesg="", installed=None,
     if installed is not None:
         write(os.path.join(prof, "cmd-0.out"),
               "@@P|installed|begin\n%s\n@@P|installed|end\n"
-              "@@P|bootloaded|begin\n\n@@P|bootloaded|end\n"
+              "@@P|bootloaded|begin\nboot0\n@@P|bootloaded|end\n"
               "MODTEST_MOUNT_RC=0\n" % "\n".join(installed))
     list_path = os.path.join(logs_dir, "module-list.tsv")
     rows = []
@@ -690,6 +791,15 @@ def run_selftest():
     def emit_case(root, lp):
         return ["--emit-baseline", os.path.join(root, "emit.json")]
 
+    def baseline_install_case(root, lp):
+        path = os.path.join(root, "base.json")
+        write(path, json.dumps({"module_count": 1, "failures": [],
+                                "install_gap": []}))
+        return ["--baseline", path]
+
+    def prebuilt_case(root, lp):
+        return ["--prebuilt"]
+
     ok = "@@M|1|a|INSMOD_OK|0|src=x pkg=x err="
     cases = [
         scenario("S1 缺 DONE", 1, "G-M1", [ok], done=False,
@@ -710,7 +820,7 @@ def run_selftest():
                  ["@@M|1|a|LOADED|-|src=OLD pkg=NEW"],
                  installed=["a.ko"], pkg="NEW"),
         scenario("S7 全绿", 0, "[PASS] G-M1", [ok], installed=["a.ko"]),
-        scenario("S8 安装集缺口", 1, "G-M5", [ok], installed=["other.ko"]),
+        scenario("S8 安装集探针为空", 1, "G-M5", [ok], installed=[]),
         scenario("S9 内核崩溃归因", 1, "KERNEL_FAULT", [ok],
                  installed=["a.ko"],
                  dmesg="[  1.1] modtest-marker idx=1 name=a\n"
@@ -718,6 +828,14 @@ def run_selftest():
                        "[  1.3] Call Trace:\n"),
         scenario("S10 生成基线", 0, "G-M6", [ok], installed=["a.ko"],
                  extra=emit_case),
+        scenario("S11 预装模式 STALE 仅告警", 0, "[WARN] G-M3",
+                 ["@@M|1|a|LOADED|-|src=OLD pkg=NEW"],
+                 installed=["a.ko\tOLD"], pkg="NEW", extra=prebuilt_case),
+        scenario("S12 安装版与测试包不一致", 1, "安装版与测试包不一致",
+                 ["@@M|1|a|INSMOD_OK|0|src=NEW pkg=NEW err="],
+                 installed=["a.ko\tOLD"], pkg="NEW"),
+        scenario("S13 基线新增安装缺口", 1, "G-M5", [ok],
+                 installed=["other.ko"], extra=baseline_install_case),
     ]
 
     failed = 0

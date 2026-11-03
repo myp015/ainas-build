@@ -51,6 +51,9 @@ mark() {
 
 while IFS='	' read -r idx name rel depends ko_srcver policy; do
   [ -n "${idx}" ] || continue
+  # 清单用 "-" 占位空字段（空 depends/srcver 的连续 TAB 会被 read 折叠，
+  # 导致 pkg 取到 policy、hazard 策略丢失）。
+  [ "${ko_srcver}" = "-" ] && ko_srcver=""
   ko="${WORK}/${rel}"
   total=$((total + 1))
 

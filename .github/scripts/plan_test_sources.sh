@@ -19,13 +19,17 @@
 #   PREBUILT_VERSIONS  "ainas=26.11.0,RROrg=26.9.0"：各源成品 OVA 的版本号，
 #                  用于拼 Release 名 <source>-ova-<version>
 #   MODULES_VERSION   模块包版本（留空=取 myp015/syno-modules 最新 Release）
+#   KERNEL            official|custom（custom=aina-cks 自编 5.10.55 内核）
+#   CKS_VERSION       ainas-cks Release 版本（custom 时留空=用 rr.img p3 内置 cks 快照）
 #
 # 输出（GITHUB_OUTPUT）：
 #   base_tasks       [{source, rr_tag, rr_asset_url, release_tag, base_asset, docker_image, docker_tag}]
 #   tasks            [{source, model, model_slug, platform, kver, modules_key,
+#                      kernel, cks_version,
 #                      rr_tag, release_tag, base_asset, docker_image, docker_tag,
 #                      ova_release_tag, ova_asset_glob, modules_release_tag}]
 #   task_count
+#   kernel
 
 set -euo pipefail
 
@@ -60,6 +64,17 @@ case "${USE_PREBUILT}" in
   *) echo "[E] USE_PREBUILT 只允许 true/false: ${USE_PREBUILT}" >&2; exit 1 ;;
 esac
 
+KERNEL="${KERNEL:-official}"
+case "${KERNEL}" in
+  official|custom) ;;
+  *) echo "[E] KERNEL 只允许 official/custom: ${KERNEL}" >&2; exit 1 ;;
+esac
+CKS_VERSION="${CKS_VERSION:-}"
+if [ "${KERNEL}" = "custom" ] && [ "${USE_PREBUILT}" = "true" ]; then
+  echo "[E] 预装成品模式不能与自定义内核组合（预装 rr.img 已按官方内核安装）" >&2
+  exit 1
+fi
+
 MODULES_RELEASE_TAG="${MODULES_VERSION:-}"
 if [ "${USE_PREBUILT}" = "true" ] && [ -z "${MODULES_RELEASE_TAG}" ]; then
   # 最新模块包 Release（与主流程发布物同源）
@@ -70,6 +85,7 @@ if [ "${USE_PREBUILT}" = "true" ]; then
     echo "[E] 无法解析 syno-modules 最新 Release 版本" >&2; exit 1; }
 fi
 export USE_PREBUILT MODULES_RELEASE_TAG PREBUILT_VERSIONS DSM_VERSION RR_SOURCE
+export KERNEL CKS_VERSION
 
 # TEST_MODELS（逗号分隔）优先于 ALL_MODELS/MODEL_*：
 # 阶段 1 只跑一个型号，脚本把它翻译成 plan_sources.sh 认识的开关。
@@ -119,6 +135,17 @@ models = json.load(open(models_json, encoding="utf-8"))
 use_prebuilt = os.environ.get("USE_PREBUILT", "false") == "true"
 modules_release_tag = os.environ.get("MODULES_RELEASE_TAG", "")
 dsm_version = os.environ.get("DSM_VERSION", "")
+kernel = os.environ.get("KERNEL", "official")
+cks_version = os.environ.get("CKS_VERSION", "")
+
+# ainas-cks 支持矩阵（ainas-cks 仅有这些平台/版本的 bzImage 与模块包）
+CKS_SUPPORTED = {
+    "epyc7002": {"7.2", "7.3", "7.4"},
+    "geminilakenk": {"7.2", "7.3", "7.4"},
+    "r1000nk": {"7.2", "7.3", "7.4"},
+    "v1000nk": {"7.2", "7.3", "7.4"},
+}
+CKS_KVER = "5.10.55"
 
 # 预装成品 OVA 的版本映射：ainas=26.11.0,RROrg=26.9.0
 prebuilt_versions = {}
@@ -195,6 +222,12 @@ for src in sources_arg:
         if t.get("kind", "normal") != "normal":
             continue
         platform, kver = locate(model)
+        if kernel == "custom":
+            if platform not in CKS_SUPPORTED or line not in CKS_SUPPORTED[platform]:
+                raise SystemExit(
+                    "[E] %s/%s 不在 ainas-cks 支持矩阵（%s）" % (
+                        model, line, ", ".join(sorted(CKS_SUPPORTED))))
+            kver = CKS_KVER
         ova_release_tag = ""
         ova_asset_glob = ""
         if use_prebuilt:
@@ -211,6 +244,8 @@ for src in sources_arg:
             "platform": platform,
             "kver": kver,
             "modules_key": "%s-%s-%s" % (platform, line, kver),
+            "kernel": kernel,
+            "cks_version": cks_version,
             "rr_tag": cfg["rr_tag"],
             "release_tag": rel_tag,
             "base_asset": base_asset,
@@ -232,6 +267,7 @@ with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as f:
     f.write("task_count=%d\n" % len(tasks))
     # analyze job 用它判断是否双源（job 级 if 里 inputs 上下文不可靠，改走 plan 输出）
     f.write("source_mode=%s\n" % os.environ.get("RR_SOURCE", "ainas"))
+    f.write("kernel=%s\n" % kernel)
 
 print("[INFO] base 任务: %d，模型任务: %d" % (len(base_tasks), len(tasks)))
 for t in tasks:

@@ -40,6 +40,12 @@ PLATFORM="${10:-${MODULES_KEY%%-*}}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORKDIR="$PWD"
+
+# 预装 rr.img 已按官方内核安装，无法在测试阶段换成 cks 内核（build 已跳过）。
+if [ "${AINAS_KERNEL:-official}" = "custom" ]; then
+  echo "[E] 预装成品模式不支持自定义内核（需 use_prebuilt=false）" >&2
+  exit 1
+fi
 OVA_DIR="${WORKDIR}/.prebuilt-ova"
 RR_DIR="${WORKDIR}/rr"
 

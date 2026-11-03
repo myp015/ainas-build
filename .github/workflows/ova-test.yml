@@ -93,6 +93,17 @@ on:
         description: "模块包版本（留空=取 myp015/syno-modules 最新 Release）"
         type: string
         default: ""
+      kernel:
+        description: "内核类型（custom=ainas-cks 自编 5.10.55，需非预装）"
+        type: choice
+        options:
+          - official
+          - custom
+        default: official
+      cks_version:
+        description: "ainas-cks Release 版本（custom 时有效；留空=用 rr.img p3 内置 cks 快照）"
+        type: string
+        default: ""
 
 jobs:
   # 解析源版本、型号→平台映射，生成两个 matrix。
@@ -126,6 +137,8 @@ jobs:
           USE_PREBUILT: ${{ inputs.use_prebuilt }}
           PREBUILT_VERSIONS: ${{ inputs.prebuilt_versions }}
           MODULES_VERSION: ${{ inputs.modules_version }}
+          KERNEL: ${{ inputs.kernel }}
+          CKS_VERSION: ${{ inputs.cks_version }}
           MODELS_JSON: .2in1-plan/script/models.json
         run: bash .github/scripts/plan_test_sources.sh
 
@@ -302,7 +315,9 @@ jobs:
         include: ${{ fromJSON(needs.plan.outputs.tasks) }}
     env:
       LANGUAGE: zh_CN
-      KERNEL: official
+      AINAS_KERNEL: ${{ inputs.kernel }}
+      KERNEL: ${{ inputs.kernel }}
+      CKS_VERSION: ${{ inputs.cks_version }}
       ADDONS: acpid,reboottoloader,addincards,cpuinfo,expands,diskcompat,lsiutil,nvmevolume,powersched,remotefs,storagepanel,smartctl,trivial,apppatch,vmtools
       LINE: ${{ inputs.dsm_version }}
       SOURCE: ${{ matrix.source }}
@@ -322,6 +337,7 @@ jobs:
       SCSI_PROFILES: ${{ inputs.scsi_profiles }}
       RUN_BASE_PROFILE: ${{ inputs.run_base_profile }}
       RUN_MODULE_TEST: ${{ inputs.run_module_test }}
+      PREBUILT: ${{ inputs.use_prebuilt }}
       MODULE_LIMIT: ${{ inputs.module_limit }}
       BOOT_TIMEOUT: ${{ inputs.boot_timeout }}
     steps:
@@ -369,6 +385,8 @@ jobs:
       - name: 编译镜像并安装 DSM
         if: inputs.use_prebuilt != true
         shell: bash
+        env:
+          ACTION_TOKEN: ${{ secrets.AiNas }}
         run: |
           set -euo pipefail
 
@@ -422,6 +440,56 @@ jobs:
           [ -b "${DISK_LOOP}p3" ] || { echo "[E] 镜像分区未就绪：${DISK_LOOP}p3" >&2; exit 1; }
           sudo mkdir -p "$PART1_PATH" "$PART3_PATH"
 
+          # ── 自定义内核：先由宿主机准备 p3/cks ─────────────────────
+          # docker_build 会在容器内自行挂载 p3（宿主此时不能持有挂载），
+          # 所以覆盖/校验/取指纹必须在 docker_build 之前完成并 umount。
+          CKS_KEY="${PLATFORM}-${LINE%.*}-${KVER}"
+          if [ "${KERNEL}" = "custom" ]; then
+            : "${ACTION_TOKEN:?缺少 ACTION_TOKEN}"
+            echo "[INFO] 自定义内核资产: ${CKS_KEY}"
+            sudo mount "${DISK_LOOP}p3" "$PART3_PATH"
+            [ -d "$PART3_PATH/cks" ] || {
+              echo "[E] rr.img 的 p3 缺少 cks 目录" >&2; exit 1; }
+
+            if [ -n "${CKS_VERSION}" ]; then
+              echo "[INFO] 用 ainas-cks ${CKS_VERSION} 覆盖 p3/cks（仅取本平台三件套）"
+              CKS_DL="$WORKDIR/.cks-dl"
+              rm -rf "$CKS_DL"
+              mkdir -p "$CKS_DL/pkg"
+              export GH_TOKEN="$ACTION_TOKEN"
+              GH_REPO=myp015/ainas-cks gh release download "${CKS_VERSION}" \
+                --pattern "ainas-cks-${CKS_VERSION}.zip" --dir "$CKS_DL"
+              CKS_ZIP="$CKS_DL/ainas-cks-${CKS_VERSION}.zip"
+              [ -f "$CKS_ZIP" ] || {
+                echo "[E] 未下载到 ainas-cks-${CKS_VERSION}.zip" >&2; exit 1; }
+              unzip -o -j "$CKS_ZIP" \
+                "bzImage-${CKS_KEY}.gz" "modules-${CKS_KEY}.tgz" "firmware.tgz" \
+                -d "$CKS_DL/pkg" >/dev/null
+              sudo rm -rf "$PART3_PATH/cks"
+              sudo mkdir -p "$PART3_PATH/cks"
+              sudo cp "$CKS_DL/pkg/bzImage-${CKS_KEY}.gz" \
+                      "$CKS_DL/pkg/modules-${CKS_KEY}.tgz" \
+                      "$CKS_DL/pkg/firmware.tgz" "$PART3_PATH/cks/"
+              rm -rf "$CKS_DL"
+            fi
+
+            for f in "bzImage-${CKS_KEY}.gz" "modules-${CKS_KEY}.tgz" "firmware.tgz"; do
+              [ -f "$PART3_PATH/cks/$f" ] || {
+                echo "[E] p3/cks 缺少 ${f}（平台/DSM/内核=${CKS_KEY}）" >&2; exit 1; }
+            done
+
+            # 运行期身份判据：从 bzImage 提取 version/UTS，供门禁比对 /proc/version
+            gzip -dc "$PART3_PATH/cks/bzImage-${CKS_KEY}.gz" > /tmp/cks-bzImage
+            mkdir -p "$WORKDIR/modtest-meta"
+            file -b /tmp/cks-bzImage > "$WORKDIR/modtest-meta/cks-image-info.txt"
+            cat "$WORKDIR/modtest-meta/cks-image-info.txt"
+            grep -q ", version " "$WORKDIR/modtest-meta/cks-image-info.txt" || {
+              echo "[E] cks-image-info 无法解析: $(cat "$WORKDIR/modtest-meta/cks-image-info.txt")" >&2
+              exit 1; }
+            rm -f /tmp/cks-bzImage
+            sudo umount "$PART3_PATH"
+          fi
+
           docker_build rr "$MODEL" "$VERSION" "$LANGUAGE" "$ADDONS" "$RR_DOCKER_TAG" \
             "$WORKDIR"
 
@@ -438,19 +506,29 @@ jobs:
           # ── 取出本平台模块包，供模块测试盘使用 ──────────────────────
           MODS_DIR="${PART3_PATH}/modules"
           SELECTED=""
-          PREFERRED="${MODS_DIR}/${MODULES_KEY}.tgz"
-          if [ -f "${PREFERRED}" ]; then
-            SELECTED="${PREFERRED}"
+          if [ "${KERNEL}" = "custom" ]; then
+            # custom 内核必须用 cks 内的模块包（与 bzImage 同源），并覆盖
+            # p3/modules 同名包，保证 guest 侧统一按 modules/<key>.tgz 读取。
+            SELECTED="${PART3_PATH}/cks/modules-${MODULES_KEY}.tgz"
+            [ -f "${SELECTED}" ] || {
+              echo "[E] p3/cks 缺少 modules-${MODULES_KEY}.tgz" >&2; exit 1; }
+            sudo cp -f "${SELECTED}" "${MODS_DIR}/${MODULES_KEY}.tgz"
+            echo "[INFO] 自定义内核模块包: $(basename "${SELECTED}")"
           else
-            SELECTED="$(find "${MODS_DIR}" -maxdepth 1 -type f -name "*${KVER}*.tgz" | sort | head -n1)"
+            PREFERRED="${MODS_DIR}/${MODULES_KEY}.tgz"
+            if [ -f "${PREFERRED}" ]; then
+              SELECTED="${PREFERRED}"
+            else
+              SELECTED="$(find "${MODS_DIR}" -maxdepth 1 -type f -name "*${KVER}*.tgz" | sort | head -n1)"
+            fi
+            [ -n "${SELECTED}" ] || \
+              SELECTED="$(find "${MODS_DIR}" -maxdepth 1 -type f -name '*.tgz' | sort | head -n1)"
+            if [ -z "${SELECTED}" ]; then
+              echo "[E] p3/modules 下未找到任何 .tgz（平台=${PLATFORM} 内核=${KVER}）" >&2
+              exit 1
+            fi
+            echo "[INFO] 模块包: $(basename "${SELECTED}")"
           fi
-          [ -n "${SELECTED}" ] || \
-            SELECTED="$(find "${MODS_DIR}" -maxdepth 1 -type f -name '*.tgz' | sort | head -n1)"
-          if [ -z "${SELECTED}" ]; then
-            echo "[E] p3/modules 下未找到任何 .tgz（平台=${PLATFORM} 内核=${KVER}）" >&2
-            exit 1
-          fi
-          echo "[INFO] 模块包: $(basename "${SELECTED}")"
           cp -f "${SELECTED}" "$WORKDIR/modules-test.tgz"
 
           # ── 模块测试清单与 guest 脚本写入 p3 ────────────────────────
@@ -471,7 +549,7 @@ jobs:
             payload_sha="$(sha256sum "$WORKDIR/modules-test.tgz" | cut -d' ' -f1)"
             entries="$(tar tzf "${SELECTED}" | grep -c '\.ko$' || true)"
             {
-              echo "kernel=official"
+              echo "kernel=${KERNEL}"
               echo "source=${SOURCE}"
               echo "model=${MODEL}"
               echo "platform=${PLATFORM}"
@@ -567,7 +645,7 @@ jobs:
             : "${MODULES_KEY:?缺少 MODULES_KEY}"
             printf '%s\n' \
               'echo "@@P|kernelid|begin"; uname -a; cat /proc/version; cat /proc/cmdline; cat /sys/devices/system/cpu/possible 2>/dev/null; cat /sys/devices/system/cpu/online 2>/dev/null; echo "@@P|kernelid|end"' \
-              'echo "@@P|installed|begin"; for d in /usr/lib/modules /lib/modules/$(uname -r); do [ -d "$d" ] || continue; find "$d" -maxdepth 3 -name "*.ko" 2>/dev/null; done | while read -r p; do case "$p" in */updates/*|*/update/*) echo "update/${p##*/}";; *) echo "${p##*/}";; esac; done | sort -u; echo "@@P|installed|end"; echo "@@P|bootloaded|begin"; cut -d" " -f1 /proc/modules 2>/dev/null | sort -u; echo "@@P|bootloaded|end"' \
+              'echo "@@P|installed|begin"; for d in /usr/lib/modules /lib/modules/$(uname -r); do [ -d "$d" ] || continue; find "$d" -name "*.ko" 2>/dev/null; done | while read -r p; do n=${p##*/}; s=$(modinfo -F srcversion "$p" 2>/dev/null); [ -n "$s" ] || s=-; printf "%s\t%s\n" "$n" "$s"; done | sort -u; echo "@@P|installed|end"; echo "@@P|bootloaded|begin"; cut -d" " -f1 /proc/modules 2>/dev/null | sort -u; echo "@@P|bootloaded|end"' \
               'echo 1 > /proc/sys/kernel/syno_install_flag; mkdir -p /mnt/modtest; cd /dev; blkid synoboot3 2>&1; mount -t ext4 synoboot3 /mnt/modtest; rc=$?; echo "MODTEST_MOUNT_RC=$rc"; ls /mnt/modtest 2>&1 | head -n 20' \
               "sh /mnt/modtest/modtest/run-module-tests.sh ${MODULES_KEY}" \
               > "${CMD_DIR}/modtest.commands"
@@ -591,15 +669,25 @@ jobs:
           META="$WORKDIR/modtest-meta/module-list.tsv"
           [ -f "$META" ] || {
             echo "[E] 缺少模块清单 $META（模块测试未准备成功）" >&2; exit 1; }
+          EXTRA=()
+          if [ "$KERNEL" = "custom" ]; then
+            EXTRA+=(--cks-image-info "$WORKDIR/modtest-meta/cks-image-info.txt")
+          fi
+          # 预装成品 OVA：镜像内模块来自 base rr.img 的旧构建，与本次测试包
+          # 本来就可能不同版本，STALE/安装集差异降级为告警（非预装仍硬失败）。
+          if [ "${PREBUILT:-false}" = "true" ]; then
+            EXTRA+=(--prebuilt)
+          fi
           python3 -I .github/scripts/modtest/parse_results.py \
             --logs /tmp/modtest-logs --profile modtest \
             --module-list "$META" \
-            --source "$SOURCE" --model "$MODEL" --kernel official \
+            --source "$SOURCE" --model "$MODEL" --kernel "$KERNEL" \
             --platform "$PLATFORM" --line "$LINE" --kver "$KVER" \
             --allowlist .github/scripts/modtest/env-fail-allowlist.tsv \
-            --baseline ".github/scripts/modtest/baseline/${PLATFORM}-${LINE}-${KVER}-official.json" \
+            --baseline ".github/scripts/modtest/baseline/${PLATFORM}-${LINE}-${KVER}-${KERNEL}.json" \
             --meta "$WORKDIR/modtest-meta/modtest-meta.txt" \
             --module-limit "${MODULE_LIMIT:-0}" \
+            "${EXTRA[@]}" \
             --out-prefix /tmp/modtest-logs/modtest-result
 
       - name: 安装/测试失败时收尾并保存镜像
@@ -630,7 +718,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: modtest-${{ matrix.source }}-${{ matrix.model_slug }}
+          name: modtest-${{ matrix.source }}-${{ matrix.model_slug }}-${{ inputs.kernel }}
           path: |
             /tmp/modtest-logs
             /tmp/dsm-install/logs

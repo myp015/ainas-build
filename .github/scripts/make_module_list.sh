@@ -20,6 +20,7 @@
 #
 # 输出文件：
 #   <输出目录>/module-list.tsv   idx name rel depends ko_srcver policy
+#                                 （depends/ko_srcver 为空时写 "-"，防止 read 折叠空列）
 #   <输出目录>/run-module-tests.sh（由调用方复制 guest 脚本）
 #
 # 说明：不再生成独立的 ext4 模块盘。实测 DSM 会把额外的 USB 存储命名为
@@ -168,15 +169,18 @@ lines = []
 idx = 0
 for e in ordered:
     idx += 1
+    # 空字段必须写 "-"：guest 侧 `IFS=<TAB> read` 会把连续的 TAB 折叠成一个
+    # 分隔符（TAB 属空白类 IFS），空 depends/srcver 会让后续列整体左移 ——
+    # 实测后果是 pkg 变成 policy 值（pkg=root）、hazard 策略丢失（不再跳过）。
     lines.append("%d\t%s\t%s\t%s\t%s\t%s" % (
-        idx, e["name"], e["rel"], e["depends"].replace("\t", " "),
-        e["srcver"], e["policy"]))
+        idx, e["name"], e["rel"], e["depends"].replace("\t", " ") or "-",
+        e["srcver"] or "-", e["policy"]))
 for e in entries:
     if e["policy"] == "update" and by_name.get(norm(e["name"]), {}).get("rel") != e["rel"]:
         idx += 1
         lines.append("%d\t%s\t%s\t%s\t%s\t%s" % (
-            idx, e["name"], e["rel"], e["depends"].replace("\t", " "),
-            e["srcver"], e["policy"]))
+            idx, e["name"], e["rel"], e["depends"].replace("\t", " ") or "-",
+            e["srcver"] or "-", e["policy"]))
 
 total = len(lines)
 if limit > 0 and total > limit:
