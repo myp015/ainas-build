@@ -24,7 +24,12 @@
 - [x] 8. CI smoke：单型号单源跑通（SA6400 × ainas）。run 41593744122：
       `mount -t ext4 synoboot3` 成功（LABEL=RR3），20 个模块全部有结果
       （loaded=7 / ok=10 / fail=3），`@@MODTEST_DONE@@` 正常收尾
-- [ ] 9. 阶段 2：双源 + SCSI 3 型 + 启动日志归一化 diff
+- [x] 9. 阶段 2：双源 + SCSI 3 型 + 启动日志归一化 diff
+      （run 41610717372：双源 × 5 profile 全绿，三型设备均被对应驱动识别）
+- [x] 10. 全量模块一次性验证（module_limit=0）：run 41613847561（514 条，9分13秒），
+      发现连字符依赖排序缺陷 → 修复后 run 41616244893 全绿，fail 66→21
+- [ ] 11. 残余 21 个失败分类：17 个为环境/硬件缺失（正常），4 个 Unknown symbol
+      （nf_socket_ipv6/nf_tproxy_ipv6 及级联 xt_socket/xt_TPROXY）待决策修复方式
 
 ## 进度
 - 2026-11-03：脚本与 workflow 落地；本地用 epyc7002-7.4-5.10.55（495 个 .ko）生成模块盘通过，
@@ -56,7 +61,11 @@
   `MODTEST_MOUNT_RC=0`，脚本解包 `modules/epyc7002-7.4-5.10.55.tgz` 并逐个 insmod，
   20 条 `@@M|` 结果 + `@@MODTEST_DONE@@ total=20 loaded=7 ok=10 fail=3 skip=0`。
   失败样例：acpi_cpufreq（No such device，QEMU 无对应 CPU）、aic8800_fdrv/aic94xx
-  （Unknown symbol，依赖未先加载）——待阶段 2 逐条核对依赖拓扑。
+  （Unknown symbol，依赖未先加载）——**已由依赖切分修复解决**（见实机验证段）。
+- 2026-11-03：阶段 2 前本地校验：三种 SCSI 设备命令行在 QEMU 10.0.13 上语法通过
+  （virtio-scsi-pci/megasas/mptsas1068 + scsi-hd 挂 bus），render_test_compose.sh
+  对真实 compose 渲染四种 profile 结果正确（container_name/restart/ARGUMENTS 注入）。
+  探针增加 `scsi_host proc_name`、`/sys/bus/scsi/devices`、dmesg 关键行 grep。
 - 2026-11-03：用户指令：测试工作流取消耗时步骤——`patch_cpuinfo`、`patch_ram`
   （unpackInitrd 解包 initrd-rr / 生成语言文件 / rr menu.sh 升级菜单 / repackInitrd）；
   base 上传到独立命名的 Release 以便重复调用。已在 prepare-base 中跳过两个补丁，
@@ -93,6 +102,27 @@
 - 2026-11-03：run 41607024004（prebuilt 双源、仅 base profile）验证 analyze：
   加入 `always() + needs 结果检查` 后对比 job 正常运行并产出 bootlog-diff，
   证明此前被跳过是「被跳过的 prepare-base 祖先」影响了隐式 success() 语义。
+- 2026-11-03：run 41610717372（双源 + 全部三型 SCSI + 20 条 smoke）全绿（20m52s）：
+  每源 5 次启动（base/modtest/virtio-scsi/megaraid/mptsas），三型设备均被识别：
+  virtio_scsi → `scsi host18 proc_name=virtio_scsi`、sata3=QEMU HARDDISK；
+  megaraid_sas（ainas 版为 syno `megaraid_sas_pdoff`）→ scsi 18:2:0:0；
+  mptsas → `proc_name=mptsas`，scsi 6:0:0:0。双源 bootlog-diff 已产出。
+- 2026-11-03：全量模块一次性验证（module_limit=0，单源预装）run 41613847561：
+  514 条 `total=514 loaded=83 ok=365 fail=66`，总耗时 9分13秒。
+- **全量暴露第二依赖缺陷**：`modinfo -F name` 是下划线名（snd_hda_codec），
+  `depends` 字段是连字符名（snd-hda-core,snd-pcm,i915-compat）→ 原样查表查不到，
+  依赖从不前置。修复（norm 连字符→下划线）后本地清单 514 条 0 违例；
+  run 41616244893：`total=514 loaded=83 ok=410 fail=21`，全量一次跑完约 9 分钟。
+- 残余失败分类：17 个环境/硬件缺失（acpi_cpufreq/coretemp/intel_idle/it87/gpio_*/
+  kvm_amd/kvm_intel/cpufreq_userspace/binder_linux/ch35x_38x/syno_hddpwrctl_test 等，
+  均属预期）；4 个 Unknown symbol：nf_socket_ipv6、nf_tproxy_ipv6 及级联
+  xt_socket、xt_TPROXY。根因：defines 打开了 CONFIG_NF_SOCKET_IPV6/NF_TPROXY_IPV6=m，
+  我方 nf_socket_ipv6.ko 导入 `udp6_lib_lookup`（仅当该配置在**内核**里开启时 ipv6.ko
+  才导出）；官方 DSM 7.4 内核未开启该配置（官方 ipv6.ko 只有 `__udp6_lib_lookup`），
+  且官方包本就不含这 4 个模块。RR 的 nf_socket_ipv6.ko 导入的是 `__udp6_lib_lookup`
+  （与官方内核兼容）。
+- 速度结论：模块全量验证 = 一次启动（base 基线可关，约 6 分钟）；SCSI 三型各需
+  一次启动（用于启动日志对比），与模块测试相比是额外 3 次启动，不是模块数导致。
 - 2026-11-03：run 41608661790（prebuilt 双源、modtest 20 条）全绿：
   `total=20 loaded=9 ok=10 fail=1`（修复前 fail=3）；9pnet_virtio 现在
   INS_MOD_OK，aic8800_fdrv 因依赖排序后移出前 20；唯一失败 acpi_cpufreq = QEMU CPU 无接口。
