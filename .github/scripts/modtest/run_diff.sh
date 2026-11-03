@@ -21,7 +21,13 @@ mkdir -p "${OUT}"
 
 shopt -s nullglob
 pairs=0
+found_ainas=0
+found_rro=0
+for rr_dir in "${ROOT}"/modtest-RROrg-*; do
+  found_rro=1
+done
 for ainas_dir in "${ROOT}"/modtest-ainas-*; do
+  found_ainas=1
   slug="${ainas_dir##*modtest-ainas-}"
   rr_dir="${ROOT}/modtest-RROrg-${slug}"
   if [ ! -d "${rr_dir}" ]; then
@@ -43,4 +49,10 @@ for ainas_dir in "${ROOT}"/modtest-ainas-*; do
 done
 
 echo "[INFO] 完成配对 ${pairs} 组，输出目录: ${OUT}"
-[ "${pairs}" -gt 0 ] || { echo "[E] 没有任何可配对日志" >&2; exit 1; }
+
+# 单源运行（rr_source=ainas 或 RROrg）没有对照可做，正常跳过。
+if [ "${found_ainas}" -eq 0 ] || [ "${found_rro}" -eq 0 ]; then
+  echo "[INFO] 单源 artifact（ainas=${found_ainas} RROrg=${found_rro}），跳过双源对比"
+  exit 0
+fi
+[ "${pairs}" -gt 0 ] || { echo "[E] 双源 artifact 存在但没有任何可配对日志" >&2; exit 1; }

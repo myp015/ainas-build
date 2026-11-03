@@ -581,13 +581,13 @@ jobs:
           if-no-files-found: warn
           retention-days: 30
 
-  # 只在双源时启用：按 (型号, profile) 配对 ainas/RROrg 的启动日志并归一化 diff。
+  # 按 (型号, profile) 配对 ainas/RROrg 的启动日志并归一化 diff。
+  # 注意：不要在 job 级用 `if: inputs...`/`needs...` 判断双源——run 41601772843/
+  # 41603509183 里 rr_source=both 却都被跳过（job 级条件求值不可靠）。
+  # 改为总是运行，由 run_diff.sh 根据实际 artifact 判断是否双源。
   analyze:
     name: 启动日志对比
     needs: [plan, build-install]
-    # job 级 if 里 inputs 上下文在 workflow_dispatch 下不可靠（run 41601772843
-    # 明明 rr_source=both 却被跳过），改用 plan 输出。
-    if: needs.plan.outputs.source_mode == 'both'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
@@ -601,6 +601,7 @@ jobs:
 
       - name: 归一化并对比
         shell: bash
+        # 单源时 run_diff.sh 直接跳过（退出 0）；双源缺配对才失败
         run: bash .github/scripts/modtest/run_diff.sh logs /tmp/bootlog-diff
 
       - name: 上传对比结果
