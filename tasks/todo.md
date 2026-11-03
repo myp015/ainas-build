@@ -74,3 +74,19 @@
 
 ## Review
 （完成后补写）
+
+## 实机验证（bj3_dsm，DS918+/apollolake/4.4.302/DSM 7.4.1-90080）
+
+- 2026-11-03：按用户要求在实机先跑通再回灌工作流。只读挂载 `/dev/synoboot3`
+  （LABEL=RAMDISK，ext4，2.0G，已用 719M）确认 p3 有 `modules/apollolake-7.4-4.4.302.tgz`；
+  在 DSM 本机生成清单（`modtest/module-list.tsv`）并执行
+  `run-module-tests.sh apollolake-7.4-4.4.302`，安全档 20 条结果正常回读。
+- **根因（实机实锤）**：`modinfo -F depends` 输出是逗号分隔
+  （如 `cfg80211,aic_load_fw,usbcore`），`make_module_list.sh` 只按空白切分，
+  多依赖模块的依赖从未被拓扑排序前置 → CI 与实机都出现 aic8800_fdrv / 9pnet_virtio
+  `Unknown symbol`。修复为按 `[,\s]+` 切分后，实机验证：
+  `rfkill → cfg80211 → aic_load_fw → aic8800_fdrv` 全部 insmod 成功，
+  `virtio → virtio_ring → 9pnet_virtio` 成功；前 20 条重跑
+  `total=20 loaded=16 ok=3 fail=1`（唯一失败 acpi_cpufreq = 实机 CPU 无对应接口，
+  属设备差异，非加载顺序问题）。
+- 实机全程不 rmmod（安全档），已加载模块仅记录 srcversion。

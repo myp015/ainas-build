@@ -36,7 +36,7 @@ mkdir -p "${EXTRACT}" "${OUT_DIR}"
 tar xzf "${MODULES_TGZ}" -C "${EXTRACT}"
 
 python3 - "${EXTRACT}" "${OUT_DIR}/module-list.tsv" "${LIMIT}" "${KVER}" <<'PY'
-import os, subprocess, sys
+import os, re, subprocess, sys
 
 root, out, limit, kver = sys.argv[1], sys.argv[2], int(sys.argv[3]), sys.argv[4]
 
@@ -95,7 +95,10 @@ def visit(name):
     if name in visiting:
         return  # 循环依赖：交给后续追加
     visiting.add(name)
-    for dep in by_name[name]["depends"].split():
+    # modinfo -F depends 是逗号分隔（如 "cfg80211,aic_load_fw,usbcore"），
+    # 早先只按空白切分导致多依赖模块的依赖从未被提前排序加载
+    # （aic8800_fdrv / 9pnet_virtio 因此 Unknown symbol）。
+    for dep in re.split(r"[,\s]+", by_name[name]["depends"]):
         dep = dep.strip()
         if dep:
             visit(dep)
