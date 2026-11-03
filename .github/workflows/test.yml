@@ -11,13 +11,26 @@ name: Test build modules
 
 on:
   workflow_dispatch:
+    inputs:
+      targets:
+        description: '编译目标 JSON 数组，元素含 version/platform（按需只跑部分平台）'
+        required: true
+        default: >-
+          [{"version":"7.1","platform":"broadwell"},
+          {"version":"7.4","platform":"broadwell"},
+          {"version":"7.1","platform":"v1000"},
+          {"version":"7.4","platform":"r1000"},
+          {"version":"7.4","platform":"epyc7002"},
+          {"version":"7.1","platform":"epyc7002"}]
 
 jobs:
   build:
     strategy:
       fail-fast: false
       matrix:
-        include:
+        include: ${{ fromJSON(inputs.targets) }}
+        # 说明：include 列表改为由 workflow_dispatch 输入 targets 驱动，
+        # 下方注释保留历次矩阵的验证背景，具体目标值见 inputs.targets 默认值。
           # ============ Task#193 与 RR 同样不可加载的模块修复验证 ====
           # 背景：Task#192 把 4.x 残余 35 个不可解析符号判为"与 RR 同样的生态状态、
           # 不修"。本轮复核后只剩两族真缺陷（另 2 个符号 amd_e400_c1e_detected /
@@ -44,14 +57,6 @@ jobs:
           # 平台覆盖：4.4 两树 × MY_DEF_HERE 平台（v1000/r1000，index_get 被官方
           # 导出的那类）+ 非 MY_DEF_HERE 平台 broadwell（index_get 不导出）。其余
           # 4.x 平台改动同形，由下一次 modules.yml 全量发布构建复核。
-          - version: "7.1"
-            platform: broadwell
-          - version: "7.4"
-            platform: broadwell
-          - version: "7.1"
-            platform: v1000
-          - version: "7.4"
-            platform: r1000
 
           # ============ 5.10 主线 drivers/scsi 官方化验证 ============
           # 背景：src/5.10.55/drivers/scsi 14 个文件（B 类 11 + C 类 3）按官方 GPL
@@ -65,10 +70,6 @@ jobs:
           #   - 全部 scsi 系 .ko 的 UND ⊆ 官方导出面 ∪ 本 target 导出面；
           #   - 所有 target 编译零错误。
           # 版本取 7.4（最新 dev KSRC）与 7.1（最老 dev KSRC），覆盖头文件跨度。
-          - version: "7.4"
-            platform: epyc7002
-          - version: "7.1"
-            platform: epyc7002
 
     runs-on: ubuntu-24.04
     steps:
