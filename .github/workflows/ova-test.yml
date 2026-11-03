@@ -102,6 +102,7 @@ jobs:
 
   # 公共 base：每个源只做一次，用 artifact 传给下游（不写 Release）。
   prepare-base:
+    name: prepare-base (${{ matrix.source }})
     needs: [plan]
     runs-on: ubuntu-24.04
     strategy:
@@ -419,5 +420,34 @@ jobs:
           path: |
             /tmp/modtest-logs
             /tmp/dsm-install/logs
+          if-no-files-found: warn
+          retention-days: 30
+
+  # 只在双源时启用：按 (型号, profile) 配对 ainas/RROrg 的启动日志并归一化 diff。
+  analyze:
+    name: 启动日志对比
+    needs: [plan, build-install]
+    if: inputs.rr_source == 'both'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: 下载双源测试日志
+        uses: actions/download-artifact@v4
+        with:
+          pattern: modtest-*
+          path: logs
+          merge-multiple: false
+
+      - name: 归一化并对比
+        shell: bash
+        run: bash .github/scripts/modtest/run_diff.sh logs /tmp/bootlog-diff
+
+      - name: 上传对比结果
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bootlog-diff
+          path: /tmp/bootlog-diff
           if-no-files-found: warn
           retention-days: 30

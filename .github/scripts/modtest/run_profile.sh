@@ -21,6 +21,9 @@ CMD_FILE="${5:?缺少命令文件}"
 LOGDIR="${6:?缺少日志目录}"
 DRIVER="${7:?缺少串口驱动路径}"
 
+# 必须在 cd 之前解析：调用方可能用相对路径（CI 传 .github/scripts/modtest/...）
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 CONTAINER="dsm"
 RRDIR="${WORKDIR}/rr"
 COMPOSE_DST="${RRDIR}/docker-compose.test.yaml"
@@ -34,7 +37,7 @@ if [ "${PROFILE}" != "base" ]; then
 fi
 
 echo "[profile:${PROFILE}] 渲染测试 compose"
-bash "$(dirname "${BASH_SOURCE[0]}")/../render_test_compose.sh" \
+bash "${SCRIPT_DIR}/../render_test_compose.sh" \
   "${COMPOSE_SRC}" "${COMPOSE_DST}" "${PROFILE}" "${WITH_MODDISK}" || exit 1
 
 cleanup() {
