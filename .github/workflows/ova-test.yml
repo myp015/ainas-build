@@ -588,6 +588,10 @@ jobs:
   analyze:
     name: 启动日志对比
     needs: [plan, build-install]
+    # 不加 if 时 GitHub 仍会在依赖 job 的 needs 判定后跳过（run 41605402797：
+    # plan 与两个 install+test 均 success，analyze 仍 0 步 skipped）。显式
+    # always()+结果检查，避免 needs 的隐式 success() 语义干扰。
+    if: ${{ always() && needs.plan.result == 'success' && needs.build-install.result == 'success' }}
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
