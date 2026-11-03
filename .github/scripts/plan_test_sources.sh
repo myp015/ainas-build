@@ -69,7 +69,7 @@ if [ "${USE_PREBUILT}" = "true" ]; then
   [ -n "${MODULES_RELEASE_TAG}" ] || {
     echo "[E] 无法解析 syno-modules 最新 Release 版本" >&2; exit 1; }
 fi
-export USE_PREBUILT MODULES_RELEASE_TAG PREBUILT_VERSIONS DSM_VERSION
+export USE_PREBUILT MODULES_RELEASE_TAG PREBUILT_VERSIONS DSM_VERSION RR_SOURCE
 
 # TEST_MODELS（逗号分隔）优先于 ALL_MODELS/MODEL_*：
 # 阶段 1 只跑一个型号，脚本把它翻译成 plan_sources.sh 认识的开关。
@@ -230,6 +230,8 @@ with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as f:
     f.write("base_tasks=" + dump(base_tasks) + "\n")
     f.write("tasks=" + dump(tasks) + "\n")
     f.write("task_count=%d\n" % len(tasks))
+    # analyze job 用它判断是否双源（job 级 if 里 inputs 上下文不可靠，改走 plan 输出）
+    f.write("source_mode=%s\n" % os.environ.get("RR_SOURCE", "ainas"))
 
 print("[INFO] base 任务: %d，模型任务: %d" % (len(base_tasks), len(tasks)))
 for t in tasks:

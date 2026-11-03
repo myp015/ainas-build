@@ -98,6 +98,7 @@ jobs:
       base_tasks: ${{ steps.plan.outputs.base_tasks }}
       tasks: ${{ steps.plan.outputs.tasks }}
       task_count: ${{ steps.plan.outputs.task_count }}
+      source_mode: ${{ steps.plan.outputs.source_mode }}
     steps:
       - uses: actions/checkout@v7
 
@@ -584,7 +585,9 @@ jobs:
   analyze:
     name: 启动日志对比
     needs: [plan, build-install]
-    if: inputs.rr_source == 'both'
+    # job 级 if 里 inputs 上下文在 workflow_dispatch 下不可靠（run 41601772843
+    # 明明 rr_source=both 却被跳过），改用 plan 输出。
+    if: needs.plan.outputs.source_mode == 'both'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
