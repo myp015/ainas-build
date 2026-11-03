@@ -374,13 +374,15 @@ jobs:
               "${cmd}" "${LOG_DIR}" "${DRIVER}"
           }
 
-          # base profile：启动日志基线；开启模块测试时挂模块盘
+          # 1) base：不挂模块盘，只做启动日志与设备基线（也是双源对比的干净基线）
+          cp .github/scripts/modtest/probe.commands "${CMD_DIR}/base.commands"
+          run_one base false "${CMD_DIR}/base.commands"
+
+          # 2) modtest：挂模块盘，逐模块 insmod
           if [ "${RUN_MODULE_TEST}" = "true" ]; then
-            printf '%s\n' 'sh /mnt/modtest/payload/run-module-tests.sh' > "${CMD_DIR}/base.commands"
-            run_one base true "${CMD_DIR}/base.commands"
-          else
-            cp .github/scripts/modtest/probe.commands "${CMD_DIR}/base.commands"
-            run_one base false "${CMD_DIR}/base.commands"
+            printf '%s\n' 'sh /mnt/modtest/payload/run-module-tests.sh' \
+              > "${CMD_DIR}/modtest.commands"
+            run_one modtest true "${CMD_DIR}/modtest.commands"
           fi
 
           for p in ${PROFILES}; do

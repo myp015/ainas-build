@@ -31,10 +31,11 @@ mkdir -p "${LOGDIR}/${PROFILE}"
 
 cd "${RRDIR}"
 
-# 每个 profile 一个独立小盘（不格式化，仅用于触发控制器/驱动 probe）
-if [ "${PROFILE}" != "base" ]; then
-  [ -f "scsi-${PROFILE}.img" ] || truncate -s 2G "scsi-${PROFILE}.img"
-fi
+# 每个 SCSI profile 一个独立小盘（不格式化，仅用于触发控制器/驱动 probe）
+case "${PROFILE}" in
+  virtio-scsi|megaraid|mptsas)
+    [ -f "scsi-${PROFILE}.img" ] || truncate -s 2G "scsi-${PROFILE}.img" ;;
+esac
 
 echo "[profile:${PROFILE}] 渲染测试 compose"
 bash "${SCRIPT_DIR}/../render_test_compose.sh" \
@@ -68,6 +69,13 @@ done
 if [ "${ready}" -ne 1 ]; then
   echo "[profile:${PROFILE}] [E] 900s 内 DSM Web 未就绪" >&2
   docker logs --tail 200 "${CONTAINER}" >"${LOGDIR}/${PROFILE}/docker-tail.log" 2>&1 || true
+  # 现场：容器是否还在跑、QEMU 是否在消耗 CPU（区分卡死与空转）
+  docker inspect "${CONTAINER}" --format \
+    'status={{.State.Status}} exit={{.State.ExitCode}} started={{.State.StartedAt}}' \
+    >"${LOGDIR}/${PROFILE}/docker-inspect.txt" 2>&1 || true
+  docker exec "${CONTAINER}" sh -c \
+    'ps -eo pid,etime,pcpu,args | grep -E "qemu-system|passt" | grep -v grep' \
+    >"${LOGDIR}/${PROFILE}/qemu-ps.txt" 2>&1 || true
   exit 1
 fi
 echo "[profile:${PROFILE}] DSM Web 已就绪"

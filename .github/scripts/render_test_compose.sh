@@ -19,7 +19,7 @@ PROFILE="${3:?缺少 profile}"
 WITH_MODDISK="${4:-false}"
 
 case "${PROFILE}" in
-  base) EXTRA="" ;;
+  base|modtest) EXTRA="" ;;
   virtio-scsi)
     EXTRA="-device virtio-scsi-pci,id=vscsi0 -drive file=/storage/alpine/scsi-${PROFILE}.img,media=disk,format=raw,if=none,id=vdisk -device scsi-hd,drive=vdisk,bus=vscsi0.0,channel=0,scsi-id=0,lun=0,rotation_rate=1" ;;
   megaraid)
@@ -33,8 +33,10 @@ esac
 
 MODDISK=""
 if [ "${WITH_MODDISK}" = "true" ]; then
-  # 独立 ahci 控制器：不复用 boot 盘的 ahci0，避免与 qemux 自建数据盘的端口冲突
-  MODDISK="-device ich9-ahci,id=ahci1 -drive file=/storage/alpine/modtest.img,media=disk,format=raw,if=none,id=moddisk -device ide-hd,drive=moddisk,bus=ahci1.0,rotation_rate=1"
+  # 用 USB 存储挂模块盘：AHCI 控制器下 QEMU 的 IDE 盘不走 NCQ，DSM 的
+  # ahci 驱动会持续 FPDMA QUEUED 失败（实测 ata13 大量 ABRT 后启动卡死）；
+  # usb-storage 不用 NCQ，且 DSM 不会把它当内部盘纳入存储池。
+  MODDISK="-drive file=/storage/alpine/modtest.img,media=disk,format=raw,if=none,id=moddisk -device usb-storage,bus=usb0.0,port=1,drive=moddisk,removable=on"
 fi
 
 python3 - "${SRC}" "${DST}" "${EXTRA}" "${MODDISK}" <<'PY'

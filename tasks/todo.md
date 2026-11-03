@@ -25,8 +25,11 @@
 ## 进度
 - 2026-11-03：脚本与 workflow 落地；本地用 epyc7002-7.4-5.10.55（495 个 .ko）生成模块盘通过，
   拓扑序（mii→8139cp）正确，vermagic 校验通过。
-- 待办：推送后触发 `ova-test.yml`：rr_source=ainas、test_models=SA6400、
-  scsi_profiles=跳过、run_module_test=true、module_limit 先 20 做 smoke。
+- 2026-11-03：触发 `ova-test.yml` smoke（rr_source=ainas、test_models=SA6400、
+  scsi_profiles=跳过、run_module_test=true、module_limit=20），run 41564874040：
+  plan 与 prepare-base 通过，install+test 进行中。
+- 修复记录：plan 合并误用未输出的 repo 字段；run_profile 相对路径导致 cd 后找不到渲染脚本；
+  Web 就绪判据改为「拿到 HTTP 状态行」。
 
 ## Review
 （完成后补写）
