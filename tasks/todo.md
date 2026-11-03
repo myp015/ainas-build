@@ -28,8 +28,13 @@
       （run 41610717372：双源 × 5 profile 全绿，三型设备均被对应驱动识别）
 - [x] 10. 全量模块一次性验证（module_limit=0）：run 41613847561（514 条，9分13秒），
       发现连字符依赖排序缺陷 → 修复后 run 41616244893 全绿，fail 66→21
-- [ ] 11. 残余 21 个失败分类：17 个为环境/硬件缺失（正常），4 个 Unknown symbol
-      （nf_socket_ipv6/nf_tproxy_ipv6 及级联 xt_socket/xt_TPROXY）待决策修复方式
+- [x] 11. 残余 21 个失败分类：17 个为环境/硬件缺失（正常），4 个 Unknown symbol
+      （nf_socket_ipv6/nf_tproxy_ipv6 及级联 xt_socket/xt_TPROXY）
+- [x] 12. 4 个 Unknown symbol 修复：源码改用 `__udp6_lib_lookup` + refcount 契约
+      （两树同步，ainas-modules ebb70628），test.yml 单平台编译验证通过，
+      UND 与 RR 成品逐符号一致；测试 Release 上机回归 4 个模块全部 INSMOD_OK
+- [ ] 13. 常规全量发布（modules.yml 63 target + cks.yml 12 target，版本 26.11.0），
+      发布后用 ova-test 预装模式复跑全量确认 514 条 fail≈17
 
 ## 进度
 - 2026-11-03：脚本与 workflow 落地；本地用 epyc7002-7.4-5.10.55（495 个 .ko）生成模块盘通过，
@@ -126,3 +131,20 @@
 - 2026-11-03：run 41608661790（prebuilt 双源、modtest 20 条）全绿：
   `total=20 loaded=9 ok=10 fail=1`（修复前 fail=3）；9pnet_virtio 现在
   INS_MOD_OK，aic8800_fdrv 因依赖排序后移出前 20；唯一失败 acpi_cpufreq = QEMU CPU 无接口。
+- 2026-11-03：IPv6 修复（ainas-modules ebb70628）：nf_socket_ipv6.c / nf_tproxy_ipv6.c
+  的 `udp6_lib_lookup` 改为 `__udp6_lib_lookup(..., 0, &udp_table, NULL)` +
+  `refcount_inc_not_zero`（与 IPv4 版同款写法），src/5.10.55 与 src/5.10.55-ck 同步。
+  依据：官方导出面 `exports_epyc7002_74.txt` 只有 `udp_table`，`__udp6_lib_lookup`
+  由官方 ipv6.ko 导出（`exports_mod_epyc7002_74.txt`）；RR 同模块 UND 即此两符号。
+- 2026-11-03：test.yml 矩阵改为 `inputs.targets`（JSON）驱动（add08c35），
+  run 41620846897 只编 epyc7002 7.4/7.1，9分28秒全绿；产物 `nf_socket_ipv6.ko` /
+  `nf_tproxy_ipv6.ko` 的 UND 与 RR 成品**逐符号一致**（9 条 / 13 条，含依赖 `ipv6`）。
+- 2026-11-03：端到端回归用临时 Release `test-modules-26.11.0`（预发布，只含
+  epyc7002 7.4/7.1 打包产物，非正式发布）；ova-test run 41622951773
+  （ainas/SA6400/预装/base 关闭/全量）5分25秒全绿：
+  `total=495 loaded=79 ok=399 fail=17`，4 个模块全部 `INSMOD_OK`
+  （nf_socket_ipv6 #250、nf_tproxy_ipv6 #252、xt_TPROXY #474、xt_socket #491）。
+  495 与正式包 514 的差额 = 发布流程额外合并的 19 个官方模块（本包不含）。
+- 2026-11-03：残余 17 失败均为环境/硬件缺失（acpi_cpufreq/binder_linux/ch35x_38x/
+  coretemp/cpufreq_userspace/f71882fg/gpio_f7188x/gpio_it87/gpio_sch311x/intel_idle/
+  ipmi_si/it87/kvm_amd/kvm_intel/nct6683/nct6775/syno_hddpwrctl_test），无 Unknown symbol。
