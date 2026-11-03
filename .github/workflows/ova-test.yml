@@ -383,7 +383,7 @@ jobs:
           if [ "${RUN_MODULE_TEST}" = "true" ]; then
             : "${MODULES_KEY:?缺少 MODULES_KEY}"
             printf '%s\n' \
-              'P=$(ls /dev/sata1p3 2>/dev/null || true); [ -n "$P" ] || P=$(ls /dev/sd?3 2>/dev/null | head -n1); echo "MODTEST_PART=$P"; [ -n "$P" ] || exit 1; mkdir -p /mnt/modtest; mount -t ext4 -o ro "$P" /mnt/modtest' \
+              'P=$(ls /dev/sata1p3 2>/dev/null || true); [ -n "$P" ] || P=$(ls /dev/sd?3 2>/dev/null | head -n1); echo "MODTEST_PART=$P"; [ -n "$P" ] || exit 1; mkdir -p /mnt/modtest; mount -t ext4 -o ro "$P" /mnt/modtest || { M=$(awk -v d="$P" '"'"'$1==d{print $2}'"'"' /proc/mounts); [ -n "$M" ] && mount --bind "$M" /mnt/modtest; }; ls /mnt/modtest/modtest/module-list.tsv' \
               "sh /mnt/modtest/modtest/run-module-tests.sh ${MODULES_KEY}" \
               > "${CMD_DIR}/modtest.commands"
             run_one modtest "${CMD_DIR}/modtest.commands"
