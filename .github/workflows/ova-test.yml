@@ -1,0 +1,423 @@
+#
+# 模块逐测工作流（ova.yml 的测试版副本，不修改正式 OVA 流程）
+#
+# 与 ova.yml 的差异：
+#   1. 不创建 Release：公共 base 用 Actions artifact 在 run 内传递；
+#   2. rr_source 支持 both（ainas 与 RROrg 同环境双跑，供启动日志对比）；
+#   3. 安装完成后不导出 OVA，改为复用已安装的 rr.img + data.qcow2
+#      逐 profile 重启 DSM，采集启动日志；
+#   4. base profile 挂载第二块 ext4 模块盘，安全档逐个 insmod 模块；
+#   5. 可选 SCSI 控制器 profile（virtio-scsi / megaraid / mptsas）验证驱动。
+#
+# 阶段 1 默认：rr_source=ainas、test_models=SA6400、scsi_profiles=跳过。
+name: Build RR-OVA Test
+
+on:
+  workflow_dispatch:
+    inputs:
+      rr_source:
+        description: "RR 源"
+        type: choice
+        options:
+          - ainas
+          - RROrg
+          - both
+        default: ainas
+      test_models:
+        description: "测试型号（逗号分隔，阶段 1 只填 SA6400）"
+        type: string
+        default: "SA6400"
+      custom_models:
+        description: "自定义型号（工作流未列出的，多个用逗号分隔）"
+        type: string
+        default: ""
+      rr_version:
+        description: "RR version（留空=latest）"
+        type: string
+        default: ""
+      dsm_version:
+        description: "DSM 版本编号（仅 7.x）"
+        type: choice
+        options:
+          - "7.2.1"
+          - "7.2.2"
+          - "7.3.0"
+          - "7.3.1"
+          - "7.3.2"
+          - "7.4.1"
+        default: "7.4.1"
+      scsi_profiles:
+        description: "SCSI 虚拟设备 profile"
+        type: choice
+        options:
+          - "跳过"
+          - "全部三型"
+          - "仅 virtio-scsi"
+          - "仅 megaraid"
+          - "仅 mptsas"
+        default: "跳过"
+      run_module_test:
+        description: "逐个 insmod 模块（安全档）"
+        type: boolean
+        default: true
+      module_limit:
+        description: "只测清单前 N 个模块（0=全部，CI smoke 建议 20）"
+        type: string
+        default: "0"
+      boot_timeout:
+        description: "安装阶段引导等待秒数"
+        type: string
+        default: "360"
+
+jobs:
+  # 解析源版本、型号→平台映射，生成两个 matrix。
+  plan:
+    runs-on: ubuntu-24.04
+    outputs:
+      base_tasks: ${{ steps.plan.outputs.base_tasks }}
+      tasks: ${{ steps.plan.outputs.tasks }}
+      task_count: ${{ steps.plan.outputs.task_count }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: checkout ainas-2in1（读取 models.json）
+        uses: actions/checkout@v7
+        with:
+          repository: myp015/ainas-2in1
+          token: ${{ secrets.AiNas }}
+          path: .2in1-plan
+
+      - name: 规划源与测试任务
+        id: plan
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.AiNas }}
+          RR_SOURCE: ${{ inputs.rr_source }}
+          RR_VERSION: ${{ inputs.rr_version }}
+          DSM_VERSION: ${{ inputs.dsm_version }}
+          TEST_MODELS: ${{ inputs.test_models }}
+          CUSTOM_MODELS: ${{ inputs.custom_models }}
+          MODELS_JSON: .2in1-plan/script/models.json
+        run: bash .github/scripts/plan_test_sources.sh
+
+  # 公共 base：每个源只做一次，用 artifact 传给下游（不写 Release）。
+  prepare-base:
+    needs: [plan]
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.plan.outputs.base_tasks) }}
+    env:
+      RR_ASSET_URL: ${{ matrix.rr_asset_url }}
+      RR_TAG: ${{ matrix.rr_tag }}
+      SOURCE: ${{ matrix.source }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: checkout ainas-2in1
+        uses: actions/checkout@v7
+        with:
+          repository: myp015/ainas-2in1
+          token: ${{ secrets.AiNas }}
+          path: .2in1
+
+      - name: 下载 RR 镜像
+        shell: bash
+        run: |
+          set -euo pipefail
+          : "${RR_TAG:?缺少 RR_TAG}"
+          : "${RR_ASSET_URL:?缺少 RR_ASSET_URL}"
+          curl -fsSL --connect-timeout 10 "$RR_ASSET_URL" -o "rr-${RR_TAG}.zip"
+          unzip -q "rr-${RR_TAG}.zip" -d rr rr.img
+
+      - name: 构建公共 base（cpuinfo + initrd 补丁）
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          WORKDIR="$PWD"
+          AINAS2IN1_DIR="${WORKDIR}/.2in1"
+          PART3_PATH="/mnt/p3"
+
+          . "$AINAS2IN1_DIR/script/2in1func.sh"
+
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq gettext cpio zstd dosfstools rsync qemu-utils >/dev/null
+
+          DISK_LOOP=$(sudo losetup -f)
+          sudo losetup -P "$DISK_LOOP" rr/rr.img
+          for _ in $(seq 1 40); do [ -b "${DISK_LOOP}p3" ] && break; sleep 0.25; done
+          [ -b "${DISK_LOOP}p3" ] || { echo "[E] 镜像分区未就绪：${DISK_LOOP}p3" >&2; exit 1; }
+          sudo mkdir -p "$PART3_PATH"
+          sudo mount "${DISK_LOOP}p3" "$PART3_PATH"
+
+          for d in cks lkms addons modules; do
+            if [ ! -d "${PART3_PATH}/${d}" ] || [ -z "$(ls -A "${PART3_PATH}/${d}")" ]; then
+              echo "[E] rr.img 的 p3 缺少内置资产目录或为空: ${d}" >&2
+              exit 1
+            fi
+          done
+          [ -f "${PART3_PATH}/addons/cpuinfo/all.tgz" ] || {
+            echo "[E] rr.img 的 p3 缺少内置资产: addons/cpuinfo/all.tgz" >&2
+            exit 1
+          }
+
+          patch_cpuinfo "${PART3_PATH}/addons" "rr"
+          patch_ram "$PART3_PATH" rr "$WORKDIR"
+
+          sudo umount "$PART3_PATH"
+          sudo losetup --detach "$DISK_LOOP"
+          sudo rm -rf "$PART3_PATH"
+
+          rm -rf "$AINAS2IN1_DIR"
+
+          zstd -3 -T0 -q -f rr/rr.img -o ova-base.img.zst
+
+      - name: 上传公共 base（artifact）
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-base-${{ matrix.source }}
+          path: ova-base.img.zst
+          if-no-files-found: error
+          retention-days: 7
+
+  build-install:
+    name: ${{ format('install+test ({0}/{1})', matrix.source, matrix.model) }}
+    needs: [plan, prepare-base]
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        include: ${{ fromJSON(needs.plan.outputs.tasks) }}
+    env:
+      LANGUAGE: zh_CN
+      KERNEL: official
+      ADDONS: acpid,reboottoloader,addincards,cpuinfo,expands,diskcompat,lsiutil,nvmevolume,powersched,remotefs,storagepanel,smartctl,trivial,apppatch,vmtools
+      LINE: ${{ inputs.dsm_version }}
+      SOURCE: ${{ matrix.source }}
+      MODEL: ${{ matrix.model }}
+      PLATFORM: ${{ matrix.platform }}
+      KVER: ${{ matrix.kver }}
+      MODULES_KEY: ${{ matrix.modules_key }}
+      TAG: ${{ matrix.rr_tag }}
+      RR_TAG: ${{ matrix.rr_tag }}
+      RR_DOCKER_IMAGE: ${{ matrix.docker_image }}
+      RR_DOCKER_TAG: ${{ matrix.docker_tag }}
+      SCSI_PROFILES: ${{ inputs.scsi_profiles }}
+      RUN_MODULE_TEST: ${{ inputs.run_module_test }}
+      MODULE_LIMIT: ${{ inputs.module_limit }}
+      BOOT_TIMEOUT: ${{ inputs.boot_timeout }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: 初始化环境
+        run: |
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git config --global user.name "github-actions[bot]"
+          sudo timedatectl set-timezone "Asia/Shanghai"
+
+      - name: checkout ainas-2in1
+        uses: actions/checkout@v7
+        with:
+          repository: myp015/ainas-2in1
+          token: ${{ secrets.AiNas }}
+          path: .2in1
+
+      - name: 下载公共 base
+        uses: actions/download-artifact@v4
+        with:
+          name: test-base-${{ matrix.source }}
+          path: base
+
+      - name: 编译镜像并安装 DSM
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          WORKDIR="$PWD"
+          AINAS2IN1_DIR="${WORKDIR}/.2in1"
+          PAT_XLSX_URL="https://raw.githubusercontent.com/myp015/ainas-rr/main/docs/pats.xlsx"
+          PAT_XLSX="/tmp/pats.xlsx"
+          DSM_INSTALL_DIR="/tmp/dsm-install"
+          PART1_PATH="/mnt/p1"
+          PART3_PATH="/mnt/p3"
+
+          . "$AINAS2IN1_DIR/script/2in1func.sh"
+
+          LINE_REQ="${LINE:-7.4.1}"
+          export LINE_REQ
+          if echo "${MODEL}" | grep -Eq '^(DS925\+|DS425\+)$' && [ "${LINE_REQ}" = "7.2.1" ]; then
+            echo "[INFO] ${MODEL} 不支持 DSM 7.2.1，自动切换到 7.2.2"
+            LINE_REQ="7.2.2"
+          fi
+
+          VERSION="$(pick_dsm_version "${LINE_REQ}")"
+          VER_MAIN="${VERSION%%-*}"
+          VER_MAIN_NODOT="${VER_MAIN//./}"
+          VER_BUILD="${VERSION#*-}"
+          VER_BUILD="${VER_BUILD%%-*}"
+          VER_SLUG="${VER_MAIN_NODOT}_${VER_BUILD}"
+          SAFE_TAG="${TAG//./_}"
+          echo "SAFE_TAG=${SAFE_TAG}" >> "$GITHUB_ENV"
+
+          if [ "${SOURCE}" = "RROrg" ]; then
+            ARTIFACT_BRAND="_RROrg"
+          else
+            ARTIFACT_BRAND="_ainas"
+          fi
+          ARTIFACT="${MODEL}_${VER_SLUG}${ARTIFACT_BRAND}_${SAFE_TAG}"
+          echo "[INFO] 型号=${MODEL} 目标DSM版本=${VERSION} 源=${SOURCE} 平台=${PLATFORM} 内核=${KVER}"
+
+          echo "[INFO] 安装构建依赖"
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq gettext cpio zstd dosfstools rsync qemu-utils >/dev/null
+
+          mkdir -p rr
+          zstd -d -q -f base/ova-base.img.zst -o rr/rr.img
+          rm -rf base
+
+          patch_part1 rr/rr.img "$PART1_PATH" rr "$MODEL"
+
+          DISK_LOOP=$(sudo losetup -f)
+          sudo losetup -P "$DISK_LOOP" rr/rr.img
+          for _ in $(seq 1 40); do [ -b "${DISK_LOOP}p3" ] && break; sleep 0.25; done
+          [ -b "${DISK_LOOP}p3" ] || { echo "[E] 镜像分区未就绪：${DISK_LOOP}p3" >&2; exit 1; }
+          sudo mkdir -p "$PART1_PATH" "$PART3_PATH"
+
+          docker_build rr "$MODEL" "$VERSION" "$LANGUAGE" "$ADDONS" "$RR_DOCKER_TAG" \
+            "$WORKDIR"
+
+          sudo mkdir -p "$PART3_PATH"
+          sudo mount "${DISK_LOOP}p3" "$PART3_PATH"
+          sudo rm -rf "$PART3_PATH/dl" "$PART3_PATH/auxfiles" "$PART3_PATH/logs"
+          trim_p3_assets "$PART3_PATH" "$MODEL"
+          rr_menu_apply "$PART3_PATH" slim
+
+          # ── 取出本平台模块包，供模块测试盘使用 ──────────────────────
+          MODS_DIR="${PART3_PATH}/modules"
+          SELECTED=""
+          PREFERRED="${MODS_DIR}/${MODULES_KEY}.tgz"
+          if [ -f "${PREFERRED}" ]; then
+            SELECTED="${PREFERRED}"
+          else
+            SELECTED="$(find "${MODS_DIR}" -maxdepth 1 -type f -name "*${KVER}*.tgz" | sort | head -n1)"
+          fi
+          [ -n "${SELECTED}" ] || \
+            SELECTED="$(find "${MODS_DIR}" -maxdepth 1 -type f -name '*.tgz' | sort | head -n1)"
+          if [ -z "${SELECTED}" ]; then
+            echo "[E] p3/modules 下未找到任何 .tgz（平台=${PLATFORM} 内核=${KVER}）" >&2
+            exit 1
+          fi
+          echo "[INFO] 模块包: $(basename "${SELECTED}")"
+          cp -f "${SELECTED}" "$WORKDIR/modules-test.tgz"
+
+          sudo umount "$PART3_PATH"
+          sudo losetup --detach "$DISK_LOOP"
+          rm -f "$WORKDIR/2in1func.sh"
+
+          repack_rr rr/rr.img "$TAG" "$WORKDIR" "2.5GB"
+
+          if [ ! -f "$WORKDIR/rr/rr.img" ]; then
+            echo "[E] rr.img 不存在于 $WORKDIR/rr/rr.img" >&2
+            exit 1
+          fi
+          dsm_setup "$MODEL" "$LINE_REQ" "$PAT_XLSX_URL" "$DSM_INSTALL_DIR" \
+            "$WORKDIR" \
+            "$AINAS2IN1_DIR/docker/vm-docker-compose.yaml" "$WORKDIR/rr/docker-compose.yaml" \
+            "${ARTIFACT_BRAND}" "$SAFE_TAG" "${BOOT_TIMEOUT}" \
+            "s#file=/rr.img#file=/storage/alpine/rr.img#g"
+
+          echo "ARTIFACT=${ARTIFACT}" >> "$GITHUB_ENV"
+          rm -f "$WORKDIR/2in1func.sh"
+
+      - name: 生成模块测试盘
+        if: inputs.run_module_test
+        shell: bash
+        run: |
+          set -euo pipefail
+          : "${KVER:?缺少 KVER}"
+          [ -f modules-test.tgz ] || { echo "[E] 缺少 modules-test.tgz" >&2; exit 1; }
+          bash .github/scripts/make_module_disk.sh \
+            modules-test.tgz "$KVER" rr/modtest.img \
+            .github/scripts/modtest/guest "${MODULE_LIMIT:-0}"
+
+      - name: 启动 profile 并采集日志
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          LOG_DIR="/tmp/modtest-logs"
+          CMD_DIR="${LOG_DIR}/cmds"
+          mkdir -p "${CMD_DIR}"
+          DRIVER="${PWD}/.2in1/script/dsm_serial_driver.py"
+          COMPOSE="${PWD}/rr/docker-compose.yaml"
+
+          [ -f "${COMPOSE}" ] || { echo "[E] 缺少已安装 compose: ${COMPOSE}" >&2; exit 1; }
+
+          case "${SCSI_PROFILES}" in
+            "全部三型") PROFILES="virtio-scsi megaraid mptsas" ;;
+            "仅 virtio-scsi") PROFILES="virtio-scsi" ;;
+            "仅 megaraid") PROFILES="megaraid" ;;
+            "仅 mptsas") PROFILES="mptsas" ;;
+            "跳过"|"") PROFILES="" ;;
+            *) echo "[E] 未知 scsi_profiles: ${SCSI_PROFILES}" >&2; exit 1 ;;
+          esac
+
+          run_one() {
+            local profile="$1" with_moddisk="$2" cmd="$3"
+            echo "[INFO] profile=${profile} 模块盘=${with_moddisk}"
+            bash .github/scripts/modtest/run_profile.sh \
+              "$PWD" "${COMPOSE}" "${profile}" "${with_moddisk}" \
+              "${cmd}" "${LOG_DIR}" "${DRIVER}"
+          }
+
+          # base profile：启动日志基线；开启模块测试时挂模块盘
+          if [ "${RUN_MODULE_TEST}" = "true" ]; then
+            printf '%s\n' 'sh /mnt/modtest/payload/run-module-tests.sh' > "${CMD_DIR}/base.commands"
+            run_one base true "${CMD_DIR}/base.commands"
+          else
+            cp .github/scripts/modtest/probe.commands "${CMD_DIR}/base.commands"
+            run_one base false "${CMD_DIR}/base.commands"
+          fi
+
+          for p in ${PROFILES}; do
+            cp .github/scripts/modtest/probe.commands "${CMD_DIR}/${p}.commands"
+            run_one "$p" false "${CMD_DIR}/${p}.commands"
+          done
+
+      - name: 安装/测试失败时收尾并保存镜像
+        if: failure()
+        shell: bash
+        run: |
+          set +e -uo pipefail
+          WORKDIR="$PWD"
+
+          if [ -f "$WORKDIR/rr/docker-compose.yaml" ]; then
+            ( cd "$WORKDIR/rr" && docker compose -f docker-compose.yaml down )
+          fi
+          docker rm -f dsm >/dev/null 2>&1
+
+          sudo umount /mnt/p1 /mnt/p3 2>/dev/null
+          for L in $(losetup -j "$WORKDIR/rr/rr.img" 2>/dev/null | cut -d: -f1); do
+            sudo losetup --detach "$L"
+          done
+          sudo sync
+
+          [ -f "$WORKDIR/rr/rr.img" ] || { echo "[E] 无 rr.img，跳过"; exit 0; }
+          OUT="$WORKDIR/rr/rr-failed-${MODEL}.img.gz"
+          gzip -1 -c "$WORKDIR/rr/rr.img" > "$OUT"
+          echo "[INFO] 失败镜像已保存: $(basename "$OUT")"
+          echo "DEBUG_IMG=$OUT" >> "$GITHUB_ENV"
+
+      - name: 上传测试日志
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: modtest-${{ matrix.source }}-${{ matrix.model_slug }}
+          path: |
+            /tmp/modtest-logs
+            /tmp/dsm-install/logs
+          if-no-files-found: warn
+          retention-days: 30

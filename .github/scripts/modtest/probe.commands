@@ -1,0 +1,14 @@
+# 每条一行，由 dsm_serial_driver.py exec 逐条发送并在 guest 执行。
+# 只读探测：版本、模块、SCSI host、块设备、驱动 srcversion、dmesg 尾部。
+uname -r
+cat /proc/version
+cat /etc.defaults/VERSION
+lsmod
+cat /proc/modules
+lspci -nnk
+for h in /sys/class/scsi_host/host*; do echo "$h $(cat $h/proc_name 2>/dev/null)"; done
+ls -l /sys/block
+cat /proc/partitions
+for b in /sys/block/*; do echo "$b vendor=$(cat $b/device/vendor 2>/dev/null) model=$(cat $b/device/model 2>/dev/null) size=$(cat $b/size 2>/dev/null)"; done
+for m in virtio_scsi megaraid_sas mptsas mptspi vmw_pvscsi; do echo "$m srcversion=$(cat /sys/module/$m/srcversion 2>/dev/null || echo absent)"; done
+dmesg | tail -n 500
