@@ -7,7 +7,7 @@
 #   - RR_SOURCE=both：ainas 与 RROrg 各调用一次，用于同环境双源对比。
 #
 # 与正式 ova.yml 的差异：
-#   - 不创建/不写入任何 Release，base 以 Actions artifact 传递；
+#   - base 上传到独立 Release（test-ova-<source>-<tag>），跨 run 复用；
 #   - tasks 里补 platform / kver / modules_key，供模块包定位与测试盘生成；
 #   - 输出 base_tasks 与 tasks 两个 matrix 数组。
 #
@@ -17,9 +17,9 @@
 #   MODELS_JSON    models.json 路径（默认 .2in1-plan/script/models.json）
 #
 # 输出（GITHUB_OUTPUT）：
-#   base_tasks       [{source, repo, rr_tag, rr_asset_url, docker_image, docker_tag}]
+#   base_tasks       [{source, rr_tag, rr_asset_url, release_tag, base_asset, docker_image, docker_tag}]
 #   tasks            [{source, model, model_slug, platform, kver, modules_key,
-#                      rr_tag, docker_image, docker_tag}]
+#                      rr_tag, release_tag, base_asset, docker_image, docker_tag}]
 #   task_count
 
 set -euo pipefail
@@ -131,10 +131,16 @@ def locate(model):
 base_tasks, tasks = [], []
 for src in sources_arg:
     cfg = parse_output(os.path.join(work, "%s.out" % src))
+    # 测试版 base 用独立 Release 命名，避免与正式 ova 工作流（ainas-ova-*/RROrg-ova-*）
+    # 的 Release 与资产名冲突，便于跨 run 重复复用。
+    rel_tag = "test-ova-%s-%s" % (src.lower(), cfg["rr_tag"])
+    base_asset = "test-ova-base-%s-%s.img.zst" % (src.lower(), cfg["rr_tag"])
     base_tasks.append({
         "source": src,
         "rr_tag": cfg["rr_tag"],
         "rr_asset_url": cfg["rr_asset_url"],
+        "release_tag": rel_tag,
+        "base_asset": base_asset,
         "docker_image": cfg["docker_image"],
         "docker_tag": cfg.get("docker_tag", "latest"),
     })
@@ -151,6 +157,8 @@ for src in sources_arg:
             "kver": kver,
             "modules_key": "%s-%s-%s" % (platform, line, kver),
             "rr_tag": cfg["rr_tag"],
+            "release_tag": rel_tag,
+            "base_asset": base_asset,
             "docker_image": cfg["docker_image"],
             "docker_tag": cfg.get("docker_tag", "latest"),
         })

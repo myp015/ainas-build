@@ -2,11 +2,13 @@
 # 模块逐测工作流（ova.yml 的测试版副本，不修改正式 OVA 流程）
 #
 # 与 ova.yml 的差异：
-#   1. 不创建 Release：公共 base 用 Actions artifact 在 run 内传递；
+#   1. 公共 base 上传到独立 Release（test-ova-<source>-<tag>），与正式 ova 工作流
+#      的 Release/资产名隔离，跨 run 复用；
 #   2. rr_source 支持 both（ainas 与 RROrg 同环境双跑，供启动日志对比）；
 #   3. 安装完成后不导出 OVA，改为复用已安装的 rr.img + data.qcow2
 #      逐 profile 重启 DSM，采集启动日志；
-#   4. base profile 挂载第二块 ext4 模块盘，安全档逐个 insmod 模块；
+#   4. modtest profile 挂载引导盘 p3（/dev/synoboot3, ext4），安全档逐个 insmod 模块，
+#      结果经串口回读；
 #   5. 可选 SCSI 控制器 profile（virtio-scsi / megaraid / mptsas）验证驱动。
 #
 # 阶段 1 默认：rr_source=ainas、test_models=SA6400、scsi_profiles=跳过。
@@ -68,6 +70,10 @@ on:
         description: "安装阶段引导等待秒数"
         type: string
         default: "360"
+      overwrite_base:
+        description: "覆盖测试版 base（默认复用 Release 中已存在的 base）"
+        type: boolean
+        default: false
 
 jobs:
   # 解析源版本、型号→平台映射，生成两个 matrix。
@@ -100,7 +106,7 @@ jobs:
           MODELS_JSON: .2in1-plan/script/models.json
         run: bash .github/scripts/plan_test_sources.sh
 
-  # 公共 base：每个源只做一次，用 artifact 传给下游（不写 Release）。
+  # 公共 base：每个源只做一次，上传到独立 test Release 供跨 run 复用。
   prepare-base:
     name: prepare-base (${{ matrix.source }})
     needs: [plan]
@@ -113,10 +119,57 @@ jobs:
       RR_ASSET_URL: ${{ matrix.rr_asset_url }}
       RR_TAG: ${{ matrix.rr_tag }}
       SOURCE: ${{ matrix.source }}
+      RELEASE_TAG: ${{ matrix.release_tag }}
+      BASE_ASSET: ${{ matrix.base_asset }}
     steps:
       - uses: actions/checkout@v7
 
+      - name: 检查是否复用已有 base
+        id: check
+        shell: bash
+        env:
+          ACTION_TOKEN: ${{ secrets.AiNas }}
+          OVERWRITE_BASE: ${{ inputs.overwrite_base }}
+        run: |
+          set -euo pipefail
+          : "${ACTION_TOKEN:?缺少 ACTION_TOKEN}"
+          : "${RR_TAG:?缺少 RR_TAG}"
+          export GH_TOKEN="$ACTION_TOKEN"
+          export GH_REPO="myp015/ainas-2in1"
+
+          # Release 可能尚不存在：先创建（重试覆盖 GitHub 短暂 5xx）
+          for attempt in $(seq 1 12); do
+            if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+              echo "[INFO] Release 已存在: $RELEASE_TAG"
+              break
+            fi
+            echo "[INFO] 创建测试 Release: $RELEASE_TAG（第 ${attempt} 次）"
+            if gh release create "$RELEASE_TAG" --title "$RELEASE_TAG" \
+                --notes "模块逐测工作流专用 base（与正式 ova 流程隔离）" >/dev/null 2>&1; then
+              break
+            fi
+            sleep 10
+          done
+          gh release view "$RELEASE_TAG" >/dev/null 2>&1 || {
+            echo "[E] Release $RELEASE_TAG 创建/确认失败" >&2; exit 1; }
+
+          ASSET_NAMES="$(gh release view "$RELEASE_TAG" --json assets --jq '.assets[].name')"
+          EXISTS="false"
+          if printf '%s\n' "$ASSET_NAMES" | grep -Fxq "$BASE_ASSET" \
+             || printf '%s\n' "$ASSET_NAMES" | grep -Fxq "${BASE_ASSET}.part.000"; then
+            EXISTS="true"
+          fi
+
+          if [ "$EXISTS" = "true" ] && [ "${OVERWRITE_BASE:-false}" != "true" ]; then
+            echo "[INFO] 已存在 ${BASE_ASSET}，复用（未勾选覆盖）"
+            echo "rebuild=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "[INFO] 需要构建 base（exists=${EXISTS} overwrite=${OVERWRITE_BASE:-false}）"
+            echo "rebuild=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: checkout ainas-2in1
+        if: steps.check.outputs.rebuild == 'true'
         uses: actions/checkout@v7
         with:
           repository: myp015/ainas-2in1
@@ -124,6 +177,7 @@ jobs:
           path: .2in1
 
       - name: 下载 RR 镜像
+        if: steps.check.outputs.rebuild == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -132,7 +186,12 @@ jobs:
           curl -fsSL --connect-timeout 10 "$RR_ASSET_URL" -o "rr-${RR_TAG}.zip"
           unzip -q "rr-${RR_TAG}.zip" -d rr rr.img
 
-      - name: 构建公共 base（cpuinfo + initrd 补丁）
+      # 测试工作流不需要品牌化，跳过耗时步骤：
+      #   patch_cpuinfo（cpuinfo 补丁）
+      #   patch_ram（unpackInitrd → 语言文件 / rr menu.sh 升级菜单 → repackInitrd）
+      # 只做资产完整性检查后直接压缩上传。
+      - name: 构建公共 base（跳过 cpuinfo/initrd 补丁）
+        if: steps.check.outputs.rebuild == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -144,7 +203,7 @@ jobs:
           . "$AINAS2IN1_DIR/script/2in1func.sh"
 
           sudo apt-get update -qq
-          sudo apt-get install -y -qq gettext cpio zstd dosfstools rsync qemu-utils kmod >/dev/null
+          sudo apt-get install -y -qq zstd >/dev/null
 
           DISK_LOOP=$(sudo losetup -f)
           sudo losetup -P "$DISK_LOOP" rr/rr.img
@@ -159,13 +218,8 @@ jobs:
               exit 1
             fi
           done
-          [ -f "${PART3_PATH}/addons/cpuinfo/all.tgz" ] || {
-            echo "[E] rr.img 的 p3 缺少内置资产: addons/cpuinfo/all.tgz" >&2
-            exit 1
-          }
 
-          patch_cpuinfo "${PART3_PATH}/addons" "rr"
-          patch_ram "$PART3_PATH" rr "$WORKDIR"
+          echo "[INFO] 跳过 patch_cpuinfo / patch_ram（测试工作流无需品牌化与 initrd 补丁）"
 
           sudo umount "$PART3_PATH"
           sudo losetup --detach "$DISK_LOOP"
@@ -175,13 +229,39 @@ jobs:
 
           zstd -3 -T0 -q -f rr/rr.img -o ova-base.img.zst
 
-      - name: 上传公共 base（artifact）
-        uses: actions/upload-artifact@v4
-        with:
-          name: test-base-${{ matrix.source }}
-          path: ova-base.img.zst
-          if-no-files-found: error
-          retention-days: 7
+      - name: 上传 base 到测试 Release
+        if: steps.check.outputs.rebuild == 'true'
+        shell: bash
+        env:
+          ACTION_TOKEN: ${{ secrets.AiNas }}
+        run: |
+          set -euo pipefail
+          : "${ACTION_TOKEN:?缺少 ACTION_TOKEN}"
+          export GH_TOKEN="$ACTION_TOKEN"
+          export GH_REPO="myp015/ainas-2in1"
+
+          mv -f ova-base.img.zst "$BASE_ASSET"
+          SIZE=$(stat -c%s "$BASE_ASSET")
+          echo "[INFO] base 大小=${SIZE} 字节"
+          UPLOAD_FILES=()
+          if [ "$SIZE" -ge 2147483648 ]; then
+            echo "[INFO] 超过 GitHub 单文件 2GB 上限，按 1900MB 分卷"
+            rm -f "${BASE_ASSET}.part."*
+            split -b 1900M -d -a 3 "$BASE_ASSET" "${BASE_ASSET}.part."
+            UPLOAD_FILES=("${BASE_ASSET}".part.*)
+          else
+            UPLOAD_FILES=("$BASE_ASSET")
+          fi
+
+          # 先删除同名旧资产，避免单文件/分卷形态切换后残留旧内容
+          gh release view "$RELEASE_TAG" --json assets --jq '.assets[].name' | while read -r name; do
+            case "$name" in
+              "$BASE_ASSET"|"$BASE_ASSET".part.*) gh release delete-asset "$RELEASE_TAG" "$name" --yes ;;
+            esac
+          done
+
+          gh release upload "$RELEASE_TAG" "${UPLOAD_FILES[@]}"
+          echo "[INFO] base 已上传到测试 Release: ${RELEASE_TAG}"
 
   build-install:
     name: ${{ format('install+test ({0}/{1})', matrix.source, matrix.model) }}
@@ -204,6 +284,8 @@ jobs:
       MODULES_KEY: ${{ matrix.modules_key }}
       TAG: ${{ matrix.rr_tag }}
       RR_TAG: ${{ matrix.rr_tag }}
+      RELEASE_TAG: ${{ matrix.release_tag }}
+      BASE_ASSET: ${{ matrix.base_asset }}
       RR_DOCKER_IMAGE: ${{ matrix.docker_image }}
       RR_DOCKER_TAG: ${{ matrix.docker_tag }}
       SCSI_PROFILES: ${{ inputs.scsi_profiles }}
@@ -226,11 +308,30 @@ jobs:
           token: ${{ secrets.AiNas }}
           path: .2in1
 
-      - name: 下载公共 base
-        uses: actions/download-artifact@v4
-        with:
-          name: test-base-${{ matrix.source }}
-          path: base
+      - name: 下载公共 base（测试 Release）
+        shell: bash
+        env:
+          ACTION_TOKEN: ${{ secrets.AiNas }}
+        run: |
+          set -euo pipefail
+          : "${ACTION_TOKEN:?缺少 ACTION_TOKEN}"
+          : "${RELEASE_TAG:?缺少 RELEASE_TAG}"
+          : "${BASE_ASSET:?缺少 BASE_ASSET}"
+          export GH_TOKEN="$ACTION_TOKEN"
+          export GH_REPO="myp015/ainas-2in1"
+          mkdir -p base
+
+          NAMES="$(gh release view "$RELEASE_TAG" --json assets --jq '.assets[].name')"
+          if printf '%s\n' "$NAMES" | grep -Fxq "$BASE_ASSET"; then
+            gh release download "$RELEASE_TAG" --pattern "$BASE_ASSET" --dir base
+          else
+            printf '%s\n' "$NAMES" | grep -Fxq "${BASE_ASSET}.part.000" || {
+              echo "[E] Release $RELEASE_TAG 中没有 ${BASE_ASSET}（及其分卷）" >&2
+              exit 1; }
+            gh release download "$RELEASE_TAG" --pattern "${BASE_ASSET}.part.*" --dir base
+            cat base/"${BASE_ASSET}".part.* > base/"${BASE_ASSET}"
+            rm -f base/"${BASE_ASSET}".part.*
+          fi
 
       - name: 编译镜像并安装 DSM
         shell: bash
@@ -276,7 +377,7 @@ jobs:
           sudo apt-get install -y -qq gettext cpio zstd dosfstools rsync qemu-utils >/dev/null
 
           mkdir -p rr
-          zstd -d -q -f base/ova-base.img.zst -o rr/rr.img
+          zstd -d -q -f "base/${BASE_ASSET}" -o rr/rr.img
           rm -rf base
 
           patch_part1 rr/rr.img "$PART1_PATH" rr "$MODEL"

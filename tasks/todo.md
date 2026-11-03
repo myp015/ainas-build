@@ -17,10 +17,13 @@
       rr.img + data.qcow2 启动，按 profile 注入 SCSI 设备，串口执行命令并采集日志
 - [x] 5. `ainas-2in1/script/dsm_serial_driver.py`：向后兼容 `exec` 子命令
       （commit bd4432a，已推送）
-- [x] 6. `.github/workflows/ova-test.yml`：复制 ova.yml，base 改用 artifact、不写 Release、
+- [x] 6. `.github/workflows/ova-test.yml`：复制 ova.yml，base 上传到独立测试 Release
+      （`test-ova-<source>-<tag>` / `test-ova-base-<source>-<tag>.img.zst`）跨 run 复用，
       安装一次后多 profile 复用预装镜像
 - [x] 7. 本地静态校验：YAML 解析、bash -n、sh -n、py_compile、真实模块包生成模块盘验证
-- [ ] 8. CI smoke：单型号单源跑通（SA6400 × ainas）
+- [x] 8. CI smoke：单型号单源跑通（SA6400 × ainas）。run 41593744122：
+      `mount -t ext4 synoboot3` 成功（LABEL=RR3），20 个模块全部有结果
+      （loaded=7 / ok=10 / fail=3），`@@MODTEST_DONE@@` 正常收尾
 - [ ] 9. 阶段 2：双源 + SCSI 3 型 + 启动日志归一化 diff
 
 ## 进度
@@ -49,6 +52,15 @@
 - 2026-11-03：run 41589941072（job 显示 success，但模块测试实际未跑）：`synoboot3`
   存在（8:3），但 `mount -t vfat` 报 wrong fs type。本地核对 grub2.14 镜像：
   p1=`RR1` vfat、p2=`RR2` ext2、**p3=`RR3` ext4**（2.4G）→ 挂载类型改 `-t ext4`。
+- 2026-11-03：run 41593744122 smoke 通过：`blkid synoboot3` = `RR3` ext4，
+  `MODTEST_MOUNT_RC=0`，脚本解包 `modules/epyc7002-7.4-5.10.55.tgz` 并逐个 insmod，
+  20 条 `@@M|` 结果 + `@@MODTEST_DONE@@ total=20 loaded=7 ok=10 fail=3 skip=0`。
+  失败样例：acpi_cpufreq（No such device，QEMU 无对应 CPU）、aic8800_fdrv/aic94xx
+  （Unknown symbol，依赖未先加载）——待阶段 2 逐条核对依赖拓扑。
+- 2026-11-03：用户指令：测试工作流取消耗时步骤——`patch_cpuinfo`、`patch_ram`
+  （unpackInitrd 解包 initrd-rr / 生成语言文件 / rr menu.sh 升级菜单 / repackInitrd）；
+  base 上传到独立命名的 Release 以便重复调用。已在 prepare-base 中跳过两个补丁，
+  新增 overwrite_base 开关与 Release 复用检查。
 
 ## Review
 （完成后补写）
