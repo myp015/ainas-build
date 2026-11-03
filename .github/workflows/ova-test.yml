@@ -387,7 +387,7 @@ jobs:
           if [ "${RUN_MODULE_TEST}" = "true" ]; then
             : "${MODULES_KEY:?缺少 MODULES_KEY}"
             printf '%s\n' \
-              'echo 1 > /proc/sys/kernel/syno_install_flag; mkdir -p /mnt/modtest; cd /dev; mount -t vfat synoboot3 /mnt/modtest; rc=$?; echo "MODTEST_MOUNT_RC=$rc"; ls -l /dev/synoboot3 2>&1; ls /mnt/modtest 2>&1 | head -n 20' \
+              'echo 1 > /proc/sys/kernel/syno_install_flag; mkdir -p /mnt/modtest; cd /dev; blkid synoboot3 2>&1; mount -t ext4 synoboot3 /mnt/modtest; rc=$?; echo "MODTEST_MOUNT_RC=$rc"; ls /mnt/modtest 2>&1 | head -n 20' \
               "sh /mnt/modtest/modtest/run-module-tests.sh ${MODULES_KEY}" \
               > "${CMD_DIR}/modtest.commands"
             run_one modtest "${CMD_DIR}/modtest.commands"

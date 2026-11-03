@@ -46,6 +46,9 @@
 - 2026-11-03：用户指令：引导盘分区在 DSM 里是 `/dev/synoboot3`，且需先
   `echo 1 > /proc/sys/kernel/syno_install_flag` 才可挂载；挂载方式
   `cd /dev && mount -t vfat synoboot3 <挂载点>`。据此替换 mknod 方案。
+- 2026-11-03：run 41589941072（job 显示 success，但模块测试实际未跑）：`synoboot3`
+  存在（8:3），但 `mount -t vfat` 报 wrong fs type。本地核对 grub2.14 镜像：
+  p1=`RR1` vfat、p2=`RR2` ext2、**p3=`RR3` ext4**（2.4G）→ 挂载类型改 `-t ext4`。
 
 ## Review
 （完成后补写）
