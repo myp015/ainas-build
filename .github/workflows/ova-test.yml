@@ -490,6 +490,33 @@ jobs:
             sudo umount "$PART3_PATH"
           fi
 
+          # ── 官方内核：编译前把 p3/modules 的本平台包换成待测 Release ────
+          # base rr.img 是某个 RR Release 的快照，p3 里的模块包可能早于本次
+          # 待测版本（旧模块的依赖面/内置判定都会变化，直接测会误报）。这里
+          # 与预装模式（prepare_prebuilt.sh）保持一致，统一测同一份模块包。
+          if [ "${KERNEL}" != "custom" ]; then
+            : "${MODULES_RELEASE_TAG:?缺少 MODULES_RELEASE_TAG}"
+            echo "[INFO] 覆盖模块包: ${MODULES_RELEASE_TAG}（只取 ${MODULES_KEY}.tgz）"
+            sudo mount "${DISK_LOOP}p3" "$PART3_PATH"
+            MODPKG_DIR="$WORKDIR/.modules-pkg"
+            rm -rf "$MODPKG_DIR"
+            mkdir -p "$MODPKG_DIR"
+            export GH_TOKEN="$ACTION_TOKEN"
+            GH_REPO=myp015/syno-modules gh release download "${MODULES_RELEASE_TAG}" \
+              --pattern "modules-*.zip" --dir "$MODPKG_DIR"
+            MODZIP="$(find "${MODPKG_DIR}" -maxdepth 1 -name 'modules-*.zip' | head -n1)"
+            [ -n "${MODZIP}" ] || {
+              echo "[E] 未下载到 modules-*.zip（${MODULES_RELEASE_TAG}）" >&2; exit 1; }
+            unzip -o -j "${MODZIP}" "${MODULES_KEY}.tgz" -d "$MODPKG_DIR" >/dev/null
+            MOD_TGZ="${MODPKG_DIR}/${MODULES_KEY}.tgz"
+            [ -f "${MOD_TGZ}" ] || {
+              echo "[E] modules zip 中缺少 ${MODULES_KEY}.tgz" >&2; exit 1; }
+            sudo mkdir -p "$PART3_PATH/modules"
+            sudo cp -f "${MOD_TGZ}" "$PART3_PATH/modules/${MODULES_KEY}.tgz"
+            sudo umount "$PART3_PATH"
+            rm -rf "$MODPKG_DIR"
+          fi
+
           docker_build rr "$MODEL" "$VERSION" "$LANGUAGE" "$ADDONS" "$RR_DOCKER_TAG" \
             "$WORKDIR"
 

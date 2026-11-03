@@ -76,14 +76,14 @@ if [ "${KERNEL}" = "custom" ] && [ "${USE_PREBUILT}" = "true" ]; then
 fi
 
 MODULES_RELEASE_TAG="${MODULES_VERSION:-}"
-if [ "${USE_PREBUILT}" = "true" ] && [ -z "${MODULES_RELEASE_TAG}" ]; then
-  # 最新模块包 Release（与主流程发布物同源）
-  MODULES_RELEASE_TAG="$(GH_REPO=myp015/syno-modules gh release view --json tagName --jq '.tagName')"
+# 两种模式都要测"本次指定的模块包"：预装模式注入已安装 OVA 的 p3，
+# 非预装模式在编译前覆盖 base rr.img 的 p3/modules，避免 base 快照里的
+# 旧模块包（与当前发布不同源）造成误报。留空时取最新 Release。
+if [ -z "${MODULES_RELEASE_TAG}" ]; then
+  MODULES_RELEASE_TAG="$(GH_REPO=myp015/syno-modules gh release view --json tagName --jq '.tagName')" || true
 fi
-if [ "${USE_PREBUILT}" = "true" ]; then
-  [ -n "${MODULES_RELEASE_TAG}" ] || {
-    echo "[E] 无法解析 syno-modules 最新 Release 版本" >&2; exit 1; }
-fi
+[ -n "${MODULES_RELEASE_TAG}" ] || {
+  echo "[E] 无法解析 syno-modules 模块包 Release 版本" >&2; exit 1; }
 export USE_PREBUILT MODULES_RELEASE_TAG PREBUILT_VERSIONS DSM_VERSION RR_SOURCE
 export KERNEL CKS_VERSION
 
