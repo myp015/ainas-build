@@ -42,8 +42,10 @@
 - 2026-11-03：run 41577570778 modtest 启动后串口登录失败（`login: timed out after 60 seconds`
   后 serial getty 重启）→ 驱动 `login()` 增加最多 4 次重试（commit cfa12ad）。
 - 2026-11-03：run 41581658294 登录重试生效，但 `/dev/sata1p3` 与 `/dev/sd?3` 均不存在
-  （命令里 `exit 1` 还把 root shell 踢掉，1800s 等不到标记）→ 改为从 `/sys/class/block/sata1p3`
-  取 dev 号并用 `mknod` 造节点后挂载，命令内不再 `exit`，失败时回退到 `/proc/mounts` 已挂载点 bind。
+  （命令里 `exit 1` 还把 root shell 踢掉，1800s 等不到标记）。
+- 2026-11-03：用户指令：引导盘分区在 DSM 里是 `/dev/synoboot3`，且需先
+  `echo 1 > /proc/sys/kernel/syno_install_flag` 才可挂载；挂载方式
+  `cd /dev && mount -t vfat synoboot3 <挂载点>`。据此替换 mknod 方案。
 
 ## Review
 （完成后补写）

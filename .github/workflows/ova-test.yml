@@ -387,7 +387,7 @@ jobs:
           if [ "${RUN_MODULE_TEST}" = "true" ]; then
             : "${MODULES_KEY:?缺少 MODULES_KEY}"
             printf '%s\n' \
-              'B=/sys/class/block/sata1p3; [ -e "$B" ] || B=$(ls -d /sys/class/block/*p3 /sys/class/block/*3 2>/dev/null | head -n1); D=$(cat "$B/dev" 2>/dev/null); echo "MODTEST_BLOCK=$B dev=$D"; echo "DEVS: $(ls /dev | grep -E '"'"'sata|sd|syno|md|nvme'"'"' | tr '"'"'\n'"'"' '"'"' '"'"')"; P="/dev/$(basename "$B")"; [ -b "$P" ] || { mknod "$P" b "${D%%:*}" "${D##*:}" && echo "MODTEST_MKNOD=$P"; }; mkdir -p /mnt/modtest; mount -t ext4 -o ro "$P" /mnt/modtest; rc=$?; echo "MODTEST_MOUNT_RC=$rc"; [ "$rc" -eq 0 ] || { M=$(awk -v d="$P" '"'"'$1==d{print $2}'"'"' /proc/mounts); [ -n "$M" ] && mount --bind "$M" /mnt/modtest && echo "MODTEST_BIND=$M"; }; ls /mnt/modtest/modtest/module-list.tsv 2>&1' \
+              'echo 1 > /proc/sys/kernel/syno_install_flag; mkdir -p /mnt/modtest; cd /dev; mount -t vfat synoboot3 /mnt/modtest; rc=$?; echo "MODTEST_MOUNT_RC=$rc"; ls -l /dev/synoboot3 2>&1; ls /mnt/modtest 2>&1 | head -n 20' \
               "sh /mnt/modtest/modtest/run-module-tests.sh ${MODULES_KEY}" \
               > "${CMD_DIR}/modtest.commands"
             run_one modtest "${CMD_DIR}/modtest.commands"
