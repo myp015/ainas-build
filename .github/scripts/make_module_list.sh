@@ -81,10 +81,19 @@ else:
     print("[WARN] 无法读取 vermagic（modinfo 不可用？）")
 
 # 同名模块（root 与 update/）保留两条，依赖图按 name 去重（优先 root）
+#
+# 命名风格差异（全量测试实锤）：modinfo -F name 给下划线名（snd_hda_codec），
+# 而 depends 字段给连字符名（snd-hda-core,snd-pcm,i915-compat）。按原样查表
+# 会让所有连字符依赖查不到、从未被前置加载，snd/DRM 升级栈整体 Unknown symbol。
+def norm(name):
+    return name.replace("-", "_")
+
+
 by_name = {}
 for e in entries:
-    if e["name"] not in by_name or e["policy"] == "root":
-        by_name[e["name"]] = e
+    key = norm(e["name"])
+    if key not in by_name or e["policy"] == "root":
+        by_name[key] = e
 
 ordered, done, visiting = [], set(), set()
 
@@ -98,8 +107,9 @@ def visit(name):
     # modinfo -F depends 是逗号分隔（如 "cfg80211,aic_load_fw,usbcore"），
     # 早先只按空白切分导致多依赖模块的依赖从未被提前排序加载
     # （aic8800_fdrv / 9pnet_virtio 因此 Unknown symbol）。
+    # 依赖名同时做连字符→下划线归一（depends 用 snd-pcm，name 用 snd_pcm）。
     for dep in re.split(r"[,\s]+", by_name[name]["depends"]):
-        dep = dep.strip()
+        dep = norm(dep.strip())
         if dep:
             visit(dep)
     visiting.discard(name)
@@ -122,7 +132,7 @@ for e in ordered:
         idx, e["name"], e["rel"], e["depends"].replace("\t", " "),
         e["srcver"], e["policy"]))
 for e in entries:
-    if e["policy"] == "update" and by_name.get(e["name"], {}).get("rel") != e["rel"]:
+    if e["policy"] == "update" and by_name.get(norm(e["name"]), {}).get("rel") != e["rel"]:
         idx += 1
         lines.append("%d\t%s\t%s\t%s\t%s\t%s" % (
             idx, e["name"], e["rel"], e["depends"].replace("\t", " "),
