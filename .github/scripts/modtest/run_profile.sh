@@ -55,7 +55,11 @@ docker rm -f "${CONTAINER}" >/dev/null 2>&1 || true
 echo "[profile:${PROFILE}] 等待 DSM Web 就绪（最多 900s）"
 ready=0
 for _ in $(seq 1 180); do
-  if curl -fsS --max-time 5 "http://127.0.0.1:5000/webman/get_state.cgi" >/dev/null 2>&1; then
+  # 判据与 dsm_setup 一致：拿到 HTTP 状态行即用户态已起（500 也算），
+  # 不能用 curl -f（未初始化/异常时 get_state.cgi 可能返回 500）
+  code="$(curl -skS --max-time 5 -o /dev/null -w '%{http_code}' \
+    "http://127.0.0.1:5000/webman/get_state.cgi" 2>/dev/null || true)"
+  if [ "${code:-000}" != "000" ]; then
     ready=1
     break
   fi
