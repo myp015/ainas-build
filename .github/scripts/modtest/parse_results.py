@@ -31,7 +31,10 @@ ANSI_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 
 HARD_CATEGORIES = {"UNKNOWN_SYMBOL", "VERMAGIC", "DEPEND", "MISSING", "OTHER",
                    "STALE_LOADED", "KERNEL_FAULT"}
-ENV_CATEGORIES = {"ENV", "BUILTIN"}
+# DEP_ENV：依赖模块因环境缺失（ENV/BUILTIN）未加载，依赖方随之 Unknown symbol。
+# 典型：非 Hyper-V 环境下 hv_vmbus "No such device"，hid_hyperv/hv_netvsc 等
+# 全部 Unknown symbol —— 属环境级联，不是模块缺陷。
+ENV_CATEGORIES = {"ENV", "BUILTIN", "DEP_ENV"}
 ALLOWABLE_CATEGORIES = ENV_CATEGORIES | {"DMESG_WARNING"}
 
 FAULT_RE = re.compile(
@@ -307,6 +310,32 @@ def analyze(args):
             skips.append(item)
         else:
             failures.append(item)
+
+    # 依赖环境级联：某模块的依赖因环境缺失（ENV/BUILTIN）未加载时（典型：
+    # 非 Hyper-V 环境的 hv_vmbus "No such device"），依赖方随之 Unknown symbol，
+    # 属环境级联而非模块缺陷。只做"降级到 DEP_ENV"，仍需白名单显式豁免。
+    dep_map = {}
+    for e in module_list:
+        dep_map.setdefault(e["name"], []).extend(
+            d.replace("-", "_")
+            for d in re.split(r"[,\s]+", e["depends"]) if d and d != "-")
+    env_down = {x["name"] for x in failures + skips
+                if x["category"] in ENV_CATEGORIES}
+    cascaded = []
+    for f in failures:
+        if f["category"] != "UNKNOWN_SYMBOL":
+            continue
+        hit = sorted({d for d in dep_map.get(f["name"], []) if d in env_down})
+        if not hit:
+            continue
+        f["category"] = "DEP_ENV"
+        f["err"] = "%s（依赖 %s 环境缺失）" % (f["err"], ",".join(hit))
+        f["allowed"] = is_allowed(f["name"], "DEP_ENV")
+        if f["allowed"]:
+            cascaded.append(f)
+    for f in cascaded:
+        failures.remove(f)
+        skips.append(f)
 
     for name, syms in unknown_syms.items():
         for f in failures:
@@ -800,6 +829,16 @@ def run_selftest():
     def prebuilt_case(root, lp):
         return ["--prebuilt"]
 
+    def dep_env_case(root, lp):
+        # b 依赖 a；a 因环境缺失（No such device）未加载，b 的 Unknown symbol
+        # 应降级为 DEP_ENV，并由白名单显式豁免。
+        write(lp, "1\ta\troot/a.ko\t\tx\troot\n"
+                  "2\tb\troot/b.ko\ta\tx\troot\n")
+        path = os.path.join(root, "allow.tsv")
+        write(path, "epyc7002\t7.4\t5.10.55\tSA6400\t*\ta\tENV\tQEMU\n"
+                    "epyc7002\t7.4\t5.10.55\tSA6400\t*\tb\tDEP_ENV\t依赖环境缺失\n")
+        return ["--allowlist", path]
+
     ok = "@@M|1|a|INSMOD_OK|0|src=x pkg=x err="
     cases = [
         scenario("S1 缺 DONE", 1, "G-M1", [ok], done=False,
@@ -836,6 +875,10 @@ def run_selftest():
                  installed=["a.ko\tOLD"], pkg="NEW"),
         scenario("S13 基线新增安装缺口", 1, "G-M5", [ok],
                  installed=["other.ko"], extra=baseline_install_case),
+        scenario("S14 依赖环境级联 DEP_ENV", 0, "DEP_ENV",
+                 ["@@M|1|a|INSMOD_FAIL|1|src=- pkg=- err=No such device",
+                  "@@M|2|b|INSMOD_FAIL|1|src=- pkg=- err=unknown symbol hv_x"],
+                 installed=["a.ko", "b.ko"], pkg="x", extra=dep_env_case),
     ]
 
     failed = 0

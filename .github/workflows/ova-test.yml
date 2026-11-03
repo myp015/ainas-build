@@ -539,7 +539,8 @@ jobs:
             MODTEST_DIR="${PART3_PATH}/modtest"
             META_DIR="$WORKDIR/modtest-meta"
             sudo mkdir -p "${MODTEST_DIR}"
-            rm -rf "$META_DIR"
+            # 不能 rm -rf：custom 内核在 docker_build 之前已把 cks-image-info.txt
+            # 写进该目录，门禁 G-M7 需要它做运行期内核身份比对。
             mkdir -p "$META_DIR"
             sudo cp .github/scripts/modtest/guest/run-module-tests.sh "${MODTEST_DIR}/"
             bash .github/scripts/make_module_list.sh \

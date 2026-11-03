@@ -7,14 +7,20 @@
 # 内核+自编模块包构建，official 允许的差异不应顺带掩盖 custom 的真缺陷。
 #
 # category 取值：ENV（硬件/虚拟环境限制）、BUILTIN（模块已内建，insmod 报 File exists）、
+#               DEP_ENV（依赖模块因环境缺失未加载导致的级联 Unknown symbol）、
 #               DMESG_WARNING（非致命内核告警）、
 #               STALE_LOADED（已加载模块 srcversion 与测试包不同，非预装模式默认硬失败）、
 #               INSTALLED_MISMATCH（系统安装的 .ko 与测试包 srcversion 不同）
 #
-# 来源：预装 OVA run 41622951773/41658007803（SA6400 / epyc7002 / DSM 7.4.1 /
+# 来源 1：预装 OVA run 41622951773/41658007803（SA6400 / epyc7002 / DSM 7.4.1 /
 # 内核 5.10.55，QEMU VM 内全量 495 条）的 17 条 INSMOD_FAIL。均为"测试虚机缺少
 # 对应硬件/固件"或"内核已内置"，与 DSM 小版本/内核版本无关（测试环境事实），
 # 因此 kver、model 用 * 通配；platform/line(7.4*) 仍限定，避免其他平台/大版本沿用被掩盖。
+# 来源 2：custom cks 内核 run 41733716293（同样 SA6400/7.4.1/5.10.55，cks 模块包
+# 681 条）。cks 包比官方包多出 Xen / Hyper-V 相关模块，测试 VM 是 KVM、既非 Xen
+# 也非 Hyper-V 宿主，这类模块必然加载失败：Xen 模块与 hv_vmbus 报 No such device，
+# 依赖 hv_vmbus 的 Hyper-V 子模块随之 Unknown symbol（解析器归类为 DEP_ENV）。
+# 仅 kernel=custom 生效，避免掩盖 official 包（不含这些模块）的其他问题。
 #
 # 维护规则：新增条目必须写明具体 errno/原因；因 Unknown symbol 等真实缺陷导致的
 # 失败严禁加入白名单，应修复模块或补编提供者。
@@ -36,3 +42,22 @@ epyc7002	7.4*	*	*	*	kvm_intel	ENV	AMD 平台且嵌套虚拟化未开启，Operat
 epyc7002	7.4*	*	*	*	nct6683	ENV	无 Nuvoton SuperIO 硬件，No such device
 epyc7002	7.4*	*	*	*	nct6775	ENV	无 Nuvoton SuperIO 硬件，No such device
 epyc7002	7.4*	*	*	*	syno_hddpwrctl_test	ENV	测试虚机无 GPIO 电源控制，Operation not permitted
+
+# ── custom（cks）内核包独有模块：Xen / Hyper-V 环境 ───────────────────────
+*	*	*	*	custom	9pnet_xen	ENV	非 Xen 宿主，9p 传输层 No such device
+*	*	*	*	custom	hv_vmbus	ENV	非 Hyper-V 宿主，VMBus 根驱动 No such device
+*	*	*	*	custom	xen_acpi_processor	ENV	非 Xen 宿主，No such device
+*	*	*	*	custom	xen_gntalloc	ENV	非 Xen 宿主，No such device
+*	*	*	*	custom	xen_gntdev	ENV	非 Xen 宿主，No such device
+*	*	*	*	custom	xen_kbdfront	ENV	非 Xen 宿主，No such device
+*	*	*	*	custom	xen_pciback	ENV	非 Xen 宿主，No such device
+*	*	*	*	custom	xen_scsifront	ENV	非 Xen 宿主，No such device
+*	*	*	*	custom	hid_hyperv	DEP_ENV	依赖 hv_vmbus，Hyper-V 宿主缺失
+*	*	*	*	custom	hv_balloon	DEP_ENV	依赖 hv_vmbus，Hyper-V 宿主缺失
+*	*	*	*	custom	hv_netvsc	DEP_ENV	依赖 hv_vmbus，Hyper-V 宿主缺失
+*	*	*	*	custom	hv_storvsc	DEP_ENV	依赖 hv_vmbus，Hyper-V 宿主缺失
+*	*	*	*	custom	hv_utils	DEP_ENV	依赖 hv_vmbus，Hyper-V 宿主缺失
+*	*	*	*	custom	hyperv_fb	DEP_ENV	依赖 hv_vmbus，Hyper-V 宿主缺失
+*	*	*	*	custom	hyperv_keyboard	DEP_ENV	依赖 hv_vmbus，Hyper-V 宿主缺失
+*	*	*	*	custom	pci_hyperv	DEP_ENV	依赖 hv_vmbus，Hyper-V 宿主缺失
+*	*	*	*	custom	uio_hv_generic	DEP_ENV	依赖 hv_vmbus，Hyper-V 宿主缺失
