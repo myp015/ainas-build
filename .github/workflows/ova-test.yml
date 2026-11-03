@@ -144,7 +144,7 @@ jobs:
           . "$AINAS2IN1_DIR/script/2in1func.sh"
 
           sudo apt-get update -qq
-          sudo apt-get install -y -qq gettext cpio zstd dosfstools rsync qemu-utils >/dev/null
+          sudo apt-get install -y -qq gettext cpio zstd dosfstools rsync qemu-utils kmod >/dev/null
 
           DISK_LOOP=$(sudo losetup -f)
           sudo losetup -P "$DISK_LOOP" rr/rr.img
@@ -314,6 +314,17 @@ jobs:
           echo "[INFO] 模块包: $(basename "${SELECTED}")"
           cp -f "${SELECTED}" "$WORKDIR/modules-test.tgz"
 
+          # ── 模块测试清单与 guest 脚本写入 p3 ────────────────────────
+          # DSM 会把额外 USB 存储命名为 synoboot（与引导盘冲突）、额外 ahci 盘
+          # 触发 NCQ 错误，因此模块包直接从引导盘 p3 读取，结果经串口回读。
+          if [ "${RUN_MODULE_TEST}" = "true" ]; then
+            MODTEST_DIR="${PART3_PATH}/modtest"
+            sudo mkdir -p "${MODTEST_DIR}"
+            sudo cp .github/scripts/modtest/guest/run-module-tests.sh "${MODTEST_DIR}/"
+            sudo bash .github/scripts/make_module_list.sh \
+              "${SELECTED}" "$KVER" "${MODTEST_DIR}" "${MODULE_LIMIT:-0}"
+          fi
+
           sudo umount "$PART3_PATH"
           sudo losetup --detach "$DISK_LOOP"
           rm -f "$WORKDIR/2in1func.sh"
@@ -332,17 +343,6 @@ jobs:
 
           echo "ARTIFACT=${ARTIFACT}" >> "$GITHUB_ENV"
           rm -f "$WORKDIR/2in1func.sh"
-
-      - name: 生成模块测试盘
-        if: inputs.run_module_test
-        shell: bash
-        run: |
-          set -euo pipefail
-          : "${KVER:?缺少 KVER}"
-          [ -f modules-test.tgz ] || { echo "[E] 缺少 modules-test.tgz" >&2; exit 1; }
-          bash .github/scripts/make_module_disk.sh \
-            modules-test.tgz "$KVER" rr/modtest.img \
-            .github/scripts/modtest/guest "${MODULE_LIMIT:-0}"
 
       - name: 启动 profile 并采集日志
         shell: bash
@@ -367,30 +367,31 @@ jobs:
           esac
 
           run_one() {
-            local profile="$1" with_moddisk="$2" cmd="$3"
-            echo "[INFO] profile=${profile} 模块盘=${with_moddisk}"
+            local profile="$1" cmd="$2"
+            echo "[INFO] profile=${profile}"
             bash .github/scripts/modtest/run_profile.sh \
-              "$PWD" "${COMPOSE}" "${profile}" "${with_moddisk}" \
+              "$PWD" "${COMPOSE}" "${profile}" \
               "${cmd}" "${LOG_DIR}" "${DRIVER}"
           }
 
-          # 1) base：不挂模块盘，只做启动日志与设备基线（也是双源对比的干净基线）
+          # 1) base：只做启动日志与设备基线（也是双源对比的干净基线）
           cp .github/scripts/modtest/probe.commands "${CMD_DIR}/base.commands"
-          run_one base false "${CMD_DIR}/base.commands"
+          run_one base "${CMD_DIR}/base.commands"
 
-          # 2) modtest：挂模块盘，逐模块 insmod
-          # 脚本本身在模块盘上，必须先由命令文件挂载，不能靠脚本自举
+          # 2) modtest：挂载引导盘 p3，逐模块 insmod
+          # 脚本在 p3 上，必须先由命令文件挂载，不能靠脚本自举
           if [ "${RUN_MODULE_TEST}" = "true" ]; then
+            : "${MODULES_KEY:?缺少 MODULES_KEY}"
             printf '%s\n' \
-              'dev=$(blkid -L MODTEST 2>/dev/null); if [ -z "$dev" ]; then for d in /dev/sd? /dev/vd?; do if [ -b "$d" ] && blkid "$d" 2>/dev/null | grep -q MODTEST; then dev="$d"; break; fi; done; fi; echo "MODTEST_DEV=$dev"; mkdir -p /mnt/modtest; mount -t ext4 -o rw "$dev" /mnt/modtest' \
-              'sh /mnt/modtest/payload/run-module-tests.sh' \
+              'P=$(ls /dev/sata1p3 2>/dev/null || true); [ -n "$P" ] || P=$(ls /dev/sd?3 2>/dev/null | head -n1); echo "MODTEST_PART=$P"; [ -n "$P" ] || exit 1; mkdir -p /mnt/modtest; mount -t ext4 -o ro "$P" /mnt/modtest' \
+              "sh /mnt/modtest/modtest/run-module-tests.sh ${MODULES_KEY}" \
               > "${CMD_DIR}/modtest.commands"
-            run_one modtest true "${CMD_DIR}/modtest.commands"
+            run_one modtest "${CMD_DIR}/modtest.commands"
           fi
 
           for p in ${PROFILES}; do
             cp .github/scripts/modtest/probe.commands "${CMD_DIR}/${p}.commands"
-            run_one "$p" false "${CMD_DIR}/${p}.commands"
+            run_one "$p" "${CMD_DIR}/${p}.commands"
           done
 
       - name: 安装/测试失败时收尾并保存镜像

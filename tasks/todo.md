@@ -8,12 +8,13 @@
 ## 计划
 - [x] 1. `.github/scripts/plan_test_sources.sh`：包装 plan_sources.sh，支持 ainas/RROrg/both，
       补充 platform/kver/modules_key，输出 base_tasks/tasks
-- [x] 2. `.github/scripts/make_module_disk.sh`：解包模块包 → modinfo 清单 + 拓扑排序 +
-      vermagic 与目标内核比对（fail fast）→ ext4 模块盘，可选条数上限
-- [x] 3. `.github/scripts/modtest/guest/run-module-tests.sh`：guest 侧挂盘（LABEL=MODTEST）、
-      安全档逐模块测试（已加载只记录、不 rmmod）、逐条 sync + progress
+- [x] 2. `.github/scripts/make_module_list.sh`：解包模块包 → modinfo 清单 + 拓扑排序 +
+      vermagic 与目标内核比对（fail fast）→ `module-list.tsv` 写入引导盘 p3 的 `modtest/`，
+      可选条数上限（原 `make_module_disk.sh` 生成独立 ext4 模块盘不可行，已删除）
+- [x] 3. `.github/scripts/modtest/guest/run-module-tests.sh`：guest 侧从引导盘 p3 读模块包，
+      安全档逐模块测试（已加载只记录、不 rmmod），结果经串口 `@@M|...` 输出
 - [x] 4. `.github/scripts/modtest/run_profile.sh` + `render_test_compose.sh`：复用已安装的
-      rr.img + data.qcow2 启动，按 profile 注入 SCSI 设备/模块盘，串口采集后回读结果
+      rr.img + data.qcow2 启动，按 profile 注入 SCSI 设备，串口执行命令并采集日志
 - [x] 5. `ainas-2in1/script/dsm_serial_driver.py`：向后兼容 `exec` 子命令
       （commit bd4432a，已推送）
 - [x] 6. `.github/workflows/ova-test.yml`：复制 ova.yml，base 改用 artifact、不写 Release、
@@ -30,6 +31,12 @@
   plan 与 prepare-base 通过，install+test 进行中。
 - 修复记录：plan 合并误用未输出的 repo 字段；run_profile 相对路径导致 cd 后找不到渲染脚本；
   Web 就绪判据改为「拿到 HTTP 状态行」。
+- 2026-11-03：run 41564874040 模块盘挂 ahci1 → QEMU IDE 盘在 AHCI 下不支持 NCQ，DSM 持续
+  `READ FPDMA QUEUED`/ABRT，启动 122s 后静默、900s Web 不就绪；改用 USB 存储。
+- 2026-11-03：run 41569653418 命令直接执行模块盘上的脚本，盘未挂载 → `No such file or directory`。
+- 2026-11-03：run 41573290378 USB 存储被 DSM 命名为 `synoboot`（`sd 18:0:0:0: [synoboot]`），
+  与引导盘冲突，`mount` 报 wrong fs type → **放弃独立模块盘方案**：模块包直接从引导盘 p3
+  （guest 内 `sata1p3`）读取，清单与 guest 脚本在编译阶段写入 `p3/modtest/`，结果全部经串口回读。
 
 ## Review
 （完成后补写）

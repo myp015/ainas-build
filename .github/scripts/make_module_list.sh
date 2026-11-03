@@ -1,46 +1,41 @@
 #!/usr/bin/env bash
 #
-# 生成模块测试用的 ext4 第二块盘（guest 内挂载读取）。
+# 生成 guest 侧模块测试清单（写入 loader p3 的 modtest/ 目录）。
 #
 # 用法：
-#   make_module_disk.sh <modules.tgz> <kver> <输出镜像> <guest脚本目录> [条数上限]
+#   make_module_list.sh <modules.tgz> <kver> <输出目录> [条数上限]
 #
 # 输入：
-#   modules.tgz   <platform>-<line>-<kver>.tgz（由 rr.img 的 p3/modules 复制）
-#   kver          内核版本（如 5.10.55）
-#   输出镜像      例如 rr/modtest.img
-#   guest脚本目录 含 run-module-tests.sh / probe.commands / read-results.sh
+#   modules.tgz  <platform>-<line>-<kver>.tgz（rr.img p3/modules 里的模块包）
+#   kver         目标内核版本（用于 vermagic fail fast）
+#   输出目录     清单与 guest 脚本落在这里，随 rr.img 一起被 DSM 读取
+#   条数上限     >0 时只保留拓扑序前 N 条（CI smoke 用），0=全部
 #
-# 盘内布局：
-#   /payload/modules/       解包后的 .ko（含 update/）
-#   /payload/module-list.tsv 拓扑排序后的清单
-#   /payload/run-module-tests.sh
-#   /payload/probe.commands
-#   /results/               测试结果（guest 写入，host 回读）
+# 输出文件：
+#   <输出目录>/module-list.tsv   idx name rel depends ko_srcver policy
+#   <输出目录>/run-module-tests.sh（由调用方复制 guest 脚本）
+#
+# 说明：不再生成独立的 ext4 模块盘。实测 DSM 会把额外的 USB 存储命名为
+# synoboot（与引导盘冲突）、把额外 ahci 盘当内部盘并触发 NCQ 错误，因此
+# 模块包直接从引导盘 p3 读取，测试结果经串口输出。
 
 set -euo pipefail
 
 MODULES_TGZ="${1:?缺少 modules.tgz}"
 KVER="${2:?缺少 kver}"
-OUT_IMG="${3:?缺少输出镜像路径}"
-GUEST_DIR="${4:?缺少 guest 脚本目录}"
-LIMIT="${5:-0}"  # >0 时只保留清单前 N 条（CI smoke 用），0=全部
+OUT_DIR="${3:?缺少输出目录}"
+LIMIT="${4:-0}"
 
-command -v mkfs.ext4 >/dev/null || { echo "[E] 缺少 mkfs.ext4（安装 e2fsprogs）" >&2; exit 1; }
 command -v modinfo >/dev/null || { echo "[E] 缺少 modinfo（安装 kmod）" >&2; exit 1; }
 
 WORK="$(mktemp -d)"
 trap 'rm -rf "${WORK}"' EXIT
 
-STAGE="${WORK}/stage"
-PAYLOAD="${STAGE}/payload"
-mkdir -p "${PAYLOAD}/modules" "${STAGE}/results"
+EXTRACT="${WORK}/modules"
+mkdir -p "${EXTRACT}" "${OUT_DIR}"
+tar xzf "${MODULES_TGZ}" -C "${EXTRACT}"
 
-echo "[INFO] 解包模块包: ${MODULES_TGZ}"
-tar xzf "${MODULES_TGZ}" -C "${PAYLOAD}/modules"
-
-# ── 生成模块清单（name / relpath / depends / srcversion / policy）────
-python3 - "${PAYLOAD}/modules" "${PAYLOAD}/module-list.tsv" "${LIMIT}" "${KVER}" <<'PY'
+python3 - "${EXTRACT}" "${OUT_DIR}/module-list.tsv" "${LIMIT}" "${KVER}" <<'PY'
 import os, subprocess, sys
 
 root, out, limit, kver = sys.argv[1], sys.argv[2], int(sys.argv[3]), sys.argv[4]
@@ -76,8 +71,6 @@ for dirpath, _dirnames, filenames in os.walk(root):
             "srcver": srcver, "policy": policy,
         })
 
-# fail fast：模块与安装内核版本不一致时，逐个 insmod 只会得到一片无意义的
-# version magic 报错，必须在生成测试盘前就暴露
 if vermagics:
     bad = sorted(v for v in vermagics if kver not in v)
     print("[INFO] 模块 vermagic: %s" % ", ".join(sorted(vermagics)))
@@ -87,17 +80,16 @@ if vermagics:
 else:
     print("[WARN] 无法读取 vermagic（modinfo 不可用？）")
 
-# 同名模块（root 与 update/）保留两条，但依赖图按 name 去重（优先 root）
+# 同名模块（root 与 update/）保留两条，依赖图按 name 去重（优先 root）
 by_name = {}
 for e in entries:
     if e["name"] not in by_name or e["policy"] == "root":
         by_name[e["name"]] = e
 
-# 拓扑排序：依赖在前；循环依赖/缺失依赖的节点最后追加
 ordered, done, visiting = [], set(), set()
 
 
-def visit(name, chain=()):
+def visit(name):
     if name in done or name not in by_name:
         return
     if name in visiting:
@@ -106,7 +98,7 @@ def visit(name, chain=()):
     for dep in by_name[name]["depends"].split():
         dep = dep.strip()
         if dep:
-            visit(dep, chain + (name,))
+            visit(dep)
     visiting.discard(name)
     done.add(name)
     ordered.append(by_name[name])
@@ -115,12 +107,10 @@ def visit(name, chain=()):
 for name in sorted(by_name):
     visit(name)
 
-# 未被拓扑到的（循环依赖）追加在末尾
 for name in sorted(by_name):
     if name not in done:
         ordered.append(by_name[name])
 
-# 输出顺序：拓扑序的 root/update 条目 + 同名 update 条目附在最后
 lines = []
 idx = 0
 for e in ordered:
@@ -128,7 +118,6 @@ for e in ordered:
     lines.append("%d\t%s\t%s\t%s\t%s\t%s" % (
         idx, e["name"], e["rel"], e["depends"].replace("\t", " "),
         e["srcver"], e["policy"]))
-# 补上被去重的 update 同名条目（安全档下会因已加载而跳过）
 for e in entries:
     if e["policy"] == "update" and by_name.get(e["name"], {}).get("rel") != e["rel"]:
         idx += 1
@@ -147,20 +136,5 @@ with open(out, "w", encoding="utf-8") as f:
 print("[INFO] 模块条目: %d（去重后拓扑节点: %d）" % (len(lines), len(ordered)))
 PY
 
-cp -f "${GUEST_DIR}/run-module-tests.sh" "${PAYLOAD}/run-module-tests.sh"
-chmod +x "${PAYLOAD}/run-module-tests.sh"
-
-# ── 生成 ext4 镜像（-d 直接灌目录，无需 mount）────────────────────────
-SIZE_MB=$(du -sm "${STAGE}" | cut -f1)
-SIZE_MB=$((SIZE_MB + 96))
-[ "${SIZE_MB}" -lt 256 ] && SIZE_MB=256
-if [ "${SIZE_MB}" -gt 2048 ]; then
-  echo "[E] 模块盘需要 ${SIZE_MB}MB，超过 2GB 上限" >&2
-  exit 1
-fi
-echo "[INFO] 生成 ext4 模块盘: ${OUT_IMG}（${SIZE_MB}MB）"
-truncate -s "${SIZE_MB}M" "${OUT_IMG}"
-mkfs.ext4 -F -q -L MODTEST -d "${STAGE}" "${OUT_IMG}"
-
-echo "[INFO] 模块盘校验:"
-debugfs -R 'ls -l /payload' "${OUT_IMG}" 2>/dev/null | head -n 10
+echo "[INFO] 清单已写入: ${OUT_DIR}/module-list.tsv"
+wc -l "${OUT_DIR}/module-list.tsv"
