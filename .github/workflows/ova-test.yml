@@ -61,6 +61,10 @@ on:
           - "仅 megaraid"
           - "仅 mptsas"
         default: "跳过"
+      run_base_profile:
+        description: "先跑 base 基线（关闭可省一次启动，仅做模块验证时建议关闭）"
+        type: boolean
+        default: true
       run_module_test:
         description: "逐个 insmod 模块（安全档）"
         type: boolean
@@ -316,6 +320,7 @@ jobs:
       OVA_ASSET_GLOB: ${{ matrix.ova_asset_glob }}
       MODULES_RELEASE_TAG: ${{ matrix.modules_release_tag }}
       SCSI_PROFILES: ${{ inputs.scsi_profiles }}
+      RUN_BASE_PROFILE: ${{ inputs.run_base_profile }}
       RUN_MODULE_TEST: ${{ inputs.run_module_test }}
       MODULE_LIMIT: ${{ inputs.module_limit }}
       BOOT_TIMEOUT: ${{ inputs.boot_timeout }}
@@ -527,8 +532,11 @@ jobs:
           }
 
           # 1) base：只做启动日志与设备基线（也是双源对比的干净基线）
-          cp .github/scripts/modtest/probe.commands "${CMD_DIR}/base.commands"
-          run_one base "${CMD_DIR}/base.commands"
+          #    仅做模块验证时可关闭，省一次完整启动（约 3~4 分钟）
+          if [ "${RUN_BASE_PROFILE}" = "true" ]; then
+            cp .github/scripts/modtest/probe.commands "${CMD_DIR}/base.commands"
+            run_one base "${CMD_DIR}/base.commands"
+          fi
 
           # 2) modtest：挂载引导盘 p3，逐模块 insmod
           # 脚本在 p3 上，必须先由命令文件挂载，不能靠脚本自举
