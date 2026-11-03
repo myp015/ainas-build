@@ -293,7 +293,11 @@ jobs:
           sudo mkdir -p "$PART3_PATH"
           sudo mount "${DISK_LOOP}p3" "$PART3_PATH"
           sudo rm -rf "$PART3_PATH/dl" "$PART3_PATH/auxfiles" "$PART3_PATH/logs"
-          trim_p3_assets "$PART3_PATH" "$MODEL"
+          # 测试工作流不裁剪 p3：modules/ 与 lkms/ 保留全平台模块（约 1.4G），
+          # guest 挂载引导盘 p3 即可直接取用本平台模块包。正式 ova.yml 仍走裁剪。
+          echo "[INFO] 测试工作流跳过 trim_p3_assets（保留全平台 modules/lkms/cks）"
+          [ -d "$PART3_PATH/modules" ] && [ -d "$PART3_PATH/lkms" ] || {
+            echo "[E] p3 缺少 modules/lkms 目录" >&2; exit 1; }
           rr_menu_apply "$PART3_PATH" slim
 
           # ── 取出本平台模块包，供模块测试盘使用 ──────────────────────

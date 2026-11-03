@@ -37,6 +37,10 @@
 - 2026-11-03：run 41573290378 USB 存储被 DSM 命名为 `synoboot`（`sd 18:0:0:0: [synoboot]`），
   与引导盘冲突，`mount` 报 wrong fs type → **放弃独立模块盘方案**：模块包直接从引导盘 p3
   （guest 内 `sata1p3`）读取，清单与 guest 脚本在编译阶段写入 `p3/modtest/`，结果全部经串口回读。
+- 2026-11-03：用户指令：p3 的 modules/ 与 lkms/ 本身就是全平台模块，不裁剪即可挂载调用
+  → 测试工作流跳过 `trim_p3_assets`（保留全平台资产约 1.4G，引导镜像 p3 为 2.4G 可容纳）。
+- 2026-11-03：run 41577570778 modtest 启动后串口登录失败（`login: timed out after 60 seconds`
+  后 serial getty 重启）→ 驱动 `login()` 增加最多 4 次重试（commit cfa12ad）。
 
 ## Review
 （完成后补写）
