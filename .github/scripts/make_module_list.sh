@@ -3,13 +3,20 @@
 # 生成 guest 侧模块测试清单（写入 loader p3 的 modtest/ 目录）。
 #
 # 用法：
-#   make_module_list.sh <modules.tgz> <kver> <输出目录> [条数上限]
+#   make_module_list.sh <modules.tgz> <kver> <输出目录> [条数上限] [平台]
 #
 # 输入：
 #   modules.tgz  <platform>-<line>-<kver>.tgz（rr.img p3/modules 里的模块包）
 #   kver         目标内核版本（用于 vermagic fail fast）
 #   输出目录     清单与 guest 脚本落在这里，随 rr.img 一起被 DSM 读取
 #   条数上限     >0 时只保留拓扑序前 N 条（CI smoke 用），0=全部
+#   平台         可选；给出时按 modtest/known-hazards.tsv 匹配，命中模块
+#                policy 置 hazard（guest 侧只记录、绝不 insmod）
+#
+# policy 取值：
+#   root     常规模块，未加载则 insmod
+#   update   update/ 同名模块，root 已加载时 SKIP_UPDATE
+#   hazard   已知官方内核缺陷，guest 一律 SKIP_HAZARD
 #
 # 输出文件：
 #   <输出目录>/module-list.tsv   idx name rel depends ko_srcver policy
@@ -25,6 +32,10 @@ MODULES_TGZ="${1:?缺少 modules.tgz}"
 KVER="${2:?缺少 kver}"
 OUT_DIR="${3:?缺少输出目录}"
 LIMIT="${4:-0}"
+PLATFORM="${5:-}"
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+HAZARDS="${SCRIPT_DIR}/modtest/known-hazards.tsv"
 
 command -v modinfo >/dev/null || { echo "[E] 缺少 modinfo（安装 kmod）" >&2; exit 1; }
 
@@ -35,10 +46,35 @@ EXTRACT="${WORK}/modules"
 mkdir -p "${EXTRACT}" "${OUT_DIR}"
 tar xzf "${MODULES_TGZ}" -C "${EXTRACT}"
 
-python3 - "${EXTRACT}" "${OUT_DIR}/module-list.tsv" "${LIMIT}" "${KVER}" <<'PY'
+python3 - "${EXTRACT}" "${OUT_DIR}/module-list.tsv" "${LIMIT}" "${KVER}" \
+          "${PLATFORM}" "${HAZARDS}" <<'PY'
 import os, re, subprocess, sys
 
-root, out, limit, kver = sys.argv[1], sys.argv[2], int(sys.argv[3]), sys.argv[4]
+(root, out, limit, kver,
+ platform, hazards_path) = sys.argv[1], sys.argv[2], int(sys.argv[3]), sys.argv[4], \
+                          sys.argv[5], sys.argv[6]
+
+
+def load_hazards(path, platform):
+    """读取 platform<TAB>module<TAB>原因；platform 支持 *。"""
+    if not platform or not os.path.exists(path):
+        return set()
+    hit = set()
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            parts = line.split("\t")
+            if len(parts) < 2:
+                raise SystemExit("[E] known-hazards 行格式非法: %r" % line)
+            p, mod = parts[0].strip(), parts[1].strip()
+            if p in (platform, "*"):
+                hit.add(mod.replace("-", "_"))
+    return hit
+
+
+HAZARDS = load_hazards(hazards_path, platform)
 
 
 def modinfo(path, field):
@@ -66,6 +102,10 @@ for dirpath, _dirnames, filenames in os.walk(root):
         if vm:
             vermagics.add(vm)
         policy = "update" if rel.startswith("update/") else "root"
+        # 已知官方内核缺陷：无论 root/update 一律置 hazard，guest 不加载
+        if name.replace("-", "_") in HAZARDS:
+            policy = "hazard"
+            print("[WARN] 命中 known-hazards: %s (%s)" % (name, rel))
         entries.append({
             "name": name, "rel": rel, "depends": depends,
             "srcver": srcver, "policy": policy,

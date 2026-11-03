@@ -6,7 +6,7 @@
 # 用法：
 #   prepare_prebuilt.sh <source> <model> <modules_key> <kver> \
 #       <ova_release_tag> <ova_asset_glob> <modules_release_tag> \
-#       <run_module_test> <module_limit>
+#       <run_module_test> <module_limit> [platform]
 #
 # 前置：
 #   - 工作目录为仓库根（$PWD），需已有 .2in1（ainas-2in1 检出）；
@@ -36,6 +36,7 @@ OVA_ASSET_GLOB="${6:?缺少 ova_asset_glob}"
 MODULES_RELEASE_TAG="${7:?缺少 modules_release_tag}"
 RUN_MODULE_TEST="${8:-false}"
 MODULE_LIMIT="${9:-0}"
+PLATFORM="${10:-${MODULES_KEY%%-*}}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORKDIR="$PWD"
@@ -166,7 +167,8 @@ if [ "${RUN_MODULE_TEST}" = "true" ]; then
   sudo cp -f "${MOD_TGZ}" "/mnt/p3/modules/${MODULES_KEY}.tgz"
   sudo cp -f "${SCRIPT_DIR}/guest/run-module-tests.sh" /mnt/p3/modtest/
   sudo bash "${WORKDIR}/.github/scripts/make_module_list.sh" \
-    "/mnt/p3/modules/${MODULES_KEY}.tgz" "${KVER}" "/mnt/p3/modtest" "${MODULE_LIMIT:-0}"
+    "/mnt/p3/modules/${MODULES_KEY}.tgz" "${KVER}" "/mnt/p3/modtest" "${MODULE_LIMIT:-0}" \
+    "${PLATFORM}"
   sudo sync
 
   sudo umount /mnt/p3

@@ -13,7 +13,8 @@
 # 安全规则：
 #   - 已加载模块只记录（/proc/modules + /sys/module/<name>/srcversion），绝不 rmmod；
 #   - 未加载模块逐个 insmod，记录 rc 与错误文本；
-#   - update/ 同名模块在 root 已加载时记为 SKIP_UPDATE。
+#   - update/ 同名模块在 root 已加载时记为 SKIP_UPDATE；
+#   - 清单 policy=hazard（known-hazards.tsv 命中的官方内核缺陷）记为 SKIP_HAZARD，不加载。
 
 set -u
 
@@ -63,6 +64,13 @@ while IFS='	' read -r idx name rel depends ko_srcver policy; do
       loaded=$((loaded + 1))
     fi
     echo "@@M|${idx}|${name}|${state}|-|src=${sys_src}"
+    continue
+  fi
+
+  # 已知官方内核缺陷（清单 policy=hazard）：只记录，绝不 insmod，避免打挂测试机
+  if [ "${policy}" = "hazard" ]; then
+    echo "@@M|${idx}|${name}|SKIP_HAZARD|-|official_kernel_bug"
+    skip=$((skip + 1))
     continue
   fi
 

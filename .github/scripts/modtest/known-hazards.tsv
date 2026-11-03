@@ -1,0 +1,10 @@
+# 模块测试已知风险清单（platform<TAB>module<TAB>原因）
+#
+# 命中规则：清单生成时若给出 platform，且 (platform, module) 命中本表，
+# 该模块 policy 置为 hazard；guest 侧对该模块只记录 SKIP_HAZARD，绝不 insmod。
+# platform 可写 * 表示对所有平台生效。module 用 modinfo -F name 的下划线名。
+# 只收录"加载会打挂测试机、但成因与我们的模块编译无关"的官方内核缺陷，
+# 形态必须是官方内核 bug（否则应修源码/配置，而不是豁免）。
+
+geminilake	scsi_debug	官方 4.4.302 内核 syno_usb_info_enum 空指针(0xe0)：加载假 SCSI 盘触发 sd_probe -> redpill sd_probe_shim 崩溃，后续 insmod 永久挂起
+r1000	scsi_debug	官方 4.4.302 内核 syno_usb_info_enum 空指针(0xe0)：同 geminilake，sd_probe -> redpill sd_probe_shim 路径

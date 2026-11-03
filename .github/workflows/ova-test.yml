@@ -461,7 +461,7 @@ jobs:
             sudo mkdir -p "${MODTEST_DIR}"
             sudo cp .github/scripts/modtest/guest/run-module-tests.sh "${MODTEST_DIR}/"
             sudo bash .github/scripts/make_module_list.sh \
-              "${SELECTED}" "$KVER" "${MODTEST_DIR}" "${MODULE_LIMIT:-0}"
+              "${SELECTED}" "$KVER" "${MODTEST_DIR}" "${MODULE_LIMIT:-0}" "${PLATFORM}"
           fi
 
           sudo umount "$PART3_PATH"
@@ -499,7 +499,7 @@ jobs:
           bash .github/scripts/modtest/prepare_prebuilt.sh \
             "${SOURCE}" "${MODEL}" "${MODULES_KEY}" "${KVER}" \
             "${OVA_RELEASE_TAG}" "${OVA_ASSET_GLOB}" "${MODULES_RELEASE_TAG}" \
-            "${RUN_MODULE_TEST}" "${MODULE_LIMIT:-0}"
+            "${RUN_MODULE_TEST}" "${MODULE_LIMIT:-0}" "${PLATFORM}"
 
       - name: 启动 profile 并采集日志
         shell: bash
