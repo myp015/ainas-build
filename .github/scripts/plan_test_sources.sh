@@ -15,11 +15,16 @@
 #   GH_TOKEN / RR_SOURCE / RR_VERSION / DSM_VERSION / ALL_MODELS /
 #   CUSTOM_MODELS / MODEL_DS918P ... MODEL_DS425P
 #   MODELS_JSON    models.json 路径（默认 .2in1-plan/script/models.json）
+#   USE_PREBUILT   true=复用已安装的成品 OVA（跳过 base 构建与安装）
+#   PREBUILT_VERSIONS  "ainas=26.11.0,RROrg=26.9.0"：各源成品 OVA 的版本号，
+#                  用于拼 Release 名 <source>-ova-<version>
+#   MODULES_VERSION   模块包版本（留空=取 myp015/syno-modules 最新 Release）
 #
 # 输出（GITHUB_OUTPUT）：
 #   base_tasks       [{source, rr_tag, rr_asset_url, release_tag, base_asset, docker_image, docker_tag}]
 #   tasks            [{source, model, model_slug, platform, kver, modules_key,
-#                      rr_tag, release_tag, base_asset, docker_image, docker_tag}]
+#                      rr_tag, release_tag, base_asset, docker_image, docker_tag,
+#                      ova_release_tag, ova_asset_glob, modules_release_tag}]
 #   task_count
 
 set -euo pipefail
@@ -47,6 +52,24 @@ if [ ! -f "${MODELS_JSON}" ]; then
 fi
 
 DSM_LINE="${DSM_VERSION%.*}"
+
+# ── 预装成品模式：解析各源 OVA Release 与模块包版本 ─────────────────────
+USE_PREBUILT="${USE_PREBUILT:-false}"
+case "${USE_PREBUILT}" in
+  true|false) ;;
+  *) echo "[E] USE_PREBUILT 只允许 true/false: ${USE_PREBUILT}" >&2; exit 1 ;;
+esac
+
+MODULES_RELEASE_TAG="${MODULES_VERSION:-}"
+if [ "${USE_PREBUILT}" = "true" ] && [ -z "${MODULES_RELEASE_TAG}" ]; then
+  # 最新模块包 Release（与主流程发布物同源）
+  MODULES_RELEASE_TAG="$(GH_REPO=myp015/syno-modules gh release view --json tagName --jq '.tagName')"
+fi
+if [ "${USE_PREBUILT}" = "true" ]; then
+  [ -n "${MODULES_RELEASE_TAG}" ] || {
+    echo "[E] 无法解析 syno-modules 最新 Release 版本" >&2; exit 1; }
+fi
+export USE_PREBUILT MODULES_RELEASE_TAG PREBUILT_VERSIONS DSM_VERSION
 
 # TEST_MODELS（逗号分隔）优先于 ALL_MODELS/MODEL_*：
 # 阶段 1 只跑一个型号，脚本把它翻译成 plan_sources.sh 认识的开关。
@@ -92,6 +115,29 @@ work, models_json, line = sys.argv[1], sys.argv[2], sys.argv[3]
 sources_arg = sys.argv[4:]
 
 models = json.load(open(models_json, encoding="utf-8"))
+
+use_prebuilt = os.environ.get("USE_PREBUILT", "false") == "true"
+modules_release_tag = os.environ.get("MODULES_RELEASE_TAG", "")
+dsm_version = os.environ.get("DSM_VERSION", "")
+
+# 预装成品 OVA 的版本映射：ainas=26.11.0,RROrg=26.9.0
+prebuilt_versions = {}
+raw_versions = os.environ.get("PREBUILT_VERSIONS", "").strip()
+if use_prebuilt and raw_versions:
+    for item in raw_versions.split(","):
+        item = item.strip()
+        if not item:
+            continue
+        if "=" not in item:
+            raise SystemExit("[E] PREBUILT_VERSIONS 格式错误（应为 ainas=26.11.0,RROrg=26.9.0）: %s" % item)
+        k, v = item.split("=", 1)
+        prebuilt_versions[k.strip()] = v.strip()
+
+# 成品 OVA 资产名形如 SA6400_741_90080_ainas_26_11_0.ova.gz / DS918+_741_...，
+# 其中 741 是 DSM 主版本号数字（7.4.1 -> 741）；用它与当前 dsm_version 做匹配校验。
+dsm_ver_digits = dsm_version.replace(".", "")
+if use_prebuilt and not dsm_ver_digits:
+    raise SystemExit("[E] 预装成品模式必须提供 DSM_VERSION")
 
 
 def parse_output(path):
@@ -149,6 +195,15 @@ for src in sources_arg:
         if t.get("kind", "normal") != "normal":
             continue
         platform, kver = locate(model)
+        ova_release_tag = ""
+        ova_asset_glob = ""
+        if use_prebuilt:
+            ver = prebuilt_versions.get(src)
+            if not ver:
+                raise SystemExit(
+                    "[E] 预装成品模式缺少 %s 源版本（PREBUILT_VERSIONS）" % src)
+            ova_release_tag = "%s-ova-%s" % (src, ver)
+            ova_asset_glob = "%s_%s_*.ova.gz" % (model, dsm_ver_digits)
         tasks.append({
             "source": src,
             "model": model,
@@ -161,6 +216,9 @@ for src in sources_arg:
             "base_asset": base_asset,
             "docker_image": cfg["docker_image"],
             "docker_tag": cfg.get("docker_tag", "latest"),
+            "ova_release_tag": ova_release_tag,
+            "ova_asset_glob": ova_asset_glob,
+            "modules_release_tag": modules_release_tag,
         })
 
 

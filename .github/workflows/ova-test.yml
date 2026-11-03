@@ -9,7 +9,10 @@
 #      逐 profile 重启 DSM，采集启动日志；
 #   4. modtest profile 挂载引导盘 p3（/dev/synoboot3, ext4），安全档逐个 insmod 模块，
 #      结果经串口回读；
-#   5. 可选 SCSI 控制器 profile（virtio-scsi / megaraid / mptsas）验证驱动。
+#   5. 可选 SCSI 控制器 profile（virtio-scsi / megaraid / mptsas）验证驱动；
+#   6. use_prebuilt=true 时直接复用正式发布 Release 里已安装的成品 OVA
+#      （ainas-ova-<tag> / RROrg-ova-<tag>），跳过 base 构建与 DSM 安装，
+#      仍从 syno-modules 取同一份模块包注入 p3 后逐模块测试。
 #
 # 阶段 1 默认：rr_source=ainas、test_models=SA6400、scsi_profiles=跳过。
 name: Build RR-OVA Test
@@ -74,6 +77,18 @@ on:
         description: "覆盖测试版 base（默认复用 Release 中已存在的 base）"
         type: boolean
         default: false
+      use_prebuilt:
+        description: "复用已安装的成品 OVA（跳过 base 构建与 DSM 安装）"
+        type: boolean
+        default: false
+      prebuilt_versions:
+        description: "各源成品 OVA 版本（ainas=26.11.0,RROrg=26.9.0）"
+        type: string
+        default: "ainas=26.11.0,RROrg=26.9.0"
+      modules_version:
+        description: "模块包版本（留空=取 myp015/syno-modules 最新 Release）"
+        type: string
+        default: ""
 
 jobs:
   # 解析源版本、型号→平台映射，生成两个 matrix。
@@ -103,13 +118,18 @@ jobs:
           DSM_VERSION: ${{ inputs.dsm_version }}
           TEST_MODELS: ${{ inputs.test_models }}
           CUSTOM_MODELS: ${{ inputs.custom_models }}
+          USE_PREBUILT: ${{ inputs.use_prebuilt }}
+          PREBUILT_VERSIONS: ${{ inputs.prebuilt_versions }}
+          MODULES_VERSION: ${{ inputs.modules_version }}
           MODELS_JSON: .2in1-plan/script/models.json
         run: bash .github/scripts/plan_test_sources.sh
 
   # 公共 base：每个源只做一次，上传到独立 test Release 供跨 run 复用。
+  # 预装成品模式不需要 base（直接用已安装 OVA），整个 job 跳过。
   prepare-base:
     name: prepare-base (${{ matrix.source }})
     needs: [plan]
+    if: ${{ inputs.use_prebuilt != true }}
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
@@ -266,6 +286,9 @@ jobs:
   build-install:
     name: ${{ format('install+test ({0}/{1})', matrix.source, matrix.model) }}
     needs: [plan, prepare-base]
+    # prepare-base 在预装模式下会被跳过；默认的 needs 语义会连带跳过本 job，
+    # 因此显式允许 skipped。
+    if: ${{ always() && needs.plan.result == 'success' && (needs.prepare-base.result == 'success' || needs.prepare-base.result == 'skipped') }}
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
@@ -288,6 +311,9 @@ jobs:
       BASE_ASSET: ${{ matrix.base_asset }}
       RR_DOCKER_IMAGE: ${{ matrix.docker_image }}
       RR_DOCKER_TAG: ${{ matrix.docker_tag }}
+      OVA_RELEASE_TAG: ${{ matrix.ova_release_tag }}
+      OVA_ASSET_GLOB: ${{ matrix.ova_asset_glob }}
+      MODULES_RELEASE_TAG: ${{ matrix.modules_release_tag }}
       SCSI_PROFILES: ${{ inputs.scsi_profiles }}
       RUN_MODULE_TEST: ${{ inputs.run_module_test }}
       MODULE_LIMIT: ${{ inputs.module_limit }}
@@ -309,6 +335,7 @@ jobs:
           path: .2in1
 
       - name: 下载公共 base（测试 Release）
+        if: inputs.use_prebuilt != true
         shell: bash
         env:
           ACTION_TOKEN: ${{ secrets.AiNas }}
@@ -334,6 +361,7 @@ jobs:
           fi
 
       - name: 编译镜像并安装 DSM
+        if: inputs.use_prebuilt != true
         shell: bash
         run: |
           set -euo pipefail
@@ -448,6 +476,24 @@ jobs:
 
           echo "ARTIFACT=${ARTIFACT}" >> "$GITHUB_ENV"
           rm -f "$WORKDIR/2in1func.sh"
+
+      # 预装成品模式：下载已安装 OVA -> 还原 rr.img/data.qcow2 -> 注入模块包。
+      # 跳过 base 构建与 DSM 安装（节省 20+ 分钟）。
+      - name: 下载预装成品 OVA 并准备磁盘
+        if: inputs.use_prebuilt == true
+        shell: bash
+        env:
+          ACTION_TOKEN: ${{ secrets.AiNas }}
+        run: |
+          set -euo pipefail
+          : "${ACTION_TOKEN:?缺少 ACTION_TOKEN}"
+          : "${OVA_RELEASE_TAG:?缺少 OVA_RELEASE_TAG}"
+          : "${OVA_ASSET_GLOB:?缺少 OVA_ASSET_GLOB}"
+          export GH_TOKEN="$ACTION_TOKEN"
+          bash .github/scripts/modtest/prepare_prebuilt.sh \
+            "${SOURCE}" "${MODEL}" "${MODULES_KEY}" "${KVER}" \
+            "${OVA_RELEASE_TAG}" "${OVA_ASSET_GLOB}" "${MODULES_RELEASE_TAG}" \
+            "${RUN_MODULE_TEST}" "${MODULE_LIMIT:-0}"
 
       - name: 启动 profile 并采集日志
         shell: bash

@@ -61,6 +61,16 @@
   （unpackInitrd 解包 initrd-rr / 生成语言文件 / rr menu.sh 升级菜单 / repackInitrd）；
   base 上传到独立命名的 Release 以便重复调用。已在 prepare-base 中跳过两个补丁，
   新增 overwrite_base 开关与 Release 复用检查。
+- 2026-11-03：run 41597730680 全绿（ainas/SA6400）：prepare-base 命中已有
+  `test-ova-ainas-26.11.0` base 直接复用；安装、base profile、modtest profile 全部成功，
+  20 个模块结果 `total=20 loaded=7 ok=10 fail=3`（与 run 41593744122 一致）。
+- 2026-11-03：用户指令：已有安装好的成品 OVA 可直接启动——改用
+  `ainas-ova-26.11.0` / `RROrg-ova-26.9.0` Release 里 `*_741_*.ova.gz`（已安装，
+  DSM 7.4.1/90080，与当前测试版本一致）。新增 `use_prebuilt`、`prebuilt_versions`、
+  `modules_version` 输入；新增 `prepare_prebuilt.sh`：gzip 流式解包 OVA →
+  按 `qemu-img` 虚机容量区分启动盘（2.5G）/数据盘（12G，不依赖 ovftool 命名）→
+  转 raw qcow2 → 从 syno-modules 取同一份平台模块包注入 p3 的 modules/ 与 modtest/。
+  预装模式下 prepare-base 与安装步骤整体跳过。
 
 ## Review
 （完成后补写）
