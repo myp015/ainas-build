@@ -1,0 +1,33 @@
+# 模块测试失败白名单（仅允许环境类失败，Unknown symbol / vermagic / 内核崩溃不得入内）
+#
+# 格式（TAB 分隔，7 列；前 6 列支持 glob/fnmatch，* 表示通配）：
+#   platform  line  kver  model  name  category  reason
+#
+# category 取值：ENV（硬件/虚拟环境限制）、BUILTIN（模块已内建，insmod 报 File exists）、
+#               DMESG_WARNING（非致命内核告警）
+#
+# 来源：run 41622951773（SA6400 / epyc7002 / DSM 7.4.1 / 官方 4.4.302，QEMU VM 内全量
+# 495 条）的 17 条 INSMOD_FAIL。均为"测试虚机缺少对应硬件/固件"或"内核已内置"，
+# 与平台/DSM 小版本/内核版本无关（测试环境事实），因此 kver、model 用 * 通配；
+# platform/line 仍限定，避免其他平台沿用被掩盖。
+#
+# 维护规则：新增条目必须写明具体 errno/原因；因 Unknown symbol 等真实缺陷导致的
+# 失败严禁加入白名单，应修复模块或补编提供者。
+
+epyc7002	7.4	*	*	acpi_cpufreq	ENV	QEMU 虚拟 CPU 无 P-state 能力，No such device
+epyc7002	7.4	*	*	binder_linux	BUILTIN	内核已内置 binder，insmod 报 File exists
+epyc7002	7.4	*	*	ch35x_38x	ENV	测试虚机无 WCH 串并卡，No such device or address
+epyc7002	7.4	*	*	coretemp	ENV	QEMU 无 Intel CPU 温度传感器，No such device
+epyc7002	7.4	*	*	cpufreq_userspace	ENV	引导期已有 cpufreq 治理者占用，Device or resource busy
+epyc7002	7.4	*	*	f71882fg	ENV	无 Fintek SuperIO 硬件，No such device
+epyc7002	7.4	*	*	gpio_f7188x	ENV	无 Fintek SuperIO 硬件，No such device
+epyc7002	7.4	*	*	gpio_it87	ENV	无 ITE SuperIO 硬件，No such device
+epyc7002	7.4	*	*	gpio_sch311x	ENV	无 SMSC SuperIO 硬件，No such device
+epyc7002	7.4	*	*	intel_idle	ENV	QEMU 虚拟 CPU 无 intel_idle 支持，No such device
+epyc7002	7.4	*	*	ipmi_si	ENV	测试虚机无 BMC/IPMI 控制器，No such device
+epyc7002	7.4	*	*	it87	ENV	无 ITE SuperIO 硬件，No such device
+epyc7002	7.4	*	*	kvm_amd	ENV	嵌套虚拟化未开启，Operation not supported
+epyc7002	7.4	*	*	kvm_intel	ENV	AMD 平台且嵌套虚拟化未开启，Operation not supported
+epyc7002	7.4	*	*	nct6683	ENV	无 Nuvoton SuperIO 硬件，No such device
+epyc7002	7.4	*	*	nct6775	ENV	无 Nuvoton SuperIO 硬件，No such device
+epyc7002	7.4	*	*	syno_hddpwrctl_test	ENV	测试虚机无 GPIO 电源控制，Operation not permitted

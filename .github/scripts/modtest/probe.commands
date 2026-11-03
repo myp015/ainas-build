@@ -1,7 +1,11 @@
 # 每条一行，由 dsm_serial_driver.py exec 逐条发送并在 guest 执行。
 # 只读探测：版本、模块、SCSI host、块设备、驱动 srcversion、dmesg 尾部。
+uname -a
 uname -r
 cat /proc/version
+cat /proc/cmdline
+cat /sys/devices/system/cpu/possible 2>/dev/null
+cat /sys/devices/system/cpu/online 2>/dev/null
 cat /etc.defaults/VERSION
 lsmod
 cat /proc/modules

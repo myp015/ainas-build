@@ -166,9 +166,30 @@ if [ "${RUN_MODULE_TEST}" = "true" ]; then
   sudo mkdir -p /mnt/p3/modules /mnt/p3/modtest
   sudo cp -f "${MOD_TGZ}" "/mnt/p3/modules/${MODULES_KEY}.tgz"
   sudo cp -f "${SCRIPT_DIR}/guest/run-module-tests.sh" /mnt/p3/modtest/
-  sudo bash "${WORKDIR}/.github/scripts/make_module_list.sh" \
-    "/mnt/p3/modules/${MODULES_KEY}.tgz" "${KVER}" "/mnt/p3/modtest" "${MODULE_LIMIT:-0}" \
-    "${PLATFORM}"
+
+  # 清单先落 $WORKDIR/modtest-meta（供门禁解析并随 artifact 上传），再复制进 p3
+  META_DIR="${WORKDIR}/modtest-meta"
+  rm -rf "${META_DIR}"
+  mkdir -p "${META_DIR}"
+  bash "${WORKDIR}/.github/scripts/make_module_list.sh" \
+    "${MOD_TGZ}" "${KVER}" "${META_DIR}" "${MODULE_LIMIT:-0}" "${PLATFORM}"
+  sudo cp -f "${META_DIR}/module-list.tsv" /mnt/p3/modtest/module-list.tsv
+  enc_entries="$(tar tzf "${MOD_TGZ}" | grep -c '\.ko$' || true)"
+  cat > "${META_DIR}/modtest-meta.txt" <<EOF
+kernel=official
+source=${SOURCE}
+model=${MODEL}
+platform=${PLATFORM}
+line=${LINE:-}
+kver=${KVER}
+modules_key=${MODULES_KEY}
+package_path=/mnt/p3/modules/${MODULES_KEY}.tgz
+package_sha256=$(sha256sum "${MOD_TGZ}" | cut -d' ' -f1)
+package_entries=${enc_entries}
+test_payload_sha256=$(sha256sum "${MOD_TGZ}" | cut -d' ' -f1)
+profile=modtest
+EOF
+  cat "${META_DIR}/modtest-meta.txt"
   sudo sync
 
   sudo umount /mnt/p3

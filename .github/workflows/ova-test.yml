@@ -456,12 +456,35 @@ jobs:
           # ── 模块测试清单与 guest 脚本写入 p3 ────────────────────────
           # DSM 会把额外 USB 存储命名为 synoboot（与引导盘冲突）、额外 ahci 盘
           # 触发 NCQ 错误，因此模块包直接从引导盘 p3 读取，结果经串口回读。
+          # 清单同时保留一份在 $WORKDIR/modtest-meta 供门禁脚本解析并随 artifact 上传。
           if [ "${RUN_MODULE_TEST}" = "true" ]; then
             MODTEST_DIR="${PART3_PATH}/modtest"
+            META_DIR="$WORKDIR/modtest-meta"
             sudo mkdir -p "${MODTEST_DIR}"
+            rm -rf "$META_DIR"
+            mkdir -p "$META_DIR"
             sudo cp .github/scripts/modtest/guest/run-module-tests.sh "${MODTEST_DIR}/"
-            sudo bash .github/scripts/make_module_list.sh \
-              "${SELECTED}" "$KVER" "${MODTEST_DIR}" "${MODULE_LIMIT:-0}" "${PLATFORM}"
+            bash .github/scripts/make_module_list.sh \
+              "${SELECTED}" "$KVER" "$META_DIR" "${MODULE_LIMIT:-0}" "${PLATFORM}"
+            sudo cp "$META_DIR/module-list.tsv" "${MODTEST_DIR}/module-list.tsv"
+            pkg_sha="$(sha256sum "${SELECTED}" | cut -d' ' -f1)"
+            payload_sha="$(sha256sum "$WORKDIR/modules-test.tgz" | cut -d' ' -f1)"
+            entries="$(tar tzf "${SELECTED}" | grep -c '\.ko$' || true)"
+            {
+              echo "kernel=official"
+              echo "source=${SOURCE}"
+              echo "model=${MODEL}"
+              echo "platform=${PLATFORM}"
+              echo "line=${LINE}"
+              echo "kver=${KVER}"
+              echo "modules_key=${MODULES_KEY}"
+              echo "package_path=${SELECTED}"
+              echo "package_sha256=${pkg_sha}"
+              echo "package_entries=${entries}"
+              echo "test_payload_sha256=${payload_sha}"
+              echo "profile=modtest"
+            } > "$META_DIR/modtest-meta.txt"
+            cat "$META_DIR/modtest-meta.txt"
           fi
 
           sudo umount "$PART3_PATH"
@@ -543,6 +566,8 @@ jobs:
           if [ "${RUN_MODULE_TEST}" = "true" ]; then
             : "${MODULES_KEY:?缺少 MODULES_KEY}"
             printf '%s\n' \
+              'echo "@@P|kernelid|begin"; uname -a; cat /proc/version; cat /proc/cmdline; cat /sys/devices/system/cpu/possible 2>/dev/null; cat /sys/devices/system/cpu/online 2>/dev/null; echo "@@P|kernelid|end"' \
+              'echo "@@P|installed|begin"; for d in /usr/lib/modules /lib/modules/$(uname -r); do [ -d "$d" ] || continue; find "$d" -maxdepth 3 -name "*.ko" 2>/dev/null; done | while read -r p; do case "$p" in */updates/*|*/update/*) echo "update/${p##*/}";; *) echo "${p##*/}";; esac; done | sort -u; echo "@@P|installed|end"; echo "@@P|bootloaded|begin"; cut -d" " -f1 /proc/modules 2>/dev/null | sort -u; echo "@@P|bootloaded|end"' \
               'echo 1 > /proc/sys/kernel/syno_install_flag; mkdir -p /mnt/modtest; cd /dev; blkid synoboot3 2>&1; mount -t ext4 synoboot3 /mnt/modtest; rc=$?; echo "MODTEST_MOUNT_RC=$rc"; ls /mnt/modtest 2>&1 | head -n 20' \
               "sh /mnt/modtest/modtest/run-module-tests.sh ${MODULES_KEY}" \
               > "${CMD_DIR}/modtest.commands"
@@ -553,6 +578,29 @@ jobs:
             cp .github/scripts/modtest/probe.commands "${CMD_DIR}/${p}.commands"
             run_one "$p" "${CMD_DIR}/${p}.commands"
           done
+
+      # P0 结果门禁：解析 guest 串口输出，白名单外的失败/缺完成标记/STALE/
+      # 内核崩溃/安装集缺口一律让 job 失败。放在采集之后、收尾之前，
+      # 且 always() 保证采集中途失败时也能给出可比对的结论。
+      - name: 模块测试结果门禁
+        if: ${{ always() && inputs.run_module_test == true }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          WORKDIR="$PWD"
+          META="$WORKDIR/modtest-meta/module-list.tsv"
+          [ -f "$META" ] || {
+            echo "[E] 缺少模块清单 $META（模块测试未准备成功）" >&2; exit 1; }
+          python3 -I .github/scripts/modtest/parse_results.py \
+            --logs /tmp/modtest-logs --profile modtest \
+            --module-list "$META" \
+            --source "$SOURCE" --model "$MODEL" --kernel official \
+            --platform "$PLATFORM" --line "$LINE" --kver "$KVER" \
+            --allowlist .github/scripts/modtest/env-fail-allowlist.tsv \
+            --baseline ".github/scripts/modtest/baseline/${PLATFORM}-${LINE}-${KVER}-official.json" \
+            --meta "$WORKDIR/modtest-meta/modtest-meta.txt" \
+            --module-limit "${MODULE_LIMIT:-0}" \
+            --out-prefix /tmp/modtest-logs/modtest-result
 
       - name: 安装/测试失败时收尾并保存镜像
         if: failure()
@@ -586,6 +634,7 @@ jobs:
           path: |
             /tmp/modtest-logs
             /tmp/dsm-install/logs
+            modtest-meta
           if-no-files-found: warn
           retention-days: 30
 

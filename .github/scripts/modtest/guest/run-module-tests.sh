@@ -43,6 +43,12 @@ ok=0
 fail=0
 skip=0
 
+# 在每个可能触发内核崩溃的动作前打标记，便于 CI 把 Oops/BUG 归因到具体模块。
+# /dev/kmsg 不可写时静默降级（仅失去归因能力，不因此判失败）。
+mark() {
+  printf 'modtest-marker idx=%s name=%s\n' "$idx" "$name" > /dev/kmsg 2>/dev/null || true
+}
+
 while IFS='	' read -r idx name rel depends ko_srcver policy; do
   [ -n "${idx}" ] || continue
   ko="${WORK}/${rel}"
@@ -63,7 +69,7 @@ while IFS='	' read -r idx name rel depends ko_srcver policy; do
       state="LOADED"
       loaded=$((loaded + 1))
     fi
-    echo "@@M|${idx}|${name}|${state}|-|src=${sys_src}"
+    echo "@@M|${idx}|${name}|${state}|-|src=${sys_src} pkg=${ko_srcver}"
     continue
   fi
 
@@ -74,9 +80,11 @@ while IFS='	' read -r idx name rel depends ko_srcver policy; do
     continue
   fi
 
+  mark
   err="$(insmod "${ko}" 2>&1)"
   rc=$?
-  err="$(printf '%s' "${err}" | tr '\n\t|' '   ' | cut -c1-160)"
+  err="$(printf '%s' "${err}" | tr '\n\t|' '   ' | cut -c1-200)"
+  sys_src="$(cat "/sys/module/${name}/srcversion" 2>/dev/null || echo '-')"
   if [ "${rc}" -eq 0 ]; then
     state="INSMOD_OK"
     ok=$((ok + 1))
@@ -85,7 +93,12 @@ while IFS='	' read -r idx name rel depends ko_srcver policy; do
     fail=$((fail + 1))
   fi
 
-  echo "@@M|${idx}|${name}|${state}|${rc}|${err}"
+  echo "@@M|${idx}|${name}|${state}|${rc}|src=${sys_src} pkg=${ko_srcver} err=${err}"
 done <"${LIST}"
+
+# 只回传故障相关 dmesg 摘要（不整份回传，避免串口超时）。
+echo "---DMESG-BEGIN---"
+dmesg | grep -Ei 'modtest-marker|BUG:|WARNING:|Oops|panic|Call Trace|Unable to handle|general protection|firmware.*(fail|error)' | tail -n 300
+echo "---DMESG-END---"
 
 echo "@@MODTEST_DONE@@ total=${total} loaded=${loaded} ok=${ok} fail=${fail} skip=${skip} status=done"
