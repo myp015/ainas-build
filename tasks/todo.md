@@ -90,3 +90,9 @@
   `total=20 loaded=16 ok=3 fail=1`（唯一失败 acpi_cpufreq = 实机 CPU 无对应接口，
   属设备差异，非加载顺序问题）。
 - 实机全程不 rmmod（安全档），已加载模块仅记录 srcversion。
+- 2026-11-03：run 41607024004（prebuilt 双源、仅 base profile）验证 analyze：
+  加入 `always() + needs 结果检查` 后对比 job 正常运行并产出 bootlog-diff，
+  证明此前被跳过是「被跳过的 prepare-base 祖先」影响了隐式 success() 语义。
+- 2026-11-03：run 41608661790（prebuilt 双源、modtest 20 条）全绿：
+  `total=20 loaded=9 ok=10 fail=1`（修复前 fail=3）；9pnet_virtio 现在
+  INS_MOD_OK，aic8800_fdrv 因依赖排序后移出前 20；唯一失败 acpi_cpufreq = QEMU CPU 无接口。
