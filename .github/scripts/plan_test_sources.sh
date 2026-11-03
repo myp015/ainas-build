@@ -133,7 +133,6 @@ for src in sources_arg:
     cfg = parse_output(os.path.join(work, "%s.out" % src))
     base_tasks.append({
         "source": src,
-        "repo": cfg["repo"],
         "rr_tag": cfg["rr_tag"],
         "rr_asset_url": cfg["rr_asset_url"],
         "docker_image": cfg["docker_image"],
