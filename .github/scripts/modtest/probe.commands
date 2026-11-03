@@ -6,7 +6,9 @@ cat /etc.defaults/VERSION
 lsmod
 cat /proc/modules
 lspci -nnk
-for h in /sys/class/scsi_host/host*; do echo "$h $(cat $h/proc_name 2>/dev/null)"; done
+for h in /sys/class/scsi_host/host*; do echo "$h proc_name=$(cat $h/proc_name 2>/dev/null)"; done
+ls /sys/bus/scsi/devices 2>/dev/null
+dmesg | grep -iE 'megaraid|mptsas|mptspi|virtio_scsi|scsi host|Attached SCSI|scsi.*scan' | tail -n 120
 ls -l /sys/block
 cat /proc/partitions
 for b in /sys/block/*; do echo "$b vendor=$(cat $b/device/vendor 2>/dev/null) model=$(cat $b/device/model 2>/dev/null) size=$(cat $b/size 2>/dev/null)"; done
