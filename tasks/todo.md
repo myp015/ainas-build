@@ -33,8 +33,13 @@
 - [x] 12. 4 个 Unknown symbol 修复：源码改用 `__udp6_lib_lookup` + refcount 契约
       （两树同步，ainas-modules ebb70628），test.yml 单平台编译验证通过，
       UND 与 RR 成品逐符号一致；测试 Release 上机回归 4 个模块全部 INSMOD_OK
-- [ ] 13. 常规全量发布（modules.yml 63 target + cks.yml 12 target，版本 26.11.0），
-      发布后用 ova-test 预装模式复跑全量确认 514 条 fail≈17
+- [x] 13. 常规全量发布（modules.yml 63 target + cks.yml 12 target，版本 26.11.0）
+      run 41623997006 全绿（63 build + firmware + release，12:26 发布）；
+      cks run 41624016278 全绿（12 build + firmware + release，12:31 发布），
+      ainas-cks `release/` 已推送到 5c4d515
+- [ ] 14. 多型号验证（4.x）：DS918+/DS3622xs+ 全量跑通；DS920+/DS923+ 因加载
+      scsi_debug 触发官方内核 Oops 卡死 → 新增 known-hazards 豁免（geminilake/r1000），
+      重跑中（run 41643536367）
 
 ## 进度
 - 2026-11-03：脚本与 workflow 落地；本地用 epyc7002-7.4-5.10.55（495 个 .ko）生成模块盘通过，
@@ -148,3 +153,17 @@
 - 2026-11-03：残余 17 失败均为环境/硬件缺失（acpi_cpufreq/binder_linux/ch35x_38x/
   coretemp/cpufreq_userspace/f71882fg/gpio_f7188x/gpio_it87/gpio_sch311x/intel_idle/
   ipmi_si/it87/kvm_amd/kvm_intel/nct6683/nct6775/syno_hddpwrctl_test），无 Unknown symbol。
+- 2026-11-03：4 型号（4.x）验证 run 41624753391：DS918+（459 条 loaded=90 ok=354 fail=15）、
+  DS3622xs+（418 条 loaded=72 ok=333 fail=13）全量跑通；DS920+/DS923+ 卡死（串口驱动 exit 13）。
+  根因：`scsi_debug` insmod 产生假 SCSI 盘 → `sd_probe → redpill sd_probe_shim` →
+  官方 4.4.302 内核 `syno_usb_info_enum+0xa6` 空指针 Oops（0xe0），insmod rc=137，
+  随后 `sr_mod` insmod 永久挂起。各平台 scsi_debug.ko srcversion 相同
+  （533BB7E5866E52F63B9ACCB），官方 hda1 包不含该模块，RR 带但 loader 不自动加载
+  （`N scsi_debug.ko`）→ 属官方内核缺陷 + 测试专用触发，非我方编译问题。
+- 2026-11-03：新增 `.github/scripts/modtest/known-hazards.tsv`（platform/module/原因），
+  `make_module_list.sh` 增加可选平台参数并置 policy=hazard，
+  guest 对 hazard 输出 `SKIP_HAZARD` 且绝不 insmod；ova-test.yml 与 prepare_prebuilt.sh
+  两处调用传平台（commit 7127a427）。本地验证：geminilake-7.3/r1000-7.3 清单
+  scsi_debug=hazard（1 条），broadwellnk 不受影响（0 条）。
+- 2026-11-03：触发 ova-test run 41643536367（ainas、DS920+/DS923+、预装模式、
+  modules_version=test-modules-26.11.0、全量）验证豁免。
