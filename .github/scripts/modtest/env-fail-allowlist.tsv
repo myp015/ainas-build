@@ -16,7 +16,10 @@
 # 来源 1：预装 OVA run 41622951773/41658007803（SA6400 / epyc7002 / DSM 7.4.1 /
 # 内核 5.10.55，QEMU VM 内全量 495 条）的 17 条 INSMOD_FAIL。均为"测试虚机缺少
 # 对应硬件/固件"或"内核已内置"，与 DSM 小版本/内核版本无关（测试环境事实），
-# 因此 kver、model 用 * 通配；platform/line(7.4*) 仍限定，避免其他平台/大版本沿用被掩盖。
+# 因此 kver、model 用 * 通配。2026-11-04 run 41752234512（DS918+/apollolake/7.4.1）
+# 复现出同一批 15 条（coretemp、syno_hddpwrctl_test 在该包内不存在或可加载），
+# 证明 platform/line 也与环境无关，故一并改为 *；category 仍强制匹配，Unknown
+# symbol 等真实缺陷（UNKNOWN_SYMBOL/VERMAGIC/OTHER）不可能被这些 ENV 条目命中。
 # 来源 2：custom cks 内核 run 41733716293（同样 SA6400/7.4.1/5.10.55，cks 模块包
 # 681 条）。cks 包比官方包多出 Xen / Hyper-V 相关模块，测试 VM 是 KVM、既非 Xen
 # 也非 Hyper-V 宿主，这类模块必然加载失败：Xen 模块与 hv_vmbus 报 No such device，
@@ -26,23 +29,23 @@
 # 维护规则：新增条目必须写明具体 errno/原因；因 Unknown symbol 等真实缺陷导致的
 # 失败严禁加入白名单，应修复模块或补编提供者。
 
-epyc7002	7.4*	*	*	*	acpi_cpufreq	ENV	QEMU 虚拟 CPU 无 P-state 能力，No such device
-epyc7002	7.4*	*	*	*	binder_linux	BUILTIN	内核已内置 binder，insmod 报 File exists
-epyc7002	7.4*	*	*	*	ch35x_38x	ENV	测试虚机无 WCH 串并卡，No such device or address
-epyc7002	7.4*	*	*	*	coretemp	ENV	QEMU 无 Intel CPU 温度传感器，No such device
-epyc7002	7.4*	*	*	*	cpufreq_userspace	ENV	引导期已有 cpufreq 治理者占用，Device or resource busy
-epyc7002	7.4*	*	*	*	f71882fg	ENV	无 Fintek SuperIO 硬件，No such device
-epyc7002	7.4*	*	*	*	gpio_f7188x	ENV	无 Fintek SuperIO 硬件，No such device
-epyc7002	7.4*	*	*	*	gpio_it87	ENV	无 ITE SuperIO 硬件，No such device
-epyc7002	7.4*	*	*	*	gpio_sch311x	ENV	无 SMSC SuperIO 硬件，No such device
-epyc7002	7.4*	*	*	*	intel_idle	ENV	QEMU 虚拟 CPU 无 intel_idle 支持，No such device
-epyc7002	7.4*	*	*	*	ipmi_si	ENV	测试虚机无 BMC/IPMI 控制器，No such device
-epyc7002	7.4*	*	*	*	it87	ENV	无 ITE SuperIO 硬件，No such device
-epyc7002	7.4*	*	*	*	kvm_amd	ENV	嵌套虚拟化未开启，Operation not supported
-epyc7002	7.4*	*	*	*	kvm_intel	ENV	AMD 平台且嵌套虚拟化未开启，Operation not supported
-epyc7002	7.4*	*	*	*	nct6683	ENV	无 Nuvoton SuperIO 硬件，No such device
-epyc7002	7.4*	*	*	*	nct6775	ENV	无 Nuvoton SuperIO 硬件，No such device
-epyc7002	7.4*	*	*	*	syno_hddpwrctl_test	ENV	测试虚机无 GPIO 电源控制，Operation not permitted
+*	*	*	*	*	acpi_cpufreq	ENV	QEMU 虚拟 CPU 无 P-state 能力，No such device
+*	*	*	*	*	binder_linux	BUILTIN	内核已内置 binder，insmod 报 File exists
+*	*	*	*	*	ch35x_38x	ENV	测试虚机无 WCH 串并卡，No such device or address
+*	*	*	*	*	coretemp	ENV	QEMU 无 Intel CPU 温度传感器，No such device
+*	*	*	*	*	cpufreq_userspace	ENV	引导期已有 cpufreq 治理者占用，Device or resource busy
+*	*	*	*	*	f71882fg	ENV	无 Fintek SuperIO 硬件，No such device
+*	*	*	*	*	gpio_f7188x	ENV	无 Fintek SuperIO 硬件，No such device
+*	*	*	*	*	gpio_it87	ENV	无 ITE SuperIO 硬件，No such device
+*	*	*	*	*	gpio_sch311x	ENV	无 SMSC SuperIO 硬件，No such device
+*	*	*	*	*	intel_idle	ENV	QEMU 虚拟 CPU 无 intel_idle 支持，No such device
+*	*	*	*	*	ipmi_si	ENV	测试虚机无 BMC/IPMI 控制器，No such device
+*	*	*	*	*	it87	ENV	无 ITE SuperIO 硬件，No such device
+*	*	*	*	*	kvm_amd	ENV	嵌套虚拟化未开启，Operation not supported
+*	*	*	*	*	kvm_intel	ENV	AMD 平台且嵌套虚拟化未开启，Operation not supported
+*	*	*	*	*	nct6683	ENV	无 Nuvoton SuperIO 硬件，No such device
+*	*	*	*	*	nct6775	ENV	无 Nuvoton SuperIO 硬件，No such device
+*	*	*	*	*	syno_hddpwrctl_test	ENV	测试虚机无 GPIO 电源控制，Operation not permitted
 
 # ── custom（cks）内核包独有模块：Xen / Hyper-V 环境 ───────────────────────
 *	*	*	*	custom	9pnet_xen	ENV	非 Xen 宿主，9p 传输层 No such device
