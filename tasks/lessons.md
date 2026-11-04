@@ -674,3 +674,22 @@ ln: invalid option -- 'v'
 教训：**“这个型号能不能编这个 DSM 版本”应在 plan 阶段用数据表判定**；另外 rr 与
 2in1 的 6.2 型号策略此前不一致（rr 静默忽略、2in1 放行），排查前先确认当前行为，
 不要按另一个工作流的印象推断。
+
+## 2026-11-04 — 资产下载失败只剩 exit code 1：curl 的 -s 吞掉了错误
+
+`Build ainas-rr-original` 两次失败都停在 `[INFO] 正在获取系统模块`，下一行直接
+`##[error]Process completed with exit code 1`，没有任何错误文本。原因链：
+
+1. `fetchReleaseAsset` 下载资产用 `curl -skL`，`-s` 同时屏蔽了 curl 的**错误信息**；
+2. 下载在开始约 1s 时被 CDN 断开，落盘文件不存在；
+3. `getModules` 的 `[ ! -f "${CACHE_FILE}" ] && exit 1` 本身也不打印任何东西。
+
+实测同一资产（`syno-modules` 26.11.1 的 934,602,509 字节）在另一台 runner 上
+3.4s 下完且 `unzip -t` 通过，说明不是资产损坏或权限问题，是瞬时传输中断。
+
+修法（ainas-2in1 `fetchReleaseAsset`）：`-sS` 保留错误；`--retry-all-errors`
+自动重试瞬时断流；tag 为空/资产列表失败/HTTP 非 200/找不到同名资产都打 `[E]`。
+
+教训：**失败路径必须自带可诊断输出**。`-s` + `[ ! -f ] && exit 1` 这种组合会把
+“为什么失败”全部丢掉，CI 日志只剩退出码；排查此类问题时先用不带 `-s` 的等价
+命令复现，别对着 exit 1 猜。
