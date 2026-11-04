@@ -6,7 +6,8 @@
 #
 # RR 原版结构（保持不动），仅仓库地址适配 myp015：
 #   checkout RROrg/rr-addons → myp015/ainas-addons（secrets.AiNas）
-#   checkout RROrg/rr-misc   → myp015/ainas-rr-misc（secrets.AiNas，上游已删，本仓库为复刻）
+#   checkout RROrg/rr-misc   → myp015/ainas-misc（secrets.AiNas，上游已删，本仓库为复刻；
+#                              原仓库名 ainas-rr-misc 已改名为 ainas-misc）
 #
 
 name: Update addons update
@@ -41,7 +42,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
         with:
-          repository: myp015/ainas-rr-misc
+          repository: myp015/ainas-misc
           token: ${{ secrets.AiNas }}
           path: rr-misc
 
