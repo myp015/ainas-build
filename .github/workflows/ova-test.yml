@@ -702,7 +702,8 @@ jobs:
             EXTRA+=(--cks-image-info "$WORKDIR/modtest-meta/cks-image-info.txt")
           fi
           # 预装成品 OVA：镜像内模块来自 base rr.img 的旧构建，与本次测试包
-          # 本来就可能不同版本，STALE/安装集差异降级为告警（非预装仍硬失败）。
+          # 本来就可能不同版本；官方内核的系统模块树还来自官方 DSM PAT。
+          # 两者 STALE/安装集差异都降级为告警（custom 内核仍硬失败）。
           if [ "${PREBUILT:-false}" = "true" ]; then
             EXTRA+=(--prebuilt)
           fi

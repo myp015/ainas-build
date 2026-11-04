@@ -9,8 +9,9 @@
 # category 取值：ENV（硬件/虚拟环境限制）、BUILTIN（模块已内建，insmod 报 File exists）、
 #               DEP_ENV（依赖模块因环境缺失未加载导致的级联 Unknown symbol）、
 #               DMESG_WARNING（非致命内核告警）、
-#               STALE_LOADED（已加载模块 srcversion 与测试包不同，非预装模式默认硬失败）、
-#               INSTALLED_MISMATCH（系统安装的 .ko 与测试包 srcversion 不同）
+#               STALE_LOADED（已加载模块 srcversion 与测试包不同；custom 内核默认硬失败，
+#                              官方内核因系统模块来自官方 PAT，只告警）、
+#               INSTALLED_MISMATCH（系统安装的 .ko 与测试包 srcversion 不同；同上）
 #
 # 来源 1：预装 OVA run 41622951773/41658007803（SA6400 / epyc7002 / DSM 7.4.1 /
 # 内核 5.10.55，QEMU VM 内全量 495 条）的 17 条 INSMOD_FAIL。均为"测试虚机缺少

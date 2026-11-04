@@ -384,18 +384,27 @@ def analyze(args):
              ": " + ", ".join("%s(%s)" % (f["name"], f["category"]) for f in hard[:8])
              if hard else ""))
 
+    # 运行内核的模块树是否由本次测试包构建：
+    #   - custom 内核：系统模块树来自本次自编模块包，必须与包内版本一致；
+    #   - official 内核：系统模块树来自官方 DSM PAT（安装器只装官方映射子集），
+    #     与测试包天然不同源；预装模式同样如此。这类差异只作告警，
+    #     真实缺陷仍由 G-M1/G-M2/G-M4/G-M8 与失败基线拦截。
+    install_drift = bool(args.prebuilt) or args.kernel != "custom"
+    drift_reason = "预装模式" if args.prebuilt else "官方内核"
+
     # G-M3：运行中模块的 srcversion 不是测试包那一版。
-    #   - 非预装（镜像由本次模块包构建）：硬失败 —— 说明测的不是这一版；
-    #   - 预装（成品 OVA）：告警 —— 镜像内的模块取自 base rr.img 的构建，
-    #     与当前测试包本来就可能不同版本；已加载模块也不参与 insmod 测试。
-    #     差异仍逐条列进 summary/JSON，供判断 base 镜像是否过期。
+    #   - 严格模式（custom 内核）：硬失败 —— 说明测的不是这一版；
+    #   - 漂移模式（official 内核/预装）：告警 —— 已加载模块来自官方 PAT 或
+    #     base rr.img 的旧构建，本来就不参与 insmod 测试。差异仍逐条列进
+    #     summary/JSON，供判断安装镜像是否过期。
     stale_fail = [] if args.allow_stale_loaded else \
         [s for s in stale if not s["allowed"]]
     stale_detail = ("STALE_LOADED %d 条（pkg 与运行内核不一致）" % len(stale) + (
         ": " + ", ".join("%s(src=%s pkg=%s)" % (s["name"], s["src"], s["pkg"])
                          for s in stale_fail[:8]) if stale_fail else ""))
-    if args.prebuilt:
-        gate("G-M3", True, stale_detail + "（预装模式按告警处理）", warn=bool(stale_fail))
+    if install_drift:
+        gate("G-M3", True, stale_detail + ("（%s按告警处理）" % drift_reason),
+             warn=bool(stale_fail))
     else:
         gate("G-M3", not stale_fail, stale_detail)
 
@@ -413,6 +422,9 @@ def analyze(args):
                 continue
             parts = s.split("\t", 1)
             name = parts[0].strip()
+            # 串口会回显 probe 的命令行/哨兵，只有以 .ko 结尾的才是安装文件。
+            if not name.endswith(".ko"):
+                continue
             installed.add(name)
             if len(parts) > 1 and parts[1].strip() not in ("", "-"):
                 inst_src.setdefault(name, set()).add(parts[1].strip())
@@ -422,6 +434,9 @@ def analyze(args):
         for line in c:
             s = line.strip()
             if not s or s.startswith("@@P|") or s.startswith("root@"):
+                continue
+            # 过滤串口回显的 shell 命令行，只接受合法模块名。
+            if not re.match(r"^[A-Za-z0-9_+.-]+$", s):
                 continue
             boot_loaded.add(s.replace("-", "_"))
 
@@ -468,12 +483,13 @@ def analyze(args):
                          len(install_extra), len(identity_bad), len(new_gap)))
     if args.skip_install_check:
         gate("G-M5", True, "已按参数跳过安装集核对")
-    elif args.prebuilt:
+    elif install_drift:
         # 只有"相对基线新增缺口/安装身份不一致"值得告警；存量 gap/extra 是
         # "DSM 安装子集 vs 包内全量"的结构差异，纯信息。
         actionable = bool(new_gap) or bool(identity_bad)
         gate("G-M5", probe_ok,
-             install_detail + ("（预装模式：差异只作告警）" if actionable else ""),
+             install_detail + ("（%s：差异只作告警）" % drift_reason
+                               if actionable else ""),
              warn=probe_ok and actionable)
     else:
         gate("G-M5", install_ok, install_detail)
@@ -535,6 +551,7 @@ def analyze(args):
                     "kernel": args.kernel, "platform": args.platform,
                     "line": args.line, "kver": args.kver,
                     "profile": args.profile, "prebuilt": bool(args.prebuilt),
+                    "install_drift": bool(install_drift),
                     "logs": args.logs},
         "totals": {"total": total, "loaded": loaded, "ok": ok,
                    "fail": fail, "skip": skip, "hazard": hazard},
@@ -635,7 +652,7 @@ def emit(args, result):
         if f.get("allowed"):
             tag = "白名单"
         else:
-            tag = "WARN" if result["context"].get("prebuilt") else "FAIL"
+            tag = "WARN" if result["context"].get("install_drift") else "FAIL"
         lines.append("- %s [%s] %s" % (f["name"], tag, f.get("err", "")))
     lines.append("")
     lines.append("## 内核崩溃/告警")
@@ -829,6 +846,13 @@ def run_selftest():
     def prebuilt_case(root, lp):
         return ["--prebuilt"]
 
+    def custom_case(root, lp):
+        # custom 内核的系统模块树由本次自编包构建，STALE/安装身份必须严格。
+        return ["--kernel", "custom"]
+
+    def baseline_install_custom_case(root, lp):
+        return baseline_install_case(root, lp) + ["--kernel", "custom"]
+
     def dep_env_case(root, lp):
         # b 依赖 a；a 因环境缺失（No such device）未加载，b 的 Unknown symbol
         # 应降级为 DEP_ENV，并由白名单显式豁免。
@@ -857,7 +881,7 @@ def run_selftest():
                  installed=["c.ko"], extra=baseline_gone_case),
         scenario("S6 STALE_LOADED", 1, "STALE_LOADED",
                  ["@@M|1|a|LOADED|-|src=OLD pkg=NEW"],
-                 installed=["a.ko"], pkg="NEW"),
+                 installed=["a.ko"], pkg="NEW", extra=custom_case),
         scenario("S7 全绿", 0, "[PASS] G-M1", [ok], installed=["a.ko"]),
         scenario("S8 安装集探针为空", 1, "G-M5", [ok], installed=[]),
         scenario("S9 内核崩溃归因", 1, "KERNEL_FAULT", [ok],
@@ -870,15 +894,18 @@ def run_selftest():
         scenario("S11 预装模式 STALE 仅告警", 0, "[WARN] G-M3",
                  ["@@M|1|a|LOADED|-|src=OLD pkg=NEW"],
                  installed=["a.ko\tOLD"], pkg="NEW", extra=prebuilt_case),
-        scenario("S12 安装版与测试包不一致", 1, "安装版与测试包不一致",
+        scenario("S12 安装版与测试包不一致（custom）", 1, "安装版与测试包不一致",
                  ["@@M|1|a|INSMOD_OK|0|src=NEW pkg=NEW err="],
-                 installed=["a.ko\tOLD"], pkg="NEW"),
-        scenario("S13 基线新增安装缺口", 1, "G-M5", [ok],
-                 installed=["other.ko"], extra=baseline_install_case),
+                 installed=["a.ko\tOLD"], pkg="NEW", extra=custom_case),
+        scenario("S13 基线新增安装缺口（custom）", 1, "G-M5", [ok],
+                 installed=["other.ko"], extra=baseline_install_custom_case),
         scenario("S14 依赖环境级联 DEP_ENV", 0, "DEP_ENV",
                  ["@@M|1|a|INSMOD_FAIL|1|src=- pkg=- err=No such device",
                   "@@M|2|b|INSMOD_FAIL|1|src=- pkg=- err=unknown symbol hv_x"],
                  installed=["a.ko", "b.ko"], pkg="x", extra=dep_env_case),
+        scenario("S15 官方内核 STALE/安装身份仅告警", 0, "[WARN] G-M3",
+                 ["@@M|1|a|LOADED|-|src=OLD pkg=NEW"],
+                 installed=["a.ko\tOLD"], pkg="NEW"),
     ]
 
     failed = 0
