@@ -44,8 +44,12 @@ HARD_CATEGORIES = {"UNKNOWN_SYMBOL", "VERMAGIC", "DEPEND", "MISSING", "OTHER",
 ENV_CATEGORIES = {"ENV", "BUILTIN", "BUILTIN_DUP", "DEP_ENV"}
 ALLOWABLE_CATEGORIES = ENV_CATEGORIES | {"DMESG_WARNING"}
 
+# 真故障只认 BUG/Oops/panic/#PF/GP 行：这几种一律先打印其中一句，再跟 Call Trace。
+# **不能把 "Call Trace" 单独当故障** —— 同一行也跟在每次 WARNING 后面
+# （典型：cfg80211 regulatory_init 的 reg.c WARN、binder 的 sysfs_warn_dup、
+# DSM 的 "inconsistent syno gpio info"），否则所有内核自带 WARN 都会把 G-M4 判失败。
 FAULT_RE = re.compile(
-    r"(BUG:|Oops|Kernel panic|Call Trace|Unable to handle|general protection)")
+    r"(BUG:|Oops|Kernel panic|Unable to handle|general protection)")
 WARNING_RE = re.compile(r"WARNING:")
 FIRMWARE_FAIL_RE = re.compile(r"firmware.*(fail|error)", re.I)
 MARKER_RE = re.compile(r"modtest-marker idx=(\d+) name=(\S+)")
