@@ -137,6 +137,18 @@ jobs:
           #   output_all/   = 编译 + 官方 + 第三方（合集）   -> 给 release/
           # =====================================================================
 
+          # G6-D 实测：geminilakenk / epyc7003ntb 的官方内核把 DRM（含 dma-fence
+          # tracepoint）内建并导出 __SCK__/__SCT__ 静态调用键（见
+          # syno-modules/official/kexports 对应面）。自编 5.10 root dmabuf.ko 也导出
+          # 同名键 ⇒ insmod 必 ENOEXEC（"exports duplicate symbol"）。这两个平台的
+          # 6.5 backport 栈由第三方 update/ 提供（含 dmabuf.ko），故纯编译产物里删除
+          # root dmabuf.ko：它是不可加载的冗余文件，且 RR 的 geminilakenk 合并集 root
+          # 同样没有 dmabuf.ko。其余 5.10 平台内核面不含 dma_fence（可正常加载），
+          # 保持现状。
+          if [ "${PLATFORM}" = "geminilakenk" ] || [ "${PLATFORM}" = "epyc7003ntb" ]; then
+            rm -f "${ROOT_PATH}/output/dmabuf.ko"
+          fi
+
           # 纯编译产物 tgz（给 modules/）。排除 .kbuild-flags：它是 compile.sh 落盘的
           # 构建元数据（供 ABI 探针回放 KCFLAGS），不属于发布产物。
           tar -zcf ${ROOT_PATH}/${PLATFORM}-${VERSION}-${KVER}.tgz --exclude=./.kbuild-flags -C ${ROOT_PATH}/output .
