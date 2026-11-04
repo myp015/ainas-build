@@ -392,8 +392,8 @@ jobs:
 
           WORKDIR="$PWD"
           AINAS2IN1_DIR="${WORKDIR}/.2in1"
-          PAT_XLSX_URL="https://raw.githubusercontent.com/myp015/ainas-rr/main/docs/pats.xlsx"
-          PAT_XLSX="/tmp/pats.xlsx"
+          PAT_JSON_URL="https://raw.githubusercontent.com/myp015/ainas-rr/main/docs/pats.json"
+          PAT_JSON="/tmp/pats.json"
           DSM_INSTALL_DIR="/tmp/dsm-install"
           PART1_PATH="/mnt/p1"
           PART3_PATH="/mnt/p3"
@@ -609,7 +609,7 @@ jobs:
             echo "[E] rr.img 不存在于 $WORKDIR/rr/rr.img" >&2
             exit 1
           fi
-          dsm_setup "$MODEL" "$LINE_REQ" "$PAT_XLSX_URL" "$DSM_INSTALL_DIR" \
+          dsm_setup "$MODEL" "$LINE_REQ" "$PAT_JSON_URL" "$DSM_INSTALL_DIR" \
             "$WORKDIR" \
             "$AINAS2IN1_DIR/docker/vm-docker-compose.yaml" "$WORKDIR/rr/docker-compose.yaml" \
             "${ARTIFACT_BRAND}" "$SAFE_TAG" "${BOOT_TIMEOUT}" \

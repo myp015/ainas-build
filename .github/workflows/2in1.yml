@@ -463,8 +463,8 @@ jobs:
           WORKDIR="$PWD"
           AINAS2IN1_DIR="${WORKDIR}/.2in1"
           REPACK_STAGE_DIR="/tmp/repack-stage"
-          PAT_XLSX_URL="https://raw.githubusercontent.com/myp015/ainas-rr/main/docs/pats.xlsx"
-          PAT_XLSX="/tmp/pats.xlsx"
+          PAT_JSON_URL="https://raw.githubusercontent.com/myp015/ainas-rr/main/docs/pats.json"
+          PAT_JSON="/tmp/pats.json"
           DSM_INSTALL_DIR="/tmp/dsm-install"
           PART1_PATH="/mnt/p1"
           PART3_PATH="/mnt/p3"
@@ -587,8 +587,8 @@ jobs:
           # ── 2in1 镜像重打包 ───────────────────────────────────────
           repack_2in1 "$WORKDIR" "$REPACK_STAGE_DIR"
 
-          # ── DSM 自动安装（解析 pats.xlsx → 启容器 → 安装 → 停容器）──
-          dsm_setup "$MODEL" "$LINE_REQ" "$PAT_XLSX_URL" "$DSM_INSTALL_DIR" \
+          # ── DSM 自动安装（解析 pats.json → 启容器 → 安装 → 停容器）──
+          dsm_setup "$MODEL" "$LINE_REQ" "$PAT_JSON_URL" "$DSM_INSTALL_DIR" \
             "$WORKDIR" \
             "$AINAS2IN1_DIR/docker/docker-compose.yaml" "$DSM_INSTALL_DIR/docker-compose.yaml" \
             "_${IMG_GIB}g_${ARTIFACT_BRAND}" "$SAFE_TAG" "180" \

@@ -75,7 +75,7 @@ fi
 # ── 2. 型号选择 ───────────────────────────────────────────────────────
 MODELS=()
 
-# 型号名大小写归一化：pats.xlsx 与 rr 内置型号表区分大小写，
+# 型号名大小写归一化：pats.json 与 rr 内置型号表区分大小写，
 # 自定义输入写成全小写（如 ds3617xs）会匹配不到型号，先还原成标准写法。
 KNOWN_MODELS=(
   "DS918+" "DS920+" "DS923+" "DS925+" "DS3622xs+" "SA6400" "DS425+"
@@ -95,18 +95,21 @@ norm_model() {
 
 # DVA 系列已从工作流勾选项中移除，需要时通过 custom_models 手动输入（如 DVA3221）。
 if [ "${DSM_VERSION}" = "6.2.4" ]; then
-  # DSM 6.2 型号白名单：只有 DS918+(apollolake) 固定可选
-  echo "[INFO] DSM 6.2 型号白名单：DS918+（其它 6.2 型号请用 custom_models 输入）"
+  # DSM 6.2：勾选项与 custom_models 都生效，但只有官方确有 6.2 PAT 的型号能编，
+  # 统一由下面「6.2 型号前置校验」在 plan 阶段拦下，不会拖到 dsm_setup 才报错。
+  # 全选沿用历史行为只编 DS918+（6.2 可编型号有 23 个，全选逐个编代价太大）；
+  # 其它 6.2 型号请勾选对应勾选项或用 custom_models 输入。
   if [ "${ALL_MODELS}" = "全选" ]; then
+    echo "[INFO] DSM 6.2 全选仅编 DS918+；其它 6.2 型号请勾选或 custom_models 输入"
     MODELS+=("DS918+")
   else
-    [ "${MODEL_DS918P:-false}" = "true" ] && MODELS+=("DS918+")
-  fi
-  # 2in1 允许 6.2 自定义型号（DS3617xs 靠 custom_models 输入）；
-  # rr/ova 沿用历史行为：6.2 忽略自定义型号。
-  if [ "${PRODUCT}" != "2in1" ] && [ -n "$(printf '%s' "${CUSTOM_MODELS}" | tr -d '[:space:]')" ]; then
-    echo "[WARN] DSM 6.2 走型号白名单，自定义型号 ${CUSTOM_MODELS} 已忽略"
-    CUSTOM_MODELS=""
+    [ "${MODEL_DS918P:-false}"    = "true" ] && MODELS+=("DS918+")
+    [ "${MODEL_DS920P:-false}"    = "true" ] && MODELS+=("DS920+")
+    [ "${MODEL_DS923P:-false}"    = "true" ] && MODELS+=("DS923+")
+    [ "${MODEL_DS925P:-false}"    = "true" ] && MODELS+=("DS925+")
+    [ "${MODEL_DS3622XSP:-false}" = "true" ] && MODELS+=("DS3622xs+")
+    [ "${MODEL_SA6400:-false}"    = "true" ] && MODELS+=("SA6400")
+    [ "${MODEL_DS425P:-false}"    = "true" ] && MODELS+=("DS425+")
   fi
 elif [ "${ALL_MODELS}" = "全选" ]; then
   echo "[INFO] 已开启全选，将编译工作流支持的全部型号"
@@ -150,6 +153,54 @@ for m in "${MODELS[@]}"; do
   [ "${skip}" -eq 0 ] && UNIQ_MODELS+=("${m}")
 done
 MODELS=("${UNIQ_MODELS[@]}")
+
+# ── 6.2 型号前置校验（plan 阶段 fail fast）───────────────────────────────
+# 型号清单以 ainas-rr 的 docs/pats.json 为唯一依据（data.yml 每次刷新的就是它）。
+# 自定义输入大小写不统一（如 ds920+）时按官方写法还原；没有 6.2 行的型号直接
+# 报错并列出可用型号，避免一路编到 dsm_setup 才报「PAT 版本不匹配」。
+if [ "${DSM_VERSION}" = "6.2.4" ] && [ "${#MODELS[@]}" -gt 0 ]; then
+  PAT62_URL="${PAT62_URL:-https://raw.githubusercontent.com/myp015/ainas-rr/main/docs/pats.json}"
+  PAT62_FILE="$(mktemp)"
+  if ! curl -fsSL --connect-timeout 10 "${PAT62_URL}" -o "${PAT62_FILE}"; then
+    rm -f "${PAT62_FILE}"
+    echo "[E] 无法获取 DSM 6.2 型号清单（${PAT62_URL}）" >&2
+    exit 1
+  fi
+  if ! MODELS62_OUT="$(python3 - "${PAT62_FILE}" "${MODELS[@]}" <<'PY'
+import json, sys
+
+with open(sys.argv[1], encoding="utf-8") as f:
+    data = json.load(f)
+# 官方写法表：只保留有 6.2 行的型号，键统一小写便于匹配用户输入
+canon = {m.lower(): m for m, v in data.items() if any(k.startswith("6.2") for k in v)}
+if not canon:
+    sys.exit("[E] pats.json 中没有任何 DSM 6.2 行")
+
+valid, invalid = [], []
+for m in sys.argv[2:]:
+    c = canon.get(m.lower())
+    if c is None:
+        if m not in invalid:
+            invalid.append(m)
+    elif c not in valid:
+        valid.append(c)
+if invalid:
+    sys.stderr.write("[E] 以下型号没有官方 DSM 6.2 PAT，无法编译 6.2.4：%s\n" % ", ".join(invalid))
+    sys.stderr.write("     可用型号：%s\n" % ", ".join(sorted(canon.values())))
+    sys.exit(1)
+print("\n".join(valid))
+PY
+  )"; then
+    rm -f "${PAT62_FILE}"
+    exit 1
+  fi
+  rm -f "${PAT62_FILE}"
+  MODELS=()
+  while IFS= read -r m; do
+    if [ -n "${m}" ]; then MODELS+=("${m}"); fi
+  done <<<"${MODELS62_OUT}"
+  echo "[INFO] DSM 6.2.4 型号校验通过: ${MODELS[*]}"
+fi
 
 if [ "${#MODELS[@]}" -eq 0 ]; then
   # rr 允许只编原版 RR 镜像；其余产品必须至少勾选一个型号

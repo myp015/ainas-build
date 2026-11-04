@@ -68,7 +68,7 @@ on:
         type: string
         default: ""
       dsm_version:
-        description: "DSM 版本编号（仅 7.x，从 pats.xlsx 获取）"
+        description: "DSM 版本编号（仅 7.x，从 pats.json 获取）"
         type: choice
         options:
           - "7.2.1"
@@ -392,8 +392,8 @@ jobs:
           # ── 目录变量 ──────────────────────────────────────────────
           WORKDIR="$PWD"
           AINAS2IN1_DIR="${WORKDIR}/.2in1"
-          PAT_XLSX_URL="https://raw.githubusercontent.com/myp015/ainas-rr/main/docs/pats.xlsx"
-          PAT_XLSX="/tmp/pats.xlsx"
+          PAT_JSON_URL="https://raw.githubusercontent.com/myp015/ainas-rr/main/docs/pats.json"
+          PAT_JSON="/tmp/pats.json"
           DSM_INSTALL_DIR="/tmp/dsm-install"
           PART1_PATH="/mnt/p1"
           PART3_PATH="/mnt/p3"
@@ -483,12 +483,12 @@ jobs:
           # ── 提取 user-config.yml + 选择引导镜像 + Repack 2GB 镜像 ──
           repack_rr rr/rr.img "$TAG" "$WORKDIR" "2.5GB"
 
-          # ── DSM 自动安装（解析 pats.xlsx → 启容器 → 安装 → 停容器）──
+          # ── DSM 自动安装（解析 pats.json → 启容器 → 安装 → 停容器）──
           if [ ! -f "$WORKDIR/rr/rr.img" ]; then
             echo "[E] rr.img 不存在于 $WORKDIR/rr/rr.img"
             exit 1
           fi
-          dsm_setup "$MODEL" "$LINE_REQ" "$PAT_XLSX_URL" "$DSM_INSTALL_DIR" \
+          dsm_setup "$MODEL" "$LINE_REQ" "$PAT_JSON_URL" "$DSM_INSTALL_DIR" \
             "$WORKDIR" \
             "$AINAS2IN1_DIR/docker/vm-docker-compose.yaml" "$WORKDIR/rr/docker-compose.yaml" \
             "${ARTIFACT_BRAND}" "$SAFE_TAG" "360" \
