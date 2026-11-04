@@ -432,7 +432,10 @@ jobs:
           zstd -d -q -f "base/${BASE_ASSET}" -o rr/rr.img
           rm -rf base
 
-          patch_part1 rr/rr.img "$PART1_PATH" rr "$MODEL"
+          # 测试流程不改 grub.cfg：patch_part1 的 rr 变体只替换菜单标题/欢迎文案，
+          # 不改变启动项与内核路径；引导由 dsm_setup 传参数直达。跳过可省一次
+          # p1 挂载与改写（正式 OVA 构建仍照常修补）。
+          echo "[INFO] 测试工作流跳过 patch_part1（不改 grub.cfg）"
 
           DISK_LOOP=$(sudo losetup -f)
           sudo losetup -P "$DISK_LOOP" rr/rr.img
