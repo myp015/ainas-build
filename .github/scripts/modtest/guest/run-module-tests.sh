@@ -101,7 +101,10 @@ done <"${LIST}"
 
 # 只回传故障相关 dmesg 摘要（不整份回传，避免串口超时）。
 echo "---DMESG-BEGIN---"
-dmesg | grep -Ei 'modtest-marker|BUG:|WARNING:|Oops|panic|Call Trace|Unable to handle|general protection|firmware.*(fail|error)' | tail -n 300
+# tail 放宽到 1000：marker 每模块一条（400~700 条），300 行会把前半程模块的
+# 证据（尤其 "exports duplicate symbol"，对应 insmod 的 "Invalid module format"）
+# 截掉，导致只读门禁无法把 BUILTIN_DUP 与真 vermagic 失败区分开。
+dmesg | grep -Ei 'modtest-marker|BUG:|WARNING:|Oops|panic|Call Trace|Unable to handle|general protection|firmware.*(fail|error)|exports duplicate symbol|disagrees about version of symbol|Unknown symbol' | tail -n 1000
 echo "---DMESG-END---"
 
 echo "@@MODTEST_DONE@@ total=${total} loaded=${loaded} ok=${ok} fail=${fail} skip=${skip} status=done"

@@ -27,4 +27,5 @@ files/mnt/p1/GRUB_VER
 files/mnt/p1/user-config.yml
 files/mnt/p2
 files/mnt/p3
-files/tmp
+files/tmp__pycache__/
+*.pyc

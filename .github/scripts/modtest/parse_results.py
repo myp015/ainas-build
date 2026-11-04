@@ -15,8 +15,15 @@
 #   @@P|<tag>|begin .. @@P|<tag>|end（kernelid / installed / bootloaded）
 #   ---DMESG-BEGIN--- .. ---DMESG-END---
 #
-# 安全原则：只有白名单类别（ENV/BUILTIN/DMESG_WARNING）允许豁免；
-# Unknown symbol / vermagic / 依赖顺序 / MISSING / 内核崩溃 一律硬失败。
+# 安全原则：只有白名单类别（ENV/BUILTIN/BUILTIN_DUP/DEP_ENV/DMESG_WARNING）
+# 允许豁免；Unknown symbol / 真·vermagic 不匹配 / 依赖顺序 / MISSING / 内核崩溃
+# 一律硬失败。
+#
+# BUILTIN_DUP：模块导出名与**内核已导出符号**重名，内核打印
+# "<mod>: exports duplicate symbol <sym> (owned by <owner>)" 并以 ENOEXEC 拒绝
+# 加载（insmod 只显示 "Invalid module format"，极易误判成 vermagic）。这是
+# "内核已内建/已加载同名功能"的等价情形，不是模块缺陷；但必须有该 dmesg 证据
+# 才降级，否则仍按 VERMAGIC 硬失败（防止把真 vermagic 问题静默掩盖）。
 
 import argparse
 import fnmatch
@@ -34,7 +41,7 @@ HARD_CATEGORIES = {"UNKNOWN_SYMBOL", "VERMAGIC", "DEPEND", "MISSING", "OTHER",
 # DEP_ENV：依赖模块因环境缺失（ENV/BUILTIN）未加载，依赖方随之 Unknown symbol。
 # 典型：非 Hyper-V 环境下 hv_vmbus "No such device"，hid_hyperv/hv_netvsc 等
 # 全部 Unknown symbol —— 属环境级联，不是模块缺陷。
-ENV_CATEGORIES = {"ENV", "BUILTIN", "DEP_ENV"}
+ENV_CATEGORIES = {"ENV", "BUILTIN", "BUILTIN_DUP", "DEP_ENV"}
 ALLOWABLE_CATEGORIES = ENV_CATEGORIES | {"DMESG_WARNING"}
 
 FAULT_RE = re.compile(
@@ -43,6 +50,7 @@ WARNING_RE = re.compile(r"WARNING:")
 FIRMWARE_FAIL_RE = re.compile(r"firmware.*(fail|error)", re.I)
 MARKER_RE = re.compile(r"modtest-marker idx=(\d+) name=(\S+)")
 UNKNOWN_SYM_RE = re.compile(r"Unknown symbol (\S+)")
+DUP_EXPORT_RE = re.compile(r"exports duplicate symbol (\S+)")
 
 M_RE = re.compile(r"^@@M\|(\d+)\|([^|]*)\|([^|]*)\|([^|]*)\|(.*)$")
 DONE_RE = re.compile(
@@ -252,6 +260,7 @@ def analyze(args):
     fault_by_name, warnings_by_name = {}, {}
     firmware_fail = 0
     unknown_syms = {}
+    dup_exports_by_name = {}
     cur_name = None
     for line in parse_dmesg(lines):
         m = MARKER_RE.search(line)
@@ -264,6 +273,11 @@ def analyze(args):
         if m:
             key = cur_name or "<unknown>"
             unknown_syms.setdefault(key, set()).add(m.group(1))
+        m = DUP_EXPORT_RE.search(line)
+        if m:
+            # 与内核导出面重名：内核返回 ENOEXEC（insmod 显示 Invalid module format）。
+            key = cur_name or "<unknown>"
+            dup_exports_by_name.setdefault(key, set()).add(m.group(1))
         if FAULT_RE.search(line):
             key = cur_name or "<unknown>"
             fault_by_name[key] = fault_by_name.get(key, 0) + 1
@@ -303,6 +317,11 @@ def analyze(args):
             continue
 
         category = "MISSING" if state == "MISSING" else classify(r["err"])
+        # "Invalid module format" 有两类根因：真 vermagic 不匹配（硬失败）与
+        # 模块导出名撞上内核已导出符号（内核 prints "exports duplicate symbol"
+        # 后返回 ENOEXEC）。只有拿到 diag 证据才降级为 BUILTIN_DUP。
+        if category == "VERMAGIC" and r["name"] in dup_exports_by_name:
+            category = "BUILTIN_DUP"
         allowed = (category in ALLOWABLE_CATEGORIES
                    and is_allowed(r["name"], category))
         item = {**r, "category": category, "allowed": allowed}
@@ -319,8 +338,13 @@ def analyze(args):
         dep_map.setdefault(e["name"], []).extend(
             d.replace("-", "_")
             for d in re.split(r"[,\s]+", e["depends"]) if d and d != "-")
+    # SKIP_UPDATE 也计入"环境缺失"：系统已加载同名模块（多为官方内核自带的
+    # 旧栈），update/ 版本因此根本没参与运行，依赖它的模块必然解析失败 ——
+    # 这是环境限制（典型：官方 DRM 已加载，update/ 6.5 栈的 ttm/amdgpu 级联
+    # Unknown symbol），不是依赖顺序缺陷。
     env_down = {x["name"] for x in failures + skips
                 if x["category"] in ENV_CATEGORIES}
+    env_down |= {r["name"] for r in records if r["state"] == "SKIP_UPDATE"}
     cascaded = []
     for f in failures:
         if f["category"] != "UNKNOWN_SYMBOL":
@@ -863,6 +887,22 @@ def run_selftest():
                     "epyc7002\t7.4\t5.10.55\tSA6400\t*\tb\tDEP_ENV\t依赖环境缺失\n")
         return ["--allowlist", path]
 
+    def builtin_dup_case(root, lp):
+        path = os.path.join(root, "allow.tsv")
+        write(path, "epyc7002\t7.4\t5.10.55\tSA6400\t*\ta\tBUILTIN_DUP\t"
+                    "内核已导出同名符号\n")
+        return ["--allowlist", path]
+
+    def skip_update_cascade_case(root, lp):
+        # b 依赖 a，a 因系统已加载同名模块（SKIP_UPDATE）未参与运行 → b 的
+        # Unknown symbol 应降级为 DEP_ENV。
+        write(lp, "1\ta\tupdate/a.ko\t\t-\tupdate\n"
+                  "2\tb\tupdate/b.ko\ta\t-\tupdate\n")
+        path = os.path.join(root, "allow.tsv")
+        write(path, "epyc7002\t7.4\t5.10.55\tSA6400\t*\tb\tDEP_ENV\t"
+                    "依赖的 update 模块被系统同名模块取代\n")
+        return ["--allowlist", path]
+
     ok = "@@M|1|a|INSMOD_OK|0|src=x pkg=x err="
     cases = [
         scenario("S1 缺 DONE", 1, "G-M1", [ok], done=False,
@@ -906,6 +946,22 @@ def run_selftest():
         scenario("S15 官方内核 STALE/安装身份仅告警", 0, "[WARN] G-M3",
                  ["@@M|1|a|LOADED|-|src=OLD pkg=NEW"],
                  installed=["a.ko\tOLD"], pkg="NEW"),
+        scenario("S16 内核重复导出证据 → BUILTIN_DUP 可豁免", 0, "BUILTIN_DUP",
+                 ["@@M|1|a|INSMOD_FAIL|1|src=- pkg=- err=insmod: ERROR: "
+                  "could not insert module a.ko: Invalid module format"],
+                 installed=["a.ko"], pkg="x", extra=builtin_dup_case,
+                 dmesg="[  1.1] modtest-marker idx=1 name=a\n"
+                       "[  1.2] a: exports duplicate symbol foo (owned by kernel)\n"),
+        scenario("S17 无重复导出证据的 VERMAGIC 仍硬失败", 1, "VERMAGIC",
+                 ["@@M|1|a|INSMOD_FAIL|1|src=- pkg=- err=insmod: ERROR: "
+                  "could not insert module a.ko: Invalid module format"],
+                 installed=["a.ko"], pkg="x", extra=builtin_dup_case,
+                 dmesg="[  1.1] modtest-marker idx=1 name=a\n"),
+        scenario("S18 SKIP_UPDATE 依赖级联 → DEP_ENV", 0, "DEP_ENV",
+                 ["@@M|1|a|SKIP_UPDATE|-|src=- pkg=",
+                  "@@M|2|b|INSMOD_FAIL|1|src=- pkg=- err=unknown symbol drm_x"],
+                 installed=["a.ko"], pkg="",
+                 extra=skip_update_cascade_case),
     ]
 
     failed = 0

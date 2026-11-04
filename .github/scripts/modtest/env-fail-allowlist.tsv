@@ -1,4 +1,5 @@
-# 模块测试失败白名单（仅允许环境类失败，Unknown symbol / vermagic / 内核崩溃不得入内）
+# 模块测试失败白名单（仅允许环境类失败，Unknown symbol / 真 vermagic 不匹配 /
+# 内核崩溃不得入内；BUILTIN_DUP 必须带内核 "exports duplicate symbol" 证据）
 #
 # 格式（TAB 分隔，8 列；除 reason 外均支持 glob/fnmatch，* 表示通配）：
 #   platform  line  kver  model  kernel  name  category  reason
@@ -7,7 +8,11 @@
 # 内核+自编模块包构建，official 允许的差异不应顺带掩盖 custom 的真缺陷。
 #
 # category 取值：ENV（硬件/虚拟环境限制）、BUILTIN（模块已内建，insmod 报 File exists）、
-#               DEP_ENV（依赖模块因环境缺失未加载导致的级联 Unknown symbol）、
+#               BUILTIN_DUP（模块导出名与内核已导出符号重名，内核打印
+#                           "exports duplicate symbol" 后以 ENOEXEC 拒绝，
+#                           insmod 侧只显示 "Invalid module format"）、
+#               DEP_ENV（依赖模块因环境缺失（ENV/BUILTIN/SKIP_UPDATE）未加载导致的
+#                           级联 Unknown symbol）、
 #               DMESG_WARNING（非致命内核告警）、
 #               STALE_LOADED（已加载模块 srcversion 与测试包不同；custom 内核默认硬失败，
 #                              官方内核因系统模块来自官方 PAT，只告警）、
@@ -65,3 +70,52 @@
 *	*	*	*	custom	hyperv_keyboard	DEP_ENV	依赖 hv_vmbus，Hyper-V 宿主缺失
 *	*	*	*	custom	pci_hyperv	DEP_ENV	依赖 hv_vmbus，Hyper-V 宿主缺失
 *	*	*	*	custom	uio_hv_generic	DEP_ENV	依赖 hv_vmbus，Hyper-V 宿主缺失
+*	*	*	*	custom	xen_fbfront	ENV	非 Xen 宿主，帧缓冲前端 No such device
+
+# ── 内核已导出同名符号（BUILTIN_DUP）：内核把该功能内建并导出，模块永远 insmod 不了 ──
+# 实测（2026-11-04 多型号矩阵 run 41755040522/41755044954/41755049558/41755053773）：
+# 我们的发布包与 RR 成品（rr-modules/extracted、rr-modules/cks）**逐文件同构**，这些
+# .ko 在 RR 包里同样存在；Synology 官方模块包（syno-modules/official/hda1）**不包含**
+# 它们（官方内核已内建）。运行期 modprobe 会按 modules.builtin 直接跳过同名模块，
+# 只有测试脚本直接 insmod 才会触发，属"冗余文件"而非功能缺陷。
+# 因此处理方式 = 保持 RR 对齐、在此逐平台登记（删除模块会破坏产物对齐，用户规则见
+# 记忆 alignment-definition / alignment-includes-official-covered-modules）。
+# 判据：dmesg 必须出现 exports duplicate symbol 证据；真 vermagic 不匹配仍是 VERMAGIC。
+#
+# 官方内核（4.4.302/4.4.180 均由内核面导出 governor；r1000/v1000 另有 PHYLIB 内建）：
+*	*	4.4.*	*	official	cpufreq_governor	BUILTIN_DUP	内核内建 CPU_FREQ_GOV_COMMON 并导出 cpufreq_governor_dbs/gov_queue_work/dbs_check_cpu；RR 包同构
+*	*	4.4.*	*	official	libphy	BUILTIN_DUP	内核内建 PHYLIB 已导出 77 个同名符号；RR 包同构
+*	*	4.4.*	*	official	button	BUILTIN_DUP	purley 内核内建 ACPI_BUTTON 并导出 acpi_lid_*；RR 包同构
+*	*	4.4.*	*	official	i8042	BUILTIN_DUP	geminilake 内核内建 SERIO_I8042 并导出 i8042_*；RR 包同构
+*	*	5.10.55	*	official	check_signature	BUILTIN_DUP	geminilakenk 内核内建 CHECK_SIGNATURE 并导出 check_signature；RR 包同构
+# 过渡期（根因已修）：src/5.10.55/defines.r1000nk 的 CONFIG_NET_DEVLINK 已改 =n（官方内核
+# 内建导出 105 个 devlink 符号，官方 hda1 与 RR 均无 devlink.ko）。26.11.0 及更早的已发布
+# modules 包仍带 devlink.ko；下一版 modules 发布并复跑 ova-test 全绿后删除本行。
+*	*	5.10.55	*	official	devlink	BUILTIN_DUP	r1000nk 内核内建 NET_DEVLINK 并导出 devlink/tracepoint 符号（产物待下一版移除）
+#
+# 官方内核 5.10：update/ 6.5 栈因系统已加载官方同名 DRM 模块（SKIP_UPDATE）无法
+# 参与运行，依赖它的模块必然 Unknown symbol（DEP_ENV，环境限制，非依赖缺陷）：
+*	*	5.10.55	*	official	ttm	DEP_ENV	update/ 6.5 栈的 drm 被系统同名模块取代（SKIP_UPDATE）
+*	*	5.10.55	*	official	drm_display_helper	DEP_ENV	同上（依赖 drm/drm_kms_helper）
+*	*	5.10.55	*	official	drm_ttm_helper	DEP_ENV	同上（依赖 ttm/drm）
+*	*	*	*	official	amdgpu	DEP_ENV	同上（依赖 update/ 整条 6.5 DRM 栈）
+*	*	4.4.*	*	official	realtek	DEP_ENV	依赖 libphy，而 libphy 因内核内建重名无法加载
+#
+# custom（cks）内核：dsm_linux 内核把这些功能内建并导出，而我们的 cks 包与 RR cks
+# 成品同构（RR cks 同样打包了这些文件）：
+*	*	5.10.55	*	custom	check_signature	BUILTIN_DUP	cks 内核内建 CHECK_SIGNATURE；RR cks 包同构
+*	*	5.10.55	*	custom	devlink	BUILTIN_DUP	cks 内核内建 NET_DEVLINK；RR cks 包同构
+*	*	5.10.55	*	custom	dimlib	BUILTIN_DUP	cks 内核内建 DIMLIB；RR cks 包同构
+*	*	5.10.55	*	custom	page_pool	BUILTIN_DUP	cks 内核内建 PAGE_POOL；RR cks 包同构
+#
+# 过渡期（根因已修）：r1000nk/v1000nk 的 cks 内核内建并导出这些符号
+# （ainas-cks/kexports/exports_cks_r1000nk_*/v1000nk_* 实证），故已把
+# src/5.10.55-ck/defines.{r1000nk,v1000nk} 的 TEXTSEARCH/XZ_DEC/IPMI_PLAT_DATA 改 =y，
+# 并把 drivers/mmc/host/Makefile 的 sdhci-pci-data 同步为 dsm_linux 的
+# obj-$(subst m,y,$(CONFIG_MMC_SDHCI_PCI)) 写法（不再产出 .ko）。26.11.0 及更早的
+# 已发布 cks 包仍携带这 4 个文件；下一版 cks 发布并复跑 ova-test 全绿后删除本段。
+# （RR cks 只发布 epyc7002/geminilakenk 包，无此四项，不能引用 RR 同构。）
+*	*	5.10.55	*	custom	textsearch	BUILTIN_DUP	cks 内核内建 TEXTSEARCH 并导出 textsearch_*（产物待下一版移除）
+*	*	5.10.55	*	custom	ipmi_plat_data	BUILTIN_DUP	cks 内核内建 IPMI_PLAT_DATA 并导出 ipmi_platform_add（产物待下一版移除）
+*	*	5.10.55	*	custom	sdhci_pci_data	BUILTIN_DUP	cks 内核内建 sdhci-pci-data（Makefile subst m,y；产物待下一版移除）
+*	*	5.10.55	*	custom	xz_dec	BUILTIN_DUP	cks 内核内建 XZ_DEC 并导出 xz_dec_*（产物待下一版移除）
