@@ -1,7 +1,10 @@
 # 模块测试基线
 
-文件名：`<platform>-<line>-<kver>-<kernel>.json`，例如
-`epyc7002-7.4-5.10.55-official.json`。
+文件名：`<platform>-<完整 DSM 版本>-<kver>-<kernel>.json`，例如
+`epyc7002-7.4.1-5.10.55-official.json`、`epyc7002-7.2.2-5.10.55-custom.json`。
+版本必须是工作流的 `dsm_version` 原值（`7.4.1` 而非 `7.4`），否则 ova-test
+按 `${PLATFORM}-${LINE}-${KVER}-${KERNEL}.json` 找不到基线，G-M6 只报
+"未启用基线"。
 
 门禁脚本 `parse_results.py` 比较两类集合：
 

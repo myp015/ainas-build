@@ -29,7 +29,98 @@
     "status": "done"
   },
   "failures": [],
-  "allowlisted": [],
+  "allowlisted": [
+    {
+      "idx": 16,
+      "name": "acpi_cpufreq",
+      "category": "ENV",
+      "err": "insmod: ERROR: could not insert module /tmp/modtest-payload/acpi-cpufreq.ko: No such device"
+    },
+    {
+      "idx": 53,
+      "name": "binder_linux",
+      "category": "BUILTIN",
+      "err": "insmod: ERROR: could not insert module /tmp/modtest-payload/binder_linux.ko: File exists"
+    },
+    {
+      "idx": 76,
+      "name": "ch35x_38x",
+      "category": "ENV",
+      "err": "insmod: ERROR: could not insert module /tmp/modtest-payload/ch35x_38x.ko: No such device or address"
+    },
+    {
+      "idx": 88,
+      "name": "cpufreq_userspace",
+      "category": "ENV",
+      "err": "insmod: ERROR: could not insert module /tmp/modtest-payload/cpufreq_userspace.ko: Device or resource busy"
+    },
+    {
+      "idx": 131,
+      "name": "f71882fg",
+      "category": "ENV",
+      "err": "insmod: ERROR: could not insert module /tmp/modtest-payload/f71882fg.ko: No such device"
+    },
+    {
+      "idx": 137,
+      "name": "gpio_f7188x",
+      "category": "ENV",
+      "err": "insmod: ERROR: could not insert module /tmp/modtest-payload/gpio-f7188x.ko: No such device"
+    },
+    {
+      "idx": 138,
+      "name": "gpio_it87",
+      "category": "ENV",
+      "err": "insmod: ERROR: could not insert module /tmp/modtest-payload/gpio-it87.ko: No such device"
+    },
+    {
+      "idx": 140,
+      "name": "gpio_sch311x",
+      "category": "ENV",
+      "err": "insmod: ERROR: could not insert module /tmp/modtest-payload/gpio-sch311x.ko: No such device"
+    },
+    {
+      "idx": 168,
+      "name": "intel_idle",
+      "category": "ENV",
+      "err": "insmod: ERROR: could not insert module /tmp/modtest-payload/intel_idle.ko: No such device"
+    },
+    {
+      "idx": 186,
+      "name": "ipmi_si",
+      "category": "ENV",
+      "err": "insmod: ERROR: could not insert module /tmp/modtest-payload/ipmi_si.ko: No such device"
+    },
+    {
+      "idx": 200,
+      "name": "it87",
+      "category": "ENV",
+      "err": "insmod: ERROR: could not insert module /tmp/modtest-payload/it87.ko: No such device"
+    },
+    {
+      "idx": 212,
+      "name": "kvm_amd",
+      "category": "ENV",
+      "err": "insmod: ERROR: could not insert module /tmp/modtest-payload/kvm-amd.ko: Operation not supported"
+    },
+    {
+      "idx": 213,
+      "name": "kvm_intel",
+      "category": "ENV",
+      "err": "insmod: ERROR: could not insert module /tmp/modtest-payload/kvm-intel.ko: Operation not supported"
+    },
+    {
+      "idx": 249,
+      "name": "nct6683",
+      "category": "ENV",
+      "err": "insmod: ERROR: could not insert module /tmp/modtest-payload/nct6683.ko: No such device"
+    },
+    {
+      "idx": 250,
+      "name": "nct6775",
+      "category": "ENV",
+      "err": "insmod: ERROR: could not insert module /tmp/modtest-payload/nct6775.ko: No such device"
+    }
+  ],
   "stale_loaded": [
     {
       "name": "vxlan",
@@ -54,7 +145,20 @@
     }
   ],
   "kernel_faults": [],
-  "dmesg_warnings": [],
+  "dmesg_warnings": [
+    {
+      "name": "<unknown>",
+      "hits": 1
+    },
+    {
+      "name": "cfg80211",
+      "hits": 1
+    },
+    {
+      "name": "binder_linux",
+      "hits": 1
+    }
+  ],
   "firmware_fail": 0,
   "install": {
     "installed": 299,
@@ -623,9 +727,9 @@
     "kver": "4.4.302",
     "modules_key": "apollolake-7.4-4.4.302",
     "package_path": "/mnt/p3/modules/apollolake-7.4-4.4.302.tgz",
-    "package_sha256": "4025a0b498c0894a58cd5f13da8a759acc6fd99318476f64355c3500e323163b",
+    "package_sha256": "7ca13dc98c145e44773e86245cb987b65999583b1fe854a6f6a36e7599d58e7c",
     "package_entries": "459",
-    "test_payload_sha256": "4025a0b498c0894a58cd5f13da8a759acc6fd99318476f64355c3500e323163b",
+    "test_payload_sha256": "7ca13dc98c145e44773e86245cb987b65999583b1fe854a6f6a36e7599d58e7c",
     "profile": "modtest"
   },
   "module_count": 459,

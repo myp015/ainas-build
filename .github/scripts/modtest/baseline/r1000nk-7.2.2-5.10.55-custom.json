@@ -1,0 +1,198 @@
+{
+  "schema": 1,
+  "context": {
+    "source": "ainas",
+    "model": "DS725+",
+    "kernel": "custom",
+    "platform": "r1000nk",
+    "line": "7.2.2",
+    "kver": "5.10.55",
+    "profile": "modtest",
+    "prebuilt": false,
+    "install_drift": false,
+    "logs": "/tmp/modtest-logs"
+  },
+  "totals": {
+    "total": 655,
+    "loaded": 129,
+    "ok": 509,
+    "fail": 17,
+    "skip": 0,
+    "hazard": 0
+  },
+  "declared": {
+    "total": "655",
+    "loaded": "129",
+    "ok": "509",
+    "fail": "17",
+    "skip": "0",
+    "status": "done"
+  },
+  "failures": [],
+  "allowlisted": [
+    {
+      "idx": 16,
+      "name": "acpi_cpufreq",
+      "category": "ENV",
+      "err": "insmod: ERROR: could not insert module /tmp/modtest-payload/acpi-cpufreq.ko: No such device"
+    },
+    {
+      "idx": 88,
+      "name": "binder_linux",
+      "category": "BUILTIN",
+      "err": "insmod: ERROR: could not insert module /tmp/modtest-payload/binder_linux.ko: File exists"
+    },
+    {
+      "idx": 127,
+      "name": "ch35x_38x",
+      "category": "ENV",
+      "err": "insmod: ERROR: could not insert module /tmp/modtest-payload/ch35x_38x.ko: No such device or address"
+    },
+    {
+      "idx": 135,
+      "name": "coretemp",
+      "category": "ENV",
+      "err": "insmod: ERROR: could not insert module /tmp/modtest-payload/coretemp.ko: No such device"
+    },
+    {
+      "idx": 139,
+      "name": "cpufreq_userspace",
+      "category": "ENV",
+      "err": "insmod: ERROR: could not insert module /tmp/modtest-payload/cpufreq_userspace.ko: Device or resource busy"
+    },
+    {
+      "idx": 179,
+      "name": "f71882fg",
+      "category": "ENV",
+      "err": "insmod: ERROR: could not insert module /tmp/modtest-payload/f71882fg.ko: No such device"
+    },
+    {
+      "idx": 199,
+      "name": "gpio_f7188x",
+      "category": "ENV",
+      "err": "insmod: ERROR: could not insert module /tmp/modtest-payload/gpio-f7188x.ko: No such device"
+    },
+    {
+      "idx": 200,
+      "name": "gpio_it87",
+      "category": "ENV",
+      "err": "insmod: ERROR: could not insert module /tmp/modtest-payload/gpio-it87.ko: No such device"
+    },
+    {
+      "idx": 202,
+      "name": "gpio_sch311x",
+      "category": "ENV",
+      "err": "insmod: ERROR: could not insert module /tmp/modtest-payload/gpio-sch311x.ko: No such device"
+    },
+    {
+      "idx": 232,
+      "name": "intel_idle",
+      "category": "ENV",
+      "err": "insmod: ERROR: could not insert module /tmp/modtest-payload/intel_idle.ko: No such device"
+    },
+    {
+      "idx": 264,
+      "name": "ipmi_si",
+      "category": "ENV",
+      "err": "insmod: ERROR: could not insert module /tmp/modtest-payload/ipmi_si.ko: No such device"
+    },
+    {
+      "idx": 276,
+      "name": "it87",
+      "category": "ENV",
+      "err": "insmod: ERROR: could not insert module /tmp/modtest-payload/it87.ko: No such device"
+    },
+    {
+      "idx": 290,
+      "name": "kvm_amd",
+      "category": "ENV",
+      "err": "insmod: ERROR: could not insert module /tmp/modtest-payload/kvm-amd.ko: Operation not supported"
+    },
+    {
+      "idx": 291,
+      "name": "kvm_intel",
+      "category": "ENV",
+      "err": "insmod: ERROR: could not insert module /tmp/modtest-payload/kvm-intel.ko: Operation not supported"
+    },
+    {
+      "idx": 347,
+      "name": "nct6683",
+      "category": "ENV",
+      "err": "insmod: ERROR: could not insert module /tmp/modtest-payload/nct6683.ko: No such device"
+    },
+    {
+      "idx": 348,
+      "name": "nct6775",
+      "category": "ENV",
+      "err": "insmod: ERROR: could not insert module /tmp/modtest-payload/nct6775.ko: No such device"
+    },
+    {
+      "idx": 545,
+      "name": "syno_hddpwrctl_test",
+      "category": "ENV",
+      "err": "insmod: ERROR: could not insert module /tmp/modtest-payload/syno_hddpwrctl_test.ko: Operation not permitted"
+    }
+  ],
+  "stale_loaded": [],
+  "kernel_faults": [],
+  "dmesg_warnings": [],
+  "firmware_fail": 1,
+  "install": {
+    "installed": 677,
+    "boot_loaded": 143,
+    "gap": [],
+    "extra": [
+      "appletalk.ko",
+      "atlantic_v2.ko",
+      "compat_xtables.ko",
+      "iscsi_target_mod.ko",
+      "phy_alloc.ko",
+      "rodsp_ep.ko",
+      "rp.ko",
+      "syno_extent_pool.ko",
+      "synoacl_vfs.ko",
+      "synobios.ko",
+      "synofsbd.ko",
+      "synorbd.ko",
+      "target_core_ep.ko",
+      "target_core_file.ko",
+      "target_core_iblock.ko",
+      "target_core_mod.ko",
+      "target_core_multi_file.ko",
+      "target_core_pscsi.ko",
+      "target_core_user.ko",
+      "tcm_loop.ko",
+      "vhost_scsi.ko",
+      "xt_geoip.ko"
+    ],
+    "identity_mismatch": [],
+    "new_gap": []
+  },
+  "baseline": {
+    "new": [],
+    "gone": []
+  },
+  "kernel_identity": {
+    "checked": true,
+    "pass": true,
+    "reluser": "5.10.55+ (RR@RROrg)",
+    "uts": "#1 SMP Wed Nov 4 16:43:05 CST 2026",
+    "detail": "发现 Linux version 行=1"
+  },
+  "package_meta": {
+    "kernel": "custom",
+    "source": "ainas",
+    "model": "DS725+",
+    "platform": "r1000nk",
+    "line": "7.2.2",
+    "kver": "5.10.55",
+    "modules_key": "r1000nk-7.2-5.10.55",
+    "package_path": "/mnt/p3/cks/modules-r1000nk-7.2-5.10.55.tgz",
+    "package_sha256": "d4b823b37b84733c691681e09051fbf08631bf8fe7d8dd6319a0f7e3c3872267",
+    "package_entries": "655",
+    "test_payload_sha256": "d4b823b37b84733c691681e09051fbf08631bf8fe7d8dd6319a0f7e3c3872267",
+    "profile": "modtest"
+  },
+  "module_count": 655,
+  "install_gap": []
+}

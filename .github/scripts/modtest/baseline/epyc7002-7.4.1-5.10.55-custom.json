@@ -10,7 +10,7 @@
     "profile": "modtest",
     "prebuilt": false,
     "install_drift": false,
-    "logs": "art-custom/tmp/modtest-logs"
+    "logs": "/tmp/modtest-logs"
   },
   "totals": {
     "total": 681,
@@ -232,7 +232,7 @@
   "stale_loaded": [],
   "kernel_faults": [],
   "dmesg_warnings": [],
-  "firmware_fail": 0,
+  "firmware_fail": 1,
   "install": {
     "installed": 710,
     "boot_loaded": 150,
@@ -291,9 +291,9 @@
     "kver": "5.10.55",
     "modules_key": "epyc7002-7.4-5.10.55",
     "package_path": "/mnt/p3/cks/modules-epyc7002-7.4-5.10.55.tgz",
-    "package_sha256": "e0d48457472f57cc9dec5fd20afd742f0de726450f616ae5f38efa6a351309e4",
+    "package_sha256": "e07fcf197a79b107a4f2e69ee12c14f5d329bebbc697df230bef58bd675cd32c",
     "package_entries": "681",
-    "test_payload_sha256": "e0d48457472f57cc9dec5fd20afd742f0de726450f616ae5f38efa6a351309e4",
+    "test_payload_sha256": "e07fcf197a79b107a4f2e69ee12c14f5d329bebbc697df230bef58bd675cd32c",
     "profile": "modtest"
   },
   "module_count": 681,

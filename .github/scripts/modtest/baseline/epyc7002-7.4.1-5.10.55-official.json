@@ -10,20 +10,20 @@
     "profile": "modtest",
     "prebuilt": false,
     "install_drift": true,
-    "logs": "/www/tmp/task216/art-new/tmp/modtest-logs"
+    "logs": "/tmp/modtest-logs"
   },
   "totals": {
-    "total": 495,
-    "loaded": 81,
-    "ok": 397,
+    "total": 514,
+    "loaded": 85,
+    "ok": 412,
     "fail": 17,
     "skip": 0,
     "hazard": 0
   },
   "declared": {
-    "total": "495",
-    "loaded": "81",
-    "ok": "397",
+    "total": "514",
+    "loaded": "85",
+    "ok": "412",
     "fail": "17",
     "skip": "0",
     "status": "done"
@@ -37,97 +37,97 @@
       "err": "insmod: ERROR: could not insert module /tmp/modtest-payload/acpi-cpufreq.ko: No such device"
     },
     {
-      "idx": 48,
+      "idx": 66,
       "name": "binder_linux",
       "category": "BUILTIN",
       "err": "insmod: ERROR: could not insert module /tmp/modtest-payload/binder_linux.ko: File exists"
     },
     {
-      "idx": 70,
+      "idx": 88,
       "name": "ch35x_38x",
       "category": "ENV",
       "err": "insmod: ERROR: could not insert module /tmp/modtest-payload/ch35x_38x.ko: No such device or address"
     },
     {
-      "idx": 76,
+      "idx": 94,
       "name": "coretemp",
       "category": "ENV",
       "err": "insmod: ERROR: could not insert module /tmp/modtest-payload/coretemp.ko: No such device"
     },
     {
-      "idx": 80,
+      "idx": 98,
       "name": "cpufreq_userspace",
       "category": "ENV",
       "err": "insmod: ERROR: could not insert module /tmp/modtest-payload/cpufreq_userspace.ko: Device or resource busy"
     },
     {
-      "idx": 102,
+      "idx": 119,
       "name": "f71882fg",
       "category": "ENV",
       "err": "insmod: ERROR: could not insert module /tmp/modtest-payload/f71882fg.ko: No such device"
     },
     {
-      "idx": 118,
+      "idx": 135,
       "name": "gpio_f7188x",
       "category": "ENV",
       "err": "insmod: ERROR: could not insert module /tmp/modtest-payload/gpio-f7188x.ko: No such device"
     },
     {
-      "idx": 119,
+      "idx": 136,
       "name": "gpio_it87",
       "category": "ENV",
       "err": "insmod: ERROR: could not insert module /tmp/modtest-payload/gpio-it87.ko: No such device"
     },
     {
-      "idx": 121,
+      "idx": 138,
       "name": "gpio_sch311x",
       "category": "ENV",
       "err": "insmod: ERROR: could not insert module /tmp/modtest-payload/gpio-sch311x.ko: No such device"
     },
     {
-      "idx": 146,
+      "idx": 163,
       "name": "intel_idle",
       "category": "ENV",
       "err": "insmod: ERROR: could not insert module /tmp/modtest-payload/intel_idle.ko: No such device"
     },
     {
-      "idx": 172,
+      "idx": 189,
       "name": "ipmi_si",
       "category": "ENV",
       "err": "insmod: ERROR: could not insert module /tmp/modtest-payload/ipmi_si.ko: No such device"
     },
     {
-      "idx": 182,
+      "idx": 199,
       "name": "it87",
       "category": "ENV",
       "err": "insmod: ERROR: could not insert module /tmp/modtest-payload/it87.ko: No such device"
     },
     {
-      "idx": 195,
+      "idx": 212,
       "name": "kvm_amd",
       "category": "ENV",
       "err": "insmod: ERROR: could not insert module /tmp/modtest-payload/kvm-amd.ko: Operation not supported"
     },
     {
-      "idx": 196,
+      "idx": 213,
       "name": "kvm_intel",
       "category": "ENV",
       "err": "insmod: ERROR: could not insert module /tmp/modtest-payload/kvm-intel.ko: Operation not supported"
     },
     {
-      "idx": 239,
+      "idx": 256,
       "name": "nct6683",
       "category": "ENV",
       "err": "insmod: ERROR: could not insert module /tmp/modtest-payload/nct6683.ko: No such device"
     },
     {
-      "idx": 240,
+      "idx": 257,
       "name": "nct6775",
       "category": "ENV",
       "err": "insmod: ERROR: could not insert module /tmp/modtest-payload/nct6775.ko: No such device"
     },
     {
-      "idx": 408,
+      "idx": 425,
       "name": "syno_hddpwrctl_test",
       "category": "ENV",
       "err": "insmod: ERROR: could not insert module /tmp/modtest-payload/syno_hddpwrctl_test.ko: Operation not permitted"
@@ -144,7 +144,7 @@
   ],
   "kernel_faults": [],
   "dmesg_warnings": [],
-  "firmware_fail": 0,
+  "firmware_fail": 1,
   "install": {
     "installed": 302,
     "boot_loaded": 153,
@@ -165,6 +165,8 @@
       "aic94xx.ko",
       "alcor_pci.ko",
       "alx.ko",
+      "amdgpu.ko",
+      "amdxcp.ko",
       "ashmem_linux.ko",
       "asix.ko",
       "atkbd.ko",
@@ -201,6 +203,14 @@
       "dm9601.ko",
       "dmabuf.ko",
       "dme1737.ko",
+      "drm.ko",
+      "drm_buddy.ko",
+      "drm_display_helper.ko",
+      "drm_kms_helper.ko",
+      "drm_mipi_dsi.ko",
+      "drm_panel_orientation_quirks.ko",
+      "drm_suballoc_helper.ko",
+      "drm_ttm_helper.ko",
       "e1000.ko",
       "e1000e.ko",
       "eeprom_93cx6.ko",
@@ -222,6 +232,7 @@
       "gpio-sch.ko",
       "gpio-sch311x.ko",
       "gpio-vx855.ko",
+      "gpu-sched.ko",
       "hd3ss3220.ko",
       "hinic.ko",
       "hpilo.ko",
@@ -229,6 +240,8 @@
       "i2c-i801.ko",
       "i2c-smbus.ko",
       "i8042.ko",
+      "i915-compat.ko",
+      "i915.ko",
       "iavf.ko",
       "ib_umad.ko",
       "ib_uverbs.ko",
@@ -464,6 +477,7 @@
       "thermal.ko",
       "tps65217.ko",
       "ts_bm.ko",
+      "ttm.ko",
       "tty0tty.ko",
       "typec.ko",
       "ushc.ko",
@@ -519,7 +533,6 @@
       "auth_rpcgss.ko",
       "authenc.ko",
       "authencesn.ko",
-      "auxiliary.ko",
       "bonding.ko",
       "br_netfilter.ko",
       "bridge.ko",
@@ -636,9 +649,7 @@
       "tunnel6.ko",
       "uas.ko",
       "udf.ko",
-      "usb-common.ko",
       "usb-storage.ko",
-      "usbcore.ko",
       "usbhid.ko",
       "usbip-core.ko",
       "usbip-host.ko",
@@ -654,8 +665,6 @@
       "xfrm_algo.ko",
       "xfrm_ipcomp.ko",
       "xfrm_user.ko",
-      "xhci-hcd.ko",
-      "xhci-pci.ko",
       "xor.ko",
       "xt_geoip.ko",
       "xxhash_generic.ko",
@@ -674,30 +683,12 @@
         ]
       },
       {
-        "name": "i40e.ko",
-        "pkg": [
-          "8FFC44C77E088CCD0934658"
-        ],
-        "installed": [
-          "1FC5349A4A939CD4BB05BA7"
-        ]
-      },
-      {
         "name": "igb.ko",
         "pkg": [
           "1F04C0EC448704AAE9409EC"
         ],
         "installed": [
           "B284BC0178FADA1F0291315"
-        ]
-      },
-      {
-        "name": "ixgbe.ko",
-        "pkg": [
-          "237CC291D5B3345D7C2763E"
-        ],
-        "installed": [
-          "DA9A549DF6673BAD0643757"
         ]
       },
       {
@@ -764,7 +755,22 @@
         ]
       }
     ],
-    "new_gap": []
+    "new_gap": [
+      "amdgpu.ko",
+      "amdxcp.ko",
+      "drm.ko",
+      "drm_buddy.ko",
+      "drm_display_helper.ko",
+      "drm_kms_helper.ko",
+      "drm_mipi_dsi.ko",
+      "drm_panel_orientation_quirks.ko",
+      "drm_suballoc_helper.ko",
+      "drm_ttm_helper.ko",
+      "gpu-sched.ko",
+      "i915-compat.ko",
+      "i915.ko",
+      "ttm.ko"
+    ]
   },
   "baseline": {
     "new": [],
@@ -784,12 +790,12 @@
     "kver": "5.10.55",
     "modules_key": "epyc7002-7.4-5.10.55",
     "package_path": "/mnt/p3/modules/epyc7002-7.4-5.10.55.tgz",
-    "package_sha256": "68eb97a42716f53af9f7a54b17b5c48e39a1070aada99eb8e521bfd9c3651c38",
-    "package_entries": "495",
-    "test_payload_sha256": "68eb97a42716f53af9f7a54b17b5c48e39a1070aada99eb8e521bfd9c3651c38",
+    "package_sha256": "69dcafd4469651ee3beb62d1d2ac735b11ee74aaba3ce99a9e2b0234b2b716b9",
+    "package_entries": "514",
+    "test_payload_sha256": "69dcafd4469651ee3beb62d1d2ac735b11ee74aaba3ce99a9e2b0234b2b716b9",
     "profile": "modtest"
   },
-  "module_count": 495,
+  "module_count": 514,
   "install_gap": [
     "3w-9xxx.ko",
     "3w-sas.ko",
@@ -807,6 +813,8 @@
     "aic94xx.ko",
     "alcor_pci.ko",
     "alx.ko",
+    "amdgpu.ko",
+    "amdxcp.ko",
     "ashmem_linux.ko",
     "asix.ko",
     "atkbd.ko",
@@ -843,6 +851,14 @@
     "dm9601.ko",
     "dmabuf.ko",
     "dme1737.ko",
+    "drm.ko",
+    "drm_buddy.ko",
+    "drm_display_helper.ko",
+    "drm_kms_helper.ko",
+    "drm_mipi_dsi.ko",
+    "drm_panel_orientation_quirks.ko",
+    "drm_suballoc_helper.ko",
+    "drm_ttm_helper.ko",
     "e1000.ko",
     "e1000e.ko",
     "eeprom_93cx6.ko",
@@ -864,6 +880,7 @@
     "gpio-sch.ko",
     "gpio-sch311x.ko",
     "gpio-vx855.ko",
+    "gpu-sched.ko",
     "hd3ss3220.ko",
     "hinic.ko",
     "hpilo.ko",
@@ -871,6 +888,8 @@
     "i2c-i801.ko",
     "i2c-smbus.ko",
     "i8042.ko",
+    "i915-compat.ko",
+    "i915.ko",
     "iavf.ko",
     "ib_umad.ko",
     "ib_uverbs.ko",
@@ -1106,6 +1125,7 @@
     "thermal.ko",
     "tps65217.ko",
     "ts_bm.ko",
+    "ttm.ko",
     "tty0tty.ko",
     "typec.ko",
     "ushc.ko",

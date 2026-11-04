@@ -1,0 +1,317 @@
+{
+  "schema": 1,
+  "context": {
+    "source": "ainas",
+    "model": "DS425+",
+    "kernel": "custom",
+    "platform": "geminilakenk",
+    "line": "7.2.2",
+    "kver": "5.10.55",
+    "profile": "modtest",
+    "prebuilt": false,
+    "install_drift": false,
+    "logs": "/tmp/modtest-logs"
+  },
+  "totals": {
+    "total": 700,
+    "loaded": 143,
+    "ok": 509,
+    "fail": 37,
+    "skip": 11,
+    "hazard": 0
+  },
+  "declared": {
+    "total": "700",
+    "loaded": "143",
+    "ok": "509",
+    "fail": "37",
+    "skip": "11",
+    "status": "done"
+  },
+  "failures": [],
+  "allowlisted": [
+    {
+      "idx": 12,
+      "name": "9pnet_xen",
+      "category": "ENV",
+      "err": "insmod: ERROR: could not insert module /tmp/modtest-payload/9pnet_xen.ko: No such device"
+    },
+    {
+      "idx": 17,
+      "name": "acpi_cpufreq",
+      "category": "ENV",
+      "err": "insmod: ERROR: could not insert module /tmp/modtest-payload/acpi-cpufreq.ko: No such device"
+    },
+    {
+      "idx": 91,
+      "name": "binder_linux",
+      "category": "BUILTIN",
+      "err": "insmod: ERROR: could not insert module /tmp/modtest-payload/binder_linux.ko: File exists"
+    },
+    {
+      "idx": 129,
+      "name": "ch35x_38x",
+      "category": "ENV",
+      "err": "insmod: ERROR: could not insert module /tmp/modtest-payload/ch35x_38x.ko: No such device or address"
+    },
+    {
+      "idx": 131,
+      "name": "check_signature",
+      "category": "BUILTIN_DUP",
+      "err": "insmod: ERROR: could not insert module /tmp/modtest-payload/check_signature.ko: Invalid module format"
+    },
+    {
+      "idx": 141,
+      "name": "cpufreq_userspace",
+      "category": "ENV",
+      "err": "insmod: ERROR: could not insert module /tmp/modtest-payload/cpufreq_userspace.ko: Device or resource busy"
+    },
+    {
+      "idx": 153,
+      "name": "devlink",
+      "category": "BUILTIN_DUP",
+      "err": "insmod: ERROR: could not insert module /tmp/modtest-payload/devlink.ko: Invalid module format"
+    },
+    {
+      "idx": 154,
+      "name": "dimlib",
+      "category": "BUILTIN_DUP",
+      "err": "insmod: ERROR: could not insert module /tmp/modtest-payload/dimlib.ko: Invalid module format"
+    },
+    {
+      "idx": 183,
+      "name": "f71882fg",
+      "category": "ENV",
+      "err": "insmod: ERROR: could not insert module /tmp/modtest-payload/f71882fg.ko: No such device"
+    },
+    {
+      "idx": 204,
+      "name": "gpio_f7188x",
+      "category": "ENV",
+      "err": "insmod: ERROR: could not insert module /tmp/modtest-payload/gpio-f7188x.ko: No such device"
+    },
+    {
+      "idx": 205,
+      "name": "gpio_it87",
+      "category": "ENV",
+      "err": "insmod: ERROR: could not insert module /tmp/modtest-payload/gpio-it87.ko: No such device"
+    },
+    {
+      "idx": 207,
+      "name": "gpio_sch311x",
+      "category": "ENV",
+      "err": "insmod: ERROR: could not insert module /tmp/modtest-payload/gpio-sch311x.ko: No such device"
+    },
+    {
+      "idx": 215,
+      "name": "hv_vmbus",
+      "category": "ENV",
+      "err": "insmod: ERROR: could not insert module /tmp/modtest-payload/hv_vmbus.ko: No such device"
+    },
+    {
+      "idx": 277,
+      "name": "ipmi_si",
+      "category": "ENV",
+      "err": "insmod: ERROR: could not insert module /tmp/modtest-payload/ipmi_si.ko: No such device"
+    },
+    {
+      "idx": 298,
+      "name": "it87",
+      "category": "ENV",
+      "err": "insmod: ERROR: could not insert module /tmp/modtest-payload/it87.ko: No such device"
+    },
+    {
+      "idx": 312,
+      "name": "kvm_amd",
+      "category": "ENV",
+      "err": "insmod: ERROR: could not insert module /tmp/modtest-payload/kvm-amd.ko: Operation not supported"
+    },
+    {
+      "idx": 313,
+      "name": "kvm_intel",
+      "category": "ENV",
+      "err": "insmod: ERROR: could not insert module /tmp/modtest-payload/kvm-intel.ko: Operation not supported"
+    },
+    {
+      "idx": 373,
+      "name": "nct6683",
+      "category": "ENV",
+      "err": "insmod: ERROR: could not insert module /tmp/modtest-payload/nct6683.ko: No such device"
+    },
+    {
+      "idx": 374,
+      "name": "nct6775",
+      "category": "ENV",
+      "err": "insmod: ERROR: could not insert module /tmp/modtest-payload/nct6775.ko: No such device"
+    },
+    {
+      "idx": 403,
+      "name": "page_pool",
+      "category": "BUILTIN_DUP",
+      "err": "insmod: ERROR: could not insert module /tmp/modtest-payload/page_pool.ko: Invalid module format"
+    },
+    {
+      "idx": 577,
+      "name": "syno_hddpwrctl_test",
+      "category": "ENV",
+      "err": "insmod: ERROR: could not insert module /tmp/modtest-payload/syno_hddpwrctl_test.ko: Operation not permitted"
+    },
+    {
+      "idx": 659,
+      "name": "xen_acpi_processor",
+      "category": "ENV",
+      "err": "insmod: ERROR: could not insert module /tmp/modtest-payload/xen-acpi-processor.ko: No such device"
+    },
+    {
+      "idx": 660,
+      "name": "xen_fbfront",
+      "category": "ENV",
+      "err": "insmod: ERROR: could not insert module /tmp/modtest-payload/xen-fbfront.ko: No such device"
+    },
+    {
+      "idx": 661,
+      "name": "xen_gntalloc",
+      "category": "ENV",
+      "err": "insmod: ERROR: could not insert module /tmp/modtest-payload/xen-gntalloc.ko: No such device"
+    },
+    {
+      "idx": 662,
+      "name": "xen_gntdev",
+      "category": "ENV",
+      "err": "insmod: ERROR: could not insert module /tmp/modtest-payload/xen-gntdev.ko: No such device"
+    },
+    {
+      "idx": 663,
+      "name": "xen_kbdfront",
+      "category": "ENV",
+      "err": "insmod: ERROR: could not insert module /tmp/modtest-payload/xen-kbdfront.ko: No such device"
+    },
+    {
+      "idx": 664,
+      "name": "xen_pciback",
+      "category": "ENV",
+      "err": "insmod: ERROR: could not insert module /tmp/modtest-payload/xen-pciback.ko: No such device"
+    },
+    {
+      "idx": 665,
+      "name": "xen_scsifront",
+      "category": "ENV",
+      "err": "insmod: ERROR: could not insert module /tmp/modtest-payload/xen-scsifront.ko: No such device"
+    },
+    {
+      "idx": 216,
+      "name": "hid_hyperv",
+      "category": "DEP_ENV",
+      "err": "insmod: ERROR: could not insert module /tmp/modtest-payload/hid-hyperv.ko: Unknown symbol in module（依赖 hv_vmbus 环境缺失）"
+    },
+    {
+      "idx": 221,
+      "name": "hv_balloon",
+      "category": "DEP_ENV",
+      "err": "insmod: ERROR: could not insert module /tmp/modtest-payload/hv_balloon.ko: Unknown symbol in module（依赖 hv_vmbus 环境缺失）"
+    },
+    {
+      "idx": 222,
+      "name": "hv_netvsc",
+      "category": "DEP_ENV",
+      "err": "insmod: ERROR: could not insert module /tmp/modtest-payload/hv_netvsc.ko: Unknown symbol in module（依赖 hv_vmbus 环境缺失）"
+    },
+    {
+      "idx": 224,
+      "name": "hv_storvsc",
+      "category": "DEP_ENV",
+      "err": "insmod: ERROR: could not insert module /tmp/modtest-payload/hv_storvsc.ko: Unknown symbol in module（依赖 hv_vmbus 环境缺失）"
+    },
+    {
+      "idx": 225,
+      "name": "hv_utils",
+      "category": "DEP_ENV",
+      "err": "insmod: ERROR: could not insert module /tmp/modtest-payload/hv_utils.ko: Unknown symbol in module（依赖 hv_vmbus 环境缺失）"
+    },
+    {
+      "idx": 226,
+      "name": "hyperv_fb",
+      "category": "DEP_ENV",
+      "err": "insmod: ERROR: could not insert module /tmp/modtest-payload/hyperv_fb.ko: Unknown symbol in module（依赖 hv_vmbus 环境缺失）"
+    },
+    {
+      "idx": 227,
+      "name": "hyperv_keyboard",
+      "category": "DEP_ENV",
+      "err": "insmod: ERROR: could not insert module /tmp/modtest-payload/hyperv-keyboard.ko: Unknown symbol in module（依赖 hv_vmbus 环境缺失）"
+    },
+    {
+      "idx": 405,
+      "name": "pci_hyperv",
+      "category": "DEP_ENV",
+      "err": "insmod: ERROR: could not insert module /tmp/modtest-payload/pci-hyperv.ko: Unknown symbol in module（依赖 hv_vmbus 环境缺失）"
+    },
+    {
+      "idx": 615,
+      "name": "uio_hv_generic",
+      "category": "DEP_ENV",
+      "err": "insmod: ERROR: could not insert module /tmp/modtest-payload/uio_hv_generic.ko: Unknown symbol in module（依赖 hv_vmbus 环境缺失）"
+    }
+  ],
+  "stale_loaded": [],
+  "kernel_faults": [],
+  "dmesg_warnings": [],
+  "firmware_fail": 1,
+  "install": {
+    "installed": 721,
+    "boot_loaded": 167,
+    "gap": [],
+    "extra": [
+      "appletalk.ko",
+      "compat_xtables.ko",
+      "iscsi_target_mod.ko",
+      "phy_alloc.ko",
+      "rodsp_ep.ko",
+      "rp.ko",
+      "syno_extent_pool.ko",
+      "synoacl_vfs.ko",
+      "synobios.ko",
+      "synofsbd.ko",
+      "synorbd.ko",
+      "target_core_ep.ko",
+      "target_core_file.ko",
+      "target_core_iblock.ko",
+      "target_core_mod.ko",
+      "target_core_multi_file.ko",
+      "target_core_pscsi.ko",
+      "target_core_user.ko",
+      "tcm_loop.ko",
+      "vhost_scsi.ko",
+      "xt_geoip.ko"
+    ],
+    "identity_mismatch": [],
+    "new_gap": []
+  },
+  "baseline": {
+    "new": [],
+    "gone": []
+  },
+  "kernel_identity": {
+    "checked": true,
+    "pass": true,
+    "reluser": "5.10.55+ (RR@RROrg)",
+    "uts": "#1 SMP Wed Nov 4 16:43:12 CST 2026",
+    "detail": "发现 Linux version 行=1"
+  },
+  "package_meta": {
+    "kernel": "custom",
+    "source": "ainas",
+    "model": "DS425+",
+    "platform": "geminilakenk",
+    "line": "7.2.2",
+    "kver": "5.10.55",
+    "modules_key": "geminilakenk-7.2-5.10.55",
+    "package_path": "/mnt/p3/cks/modules-geminilakenk-7.2-5.10.55.tgz",
+    "package_sha256": "53460ede655113ff41b71d22ad6b524859581f6d1db23b20928c782b13f45cab",
+    "package_entries": "700",
+    "test_payload_sha256": "53460ede655113ff41b71d22ad6b524859581f6d1db23b20928c782b13f45cab",
+    "profile": "modtest"
+  },
+  "module_count": 700,
+  "install_gap": []
+}
