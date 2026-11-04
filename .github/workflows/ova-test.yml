@@ -528,7 +528,10 @@ jobs:
           echo "[INFO] 测试工作流跳过 trim_p3_assets（保留全平台 modules/lkms/cks）"
           [ -d "$PART3_PATH/modules" ] && [ -d "$PART3_PATH/lkms" ] || {
             echo "[E] p3 缺少 modules/lkms 目录" >&2; exit 1; }
-          rr_menu_apply "$PART3_PATH" slim
+          # 测试流程的引导由 dsm_setup 传内核参数直达，不依赖交互菜单；
+          # initrd-rr 解包/精简 menu.sh/重打包纯属发布产物优化，跳过可省
+          # 一次 unpackInitrd+repackInitrd（大镜像下耗时明显）。
+          echo "[INFO] 测试工作流跳过 rr_menu_apply（不改 initrd-rr）"
 
           # ── 取出本平台模块包，供模块测试盘使用 ──────────────────────
           MODS_DIR="${PART3_PATH}/modules"
