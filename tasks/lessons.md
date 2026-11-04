@@ -675,21 +675,30 @@ ln: invalid option -- 'v'
 2in1 的 6.2 型号策略此前不一致（rr 静默忽略、2in1 放行），排查前先确认当前行为，
 不要按另一个工作流的印象推断。
 
-## 2026-11-04 — 资产下载失败只剩 exit code 1：curl 的 -s 吞掉了错误
+## 2026-11-04 — 资产下载失败只剩 exit code 1：选错 test release + 静默错误
 
 `Build ainas-rr-original` 两次失败都停在 `[INFO] 正在获取系统模块`，下一行直接
-`##[error]Process completed with exit code 1`，没有任何错误文本。原因链：
+`##[error]Process completed with exit code 1`。补上诊断输出后（run 41860498651）看到：
 
-1. `fetchReleaseAsset` 下载资产用 `curl -skL`，`-s` 同时屏蔽了 curl 的**错误信息**；
-2. 下载在开始约 1s 时被 CDN 断开，落盘文件不存在；
-3. `getModules` 的 `[ ! -f "${CACHE_FILE}" ] && exit 1` 本身也不打印任何东西。
+    [E] syno-modules@test-modules-26.11.0 中没有资产 modules-test-modules-26.11.0.zip
 
-实测同一资产（`syno-modules` 26.11.1 的 934,602,509 字节）在另一台 runner 上
-3.4s 下完且 `unzip -t` 通过，说明不是资产损坏或权限问题，是瞬时传输中断。
+根因是 include-pre 的 release 选择：
+- `syno-modules` 的 test release tag 是 `test-modules-26.11.0`，资产名是
+  `modules-26.11.0-test.zip`；
+- 旧逻辑用 `sort -rV` 选 tag，`test-modules-26.11.0` 会排在 `26.11.1` 之上；
+- 旧逻辑按 `<前缀>-<TAG>.zip` 精确匹配，永远匹配不到该 test release 的资产；
+- 下载根本没开始，而 `-s` 屏蔽 curl 错误、`[ ! -f ] && exit 1` 又不打印，日志只剩退出码。
 
-修法（ainas-2in1 `fetchReleaseAsset`）：`-sS` 保留错误；`--retry-all-errors`
-自动重试瞬时断流；tag 为空/资产列表失败/HTTP 非 200/找不到同名资产都打 `[E]`。
+修法（ainas-2in1 `fetchReleaseAsset`，`087dc34`）：
+- include-pre 时按 `published_at` 取最新非草稿 release（与 `/releases/latest` 语义一致），
+  不再用 `sort -rV` 比较任意字符串 tag；
+- 资产按 `<前缀>-*.zip` 前缀匹配，与 tag 同名的精确匹配优先；
+- 保留 `-sS` / `--retry-all-errors` 与逐项 `[E]` 输出。
 
-教训：**失败路径必须自带可诊断输出**。`-s` + `[ ! -f ] && exit 1` 这种组合会把
-“为什么失败”全部丢掉，CI 日志只剩退出码；排查此类问题时先用不带 `-s` 的等价
-命令复现，别对着 exit 1 猜。
+验证：本地以 include-pre 调 ainas-lkm（15MB）与 syno-modules（934MB），均正确选到
+26.10.68 / 26.11.1 并下载成功；单测确认 test release 发布时间更新时会被选中，且
+`modules-26.11.0-test.zip` 能被前缀匹配。
+
+教训：**先补可诊断输出，再谈根因**。最初“CDN 瞬时断流”的推断是错的——诊断输出一
+上线就暴露出选错了 release。发布流程新增非常规命名的 release（如 `test-*`）时，
+必须同步检查所有消费方的 tag/资产匹配逻辑。
