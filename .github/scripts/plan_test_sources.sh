@@ -55,7 +55,13 @@ if [ ! -f "${MODELS_JSON}" ]; then
   exit 1
 fi
 
+# 三段式（7.2.2 → 7.2）取前两段；两段式（7.0/7.1）本身即版本线（models.json
+# 的 productvers 键就是 7.0/7.1，用 ${%.*} 会截成 "7" 导致查不到条目）。
 DSM_LINE="${DSM_VERSION%.*}"
+case "${DSM_VERSION}" in
+  *.*.*) ;;
+  *) DSM_LINE="${DSM_VERSION}" ;;
+esac
 
 # ── 预装成品模式：解析各源 OVA Release 与模块包版本 ─────────────────────
 USE_PREBUILT="${USE_PREBUILT:-false}"
