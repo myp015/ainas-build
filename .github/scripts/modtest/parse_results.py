@@ -44,12 +44,29 @@ HARD_CATEGORIES = {"UNKNOWN_SYMBOL", "VERMAGIC", "DEPEND", "MISSING", "OTHER",
 ENV_CATEGORIES = {"ENV", "BUILTIN", "BUILTIN_DUP", "DEP_ENV"}
 ALLOWABLE_CATEGORIES = ENV_CATEGORIES | {"DMESG_WARNING"}
 
+# KERNEL_INTERNAL：崩溃现场 IP 落在**内核内建代码**（IP 行无 [模块] 归属），
+# 模块只是在调用链上触发了它（典型：scsi_debug 合成磁盘进入 sd_probe 的
+# syno_usb_info_enum，官方 4.4.302 内核在非 USB host 上解引用 NULL）。
+# 这类崩溃模块侧无法修复，但仍需白名单显式豁免（不静默放过）；
+# IP 解析不到或 IP 在模块内时一律按 KERNEL_FAULT 硬失败（保守，防误放）。
+KERNEL_INTERNAL_CATEGORY = "KERNEL_INTERNAL"
+# 同一现场会让 insmod 随之失败（模块在 probe 里进内核内建代码崩溃），
+# 因此模块侧失败也归 KERNEL_INTERNAL，白名单一行同时覆盖 G-M2 与 G-M4。
+ALLOWABLE_CATEGORIES = ALLOWABLE_CATEGORIES | {KERNEL_INTERNAL_CATEGORY}
+
 # 真故障只认 BUG/Oops/panic/#PF/GP 行：这几种一律先打印其中一句，再跟 Call Trace。
 # **不能把 "Call Trace" 单独当故障** —— 同一行也跟在每次 WARNING 后面
 # （典型：cfg80211 regulatory_init 的 reg.c WARN、binder 的 sysfs_warn_dup、
 # DSM 的 "inconsistent syno gpio info"），否则所有内核自带 WARN 都会把 G-M4 判失败。
 FAULT_RE = re.compile(
     r"(BUG:|Oops|Kernel panic|Unable to handle|general protection)")
+# 故障现场 IP 行（x86 4.4/5.10 两种写法都覆盖）：
+#   IP: [<ffffffff813e6116>] syno_usb_info_enum+0xa6/0x130
+#   RIP: 0010:[<ffffffffa2628ad3>]  [<ffffffffa2628ad3>] sdebug_driver_probe+0x.. [scsi_debug]
+# group(1)=符号名（可能是 "sym+off/size"），group(2)=模块名（有 [mod] 尾注时）。
+IP_RE = re.compile(
+    r"(?:IP|RIP):\s*(?:[0-9a-fA-F]{4}:)?\s*(?:\[<[0-9a-fA-F]+>\])?\s*"
+    r"(?:\[<[0-9a-fA-F]+>\]\s*)?([^ \t\[]+)(?:\s+\[([^\]\s]+)\])?")
 WARNING_RE = re.compile(r"WARNING:")
 FIRMWARE_FAIL_RE = re.compile(r"firmware.*(fail|error)", re.I)
 MARKER_RE = re.compile(r"modtest-marker idx=(\d+) name=(\S+)")
@@ -261,15 +278,43 @@ def analyze(args):
             r["err"] = d
 
     # dmesg 摘要归因
-    fault_by_name, warnings_by_name = {}, {}
+    # 故障按「块」计数（一次 Oops 会打印 BUG:/Oops:/Call Trace 多行，同一现场
+    # 只算一次），并按现场 IP 归属拆成两类：
+    #   - IP 有 [模块] 尾注（或解析不到 IP）→ KERNEL_FAULT，模块侧硬失败；
+    #   - IP 是内核内建符号（无 [模块]）→ KERNEL_INTERNAL，可经白名单豁免。
+    fault_by_name, internal_by_name = {}, {}
+    fault_syms, internal_syms = {}, {}
+    warnings_by_name = {}
     firmware_fail = 0
     unknown_syms = {}
     dup_exports_by_name = {}
     cur_name = None
+    fault_owner, fault_kind, fault_sym = None, None, ""
+
+    def close_fault():
+        nonlocal fault_owner, fault_kind, fault_sym
+        if fault_owner is None:
+            return
+        key = fault_owner
+        if fault_kind == "internal":
+            internal_by_name[key] = internal_by_name.get(key, 0) + 1
+            if fault_sym:
+                internal_syms.setdefault(key, set()).add(fault_sym)
+        else:
+            # IP 在模块内、或无法解析 IP：保守按模块侧硬失败。
+            fault_by_name[key] = fault_by_name.get(key, 0) + 1
+            if fault_sym:
+                fault_syms.setdefault(key, set()).add(fault_sym)
+        fault_owner, fault_kind, fault_sym = None, None, ""
+
     for line in parse_dmesg(lines):
         m = MARKER_RE.search(line)
         if m:
+            close_fault()
             cur_name = m.group(2)
+            continue
+        if "end trace" in line:
+            close_fault()
             continue
         if FIRMWARE_FAIL_RE.search(line):
             firmware_fail += 1
@@ -282,12 +327,19 @@ def analyze(args):
             # 与内核导出面重名：内核返回 ENOEXEC（insmod 显示 Invalid module format）。
             key = cur_name or "<unknown>"
             dup_exports_by_name.setdefault(key, set()).add(m.group(1))
-        if FAULT_RE.search(line):
-            key = cur_name or "<unknown>"
-            fault_by_name[key] = fault_by_name.get(key, 0) + 1
-        elif WARNING_RE.search(line):
+        if WARNING_RE.search(line):
             key = cur_name or "<unknown>"
             warnings_by_name[key] = warnings_by_name.get(key, 0) + 1
+        if fault_owner is None:
+            if FAULT_RE.search(line):
+                fault_owner = cur_name or "<unknown>"
+                fault_kind = None
+        else:
+            m = IP_RE.search(line)
+            if m and fault_kind is None:
+                fault_sym = m.group(1)
+                fault_kind = "module" if m.group(2) else "internal"
+    close_fault()
 
     allow_rows = load_allowlist(args.allowlist)
 
@@ -321,6 +373,10 @@ def analyze(args):
             continue
 
         category = "MISSING" if state == "MISSING" else classify(r["err"])
+        # 崩溃现场在内核内建代码（见上 dmesg 归因）时，模块只是触发方；
+        # insmod 随崩溃失败，归同类别（白名单按 KERNEL_INTERNAL 豁免）。
+        if state == "INSMOD_FAIL" and r["name"] in internal_by_name:
+            category = KERNEL_INTERNAL_CATEGORY
         # "Invalid module format" 有两类根因：真 vermagic 不匹配（硬失败）与
         # 模块导出名撞上内核已导出符号（内核 prints "exports duplicate symbol"
         # 后返回 ENOEXEC）。只有拿到 diag 证据才降级为 BUILTIN_DUP。
@@ -342,13 +398,15 @@ def analyze(args):
         dep_map.setdefault(e["name"], []).extend(
             d.replace("-", "_")
             for d in re.split(r"[,\s]+", e["depends"]) if d and d != "-")
-    # SKIP_UPDATE 也计入"环境缺失"：系统已加载同名模块（多为官方内核自带的
-    # 旧栈），update/ 版本因此根本没参与运行，依赖它的模块必然解析失败 ——
-    # 这是环境限制（典型：官方 DRM 已加载，update/ 6.5 栈的 ttm/amdgpu 级联
-    # Unknown symbol），不是依赖顺序缺陷。
+    # SKIP_UPDATE / LOADED 也计入"环境缺失"：系统已加载同名模块（多为官方
+    # 内核自带的旧栈或官方 PAT 模块），包内版本因此根本没参与运行，依赖它的
+    # 模块必然解析失败 —— 这是环境限制（典型：官方 DRM 已加载，update/ 6.5
+    # 栈的 ttm/amdgpu 级联 Unknown symbol；官方 ib_core/mlx4_core 已加载，
+    # 包内新版 ib_uverbs/mlx4_en 缺符号），不是依赖顺序缺陷。
     env_down = {x["name"] for x in failures + skips
                 if x["category"] in ENV_CATEGORIES}
-    env_down |= {r["name"] for r in records if r["state"] == "SKIP_UPDATE"}
+    env_down |= {r["name"] for r in records
+                 if r["state"] in ("SKIP_UPDATE", "LOADED")}
     cascaded = []
     for f in failures:
         if f["category"] != "UNKNOWN_SYMBOL":
@@ -371,8 +429,13 @@ def analyze(args):
                 f["symbols"] = sorted(syms)
                 break
 
-    kernel_faults = [{"name": n, "hits": c, "allowed": False}
-                     for n, c in fault_by_name.items()]
+    kernel_faults = ([{"name": n, "hits": c, "kind": "module", "allowed": False,
+                       "symbols": sorted(fault_syms.get(n, ()))}
+                      for n, c in fault_by_name.items()]
+                     + [{"name": n, "hits": c, "kind": "internal",
+                         "allowed": is_allowed(n, KERNEL_INTERNAL_CATEGORY),
+                         "symbols": sorted(internal_syms.get(n, ()))}
+                        for n, c in internal_by_name.items()])
     warning_faults = [{"name": n, "hits": c} for n, c in warnings_by_name.items()]
 
     # 汇总计数
@@ -436,8 +499,16 @@ def analyze(args):
     else:
         gate("G-M3", not stale_fail, stale_detail)
 
-    gate("G-M4", not kernel_faults,
-         "内核崩溃/异常归因 %d 条" % len(kernel_faults))
+    # KERNEL_FAULT（IP 在模块内或无法定位）不可豁免；KERNEL_INTERNAL（IP 在
+    # 内核内建代码）必须由白名单显式登记，登记后只报告不阻断。
+    fault_blocking = [f for f in kernel_faults if not f["allowed"]]
+    fault_detail = "内核崩溃/异常归因 %d 条" % len(fault_blocking)
+    if fault_blocking:
+        fault_detail += ": " + ", ".join(
+            "%s(%s%s)" % (f["name"], f["kind"],
+                          "/" + ",".join(f["symbols"]) if f["symbols"] else "")
+            for f in fault_blocking[:8])
+    gate("G-M4", not fault_blocking, fault_detail)
 
     # P0-4 安装集核对
     # guest 侧每行：<文件名>[TAB<srcversion>]（modinfo 不可用时只有文件名）
@@ -685,7 +756,10 @@ def emit(args, result):
     lines.append("")
     lines.append("## 内核崩溃/告警")
     for f in result["kernel_faults"]:
-        lines.append("- KERNEL_FAULT %s x%d" % (f["name"], f["hits"]))
+        label = "KERNEL_FAULT" if f.get("kind") == "module" else "KERNEL_INTERNAL"
+        tag = " [已豁免]" if f.get("allowed") else ""
+        sym = " (%s)" % ",".join(f["symbols"]) if f.get("symbols") else ""
+        lines.append("- %s %s x%d%s%s" % (label, f["name"], f["hits"], sym, tag))
     for f in result["dmesg_warnings"]:
         lines.append("- DMESG_WARNING %s x%d" % (f["name"], f["hits"]))
     if result["firmware_fail"]:
@@ -897,6 +971,13 @@ def run_selftest():
                     "内核已导出同名符号\n")
         return ["--allowlist", path]
 
+    def internal_allow_case(root, lp):
+        # KERNEL_INTERNAL：崩溃 IP 落在内核内建代码（模块只是触发方）。
+        path = os.path.join(root, "allow.tsv")
+        write(path, "epyc7002\t7.4\t5.10.55\tSA6400\t*\ta\tKERNEL_INTERNAL\t"
+                    "内核内建代码缺陷\n")
+        return ["--allowlist", path]
+
     def skip_update_cascade_case(root, lp):
         # b 依赖 a，a 因系统已加载同名模块（SKIP_UPDATE）未参与运行 → b 的
         # Unknown symbol 应降级为 DEP_ENV。
@@ -966,6 +1047,39 @@ def run_selftest():
                   "@@M|2|b|INSMOD_FAIL|1|src=- pkg=- err=unknown symbol drm_x"],
                  installed=["a.ko"], pkg="",
                  extra=skip_update_cascade_case),
+        # 内核内建代码崩溃：IP 无 [模块] 归属 → KERNEL_INTERNAL。未登记白名单
+        # 仍失败（S19），登记后只报告不阻断（S20）。IP 在模块内则不可豁免（S21）。
+        scenario("S19 内核内建代码崩溃未豁免仍失败", 1, "KERNEL_INTERNAL",
+                 [ok], installed=["a.ko"],
+                 dmesg="[  1.1] modtest-marker idx=1 name=a\n"
+                       "[  1.2] BUG: unable to handle kernel NULL pointer\n"
+                       "[  1.3] IP: [<ffffffff813e6116>] syno_usb_info_enum+0xa6/0x130\n"
+                       "[  1.4] Call Trace:\n"
+                       "[  1.5]  [<ffffffffa2628ad3>] foo+0x20d/0x232 [a]\n"
+                       "[  1.6] ---[ end trace 1 ]---\n"),
+        scenario("S20 内核内建代码崩溃登记白名单后通过", 0, "KERNEL_INTERNAL",
+                 [ok], installed=["a.ko"], extra=internal_allow_case,
+                 dmesg="[  1.1] modtest-marker idx=1 name=a\n"
+                       "[  1.2] BUG: unable to handle kernel NULL pointer\n"
+                       "[  1.3] IP: [<ffffffff813e6116>] syno_usb_info_enum+0xa6/0x130\n"
+                       "[  1.4] Call Trace:\n"
+                       "[  1.5] ---[ end trace 1 ]---\n"),
+        scenario("S21 模块内崩溃不可用内建白名单豁免", 1, "KERNEL_FAULT",
+                 [ok], installed=["a.ko"], extra=internal_allow_case,
+                 dmesg="[  1.1] modtest-marker idx=1 name=a\n"
+                       "[  1.2] BUG: unable to handle kernel NULL pointer\n"
+                       "[  1.3] IP: [<ffffffffa2628ad3>] foo+0x20d/0x232 [a]\n"
+                       "[  1.4] ---[ end trace 1 ]---\n"),
+        # 同一现场模块的 insmod 也会失败（probe 里进内核内建代码崩溃），
+        # 该失败应与 dmesg 侧同归 KERNEL_INTERNAL，一行白名单覆盖 G-M2/G-M4。
+        scenario("S22 内建代码崩溃连带 insmod 失败归 KERNEL_INTERNAL", 0,
+                 "a (KERNEL_INTERNAL)",
+                 ["@@M|1|a|INSMOD_FAIL|1|src=- pkg=- err="],
+                 installed=["a.ko"], extra=internal_allow_case,
+                 dmesg="[  1.1] modtest-marker idx=1 name=a\n"
+                       "[  1.2] BUG: unable to handle kernel NULL pointer\n"
+                       "[  1.3] IP: [<ffffffff813e6116>] syno_usb_info_enum+0xa6/0x130\n"
+                       "[  1.4] ---[ end trace 1 ]---\n"),
     ]
 
     failed = 0

@@ -109,3 +109,19 @@
 # Module.symvers 分支——内核导出该符号时不产 .ko，内核未启用 MMC 的
 # epyc7002/geminilakenk 仍产独立 .ko 提供符号（RR cks 同款，非重名）。
 # 本段此前登记的 4 条 BUILTIN_DUP 仅覆盖 26.11.0 及更早产物。
+#
+# 内核内建代码崩溃（KERNEL_INTERNAL）：崩溃现场 IP 在官方内核（无 [模块] 归属），
+# 模块只是调用链触发方，模块侧无法修复。判据：Call Trace 里 IP 行无 [module]
+# 尾注；若 IP 在模块内或无法定位，仍按 KERNEL_FAULT 硬失败。
+# 实测（26.11.1 矩阵）：scsi_debug 建好合成 SCSI 磁盘后，sd_probe 走 DSM 定制的
+# syno_usb_info_enum，在非 USB host 上解引用 NULL（4.4.302 内核 sd.c）。同内核
+# 的 denverton 平台不触发（平台定制不同），故按平台逐条登记。
+v1000	*	4.4.*	*	official	scsi_debug	KERNEL_INTERNAL	官方 4.4.302 内核 syno_usb_info_enum 对非 USB SCSI host 解引用 NULL（v1000/DS1621+）
+broadwellnkv2	*	4.4.*	*	official	scsi_debug	KERNEL_INTERNAL	同上（broadwellnkv2/FS3410）
+purley	*	4.4.*	*	official	scsi_debug	KERNEL_INTERNAL	同上（purley/FS6400）
+#
+# 官方内核预加载了官方模块树（LOADED），包内同名新版模块不参与运行；依赖它们的
+# 模块随之 Unknown symbol（DEP_ENV，环境限制）。实测 purley/FS6400 启动即加载
+# 官方 ib_core/mlx4_core，而官方版不导出 4.4.302 主线模块所需的符号。
+purley	*	4.4.*	*	official	ib_uverbs	DEP_ENV	官方 ib_core 缺 ib_query_device/ib_dealloc_mw（LOADED 环境）
+purley	*	4.4.*	*	official	mlx4_en	DEP_ENV	官方 mlx4_core 缺 mlx4_test_interrupts（LOADED 环境）
