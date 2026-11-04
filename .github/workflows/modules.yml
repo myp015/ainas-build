@@ -436,7 +436,11 @@ jobs:
         # 对齐 RR：分平台 artifact 一律删，run 的可取回成果是下面那个合并 zip
         # （未填版本号时会以 artifact 形式保留 5 天，见 Zip 之后的 Upload to Artifacts）。
         # 仍保留 if: success()：download 失败时不动 artifacts，便于排查。
+        # 清理本身是幂等 best-effort：action 遇到服务端 404（artifact 已被删/并发
+        # 清理）会把 job 判失败并跳过全部发布步骤（run 41803318414 实测，门禁已过、
+        # 只需删除却卡死发布）。清理失败不影响发布正确性，故不阻断后续步骤。
         if: success()
+        continue-on-error: true
         uses: geekyeggo/delete-artifact@v6
         with:
           name: |
