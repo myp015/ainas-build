@@ -22,7 +22,7 @@
 #   KERNEL            official|custom（custom=aina-cks 自编 5.10.55 内核）
 #   CKS_VERSION       ainas-cks Release 版本（custom 时留空=用 rr.img p3 内置 cks 快照）
 #   ALL_PLATFORMS     true=按 .github/scripts/modtest/platform-representatives.tsv
-#                     每个平台取一个代表型号（与 TEST_MODELS 互斥）；覆盖不全即退出 1
+#                     每个平台取一个代表型号（此时忽略 TEST_MODELS）；覆盖不全即退出 1
 #
 # 输出（GITHUB_OUTPUT）：
 #   base_tasks       [{source, rr_tag, rr_asset_url, release_tag, base_asset, docker_image, docker_tag}]
@@ -106,9 +106,11 @@ case "${ALL_PLATFORMS}" in
 esac
 PLATFORM_TABLE="${PLATFORM_TABLE:-${SCRIPT_DIR}/modtest/platform-representatives.tsv}"
 if [ "${ALL_PLATFORMS}" = "true" ]; then
+  # 全平台意图明确优先：工作流里 test_models 有默认值（SA6400），用 GitHub
+  # 表达式置空会被 `&& '' || x` 的假值语义破坏，所以在这里直接忽略并提示。
   if [ -n "${TEST_MODELS:-}" ]; then
-    echo "[E] all_platforms 与 test_models 互斥，只能二选一" >&2
-    exit 1
+    echo "[W] all_platforms=true，忽略 test_models=${TEST_MODELS}" >&2
+    TEST_MODELS=""
   fi
   [ -f "${PLATFORM_TABLE}" ] || {
     echo "[E] 找不到代表型号表: ${PLATFORM_TABLE}" >&2; exit 1; }

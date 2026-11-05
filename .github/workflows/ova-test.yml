@@ -48,7 +48,7 @@ on:
         type: string
         default: "SA6400"
       all_platforms:
-        description: "全平台：按代表型号表每个平台跑一个型号（与 test_models 互斥）"
+        description: "全平台：按代表型号表每个平台跑一个型号（优先，忽略 test_models）"
         type: boolean
         default: false
       custom_models:
@@ -170,9 +170,9 @@ jobs:
           RR_SOURCE: ${{ inputs.rr_source }}
           RR_VERSION: ${{ inputs.rr_version }}
           DSM_VERSION: ${{ inputs.dsm_version }}
-          # all_platforms 优先：此时 test_models 的默认值视为无效，避免因
-          # 忘了清空默认 SA6400 撞上脚本的互斥检查。
-          TEST_MODELS: ${{ inputs.all_platforms && '' || inputs.test_models }}
+          # all_platforms=true 时由脚本忽略 test_models（GitHub 表达式里
+          # `x && '' || y` 的空串是假值，无法可靠置空，所以判断放脚本里）。
+          TEST_MODELS: ${{ inputs.test_models }}
           ALL_PLATFORMS: ${{ inputs.all_platforms }}
           CUSTOM_MODELS: ${{ inputs.custom_models }}
           USE_PREBUILT: ${{ inputs.use_prebuilt }}
