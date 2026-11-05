@@ -167,3 +167,19 @@
   scsi_debug=hazard（1 条），broadwellnk 不受影响（0 条）。
 - 2026-11-03：触发 ova-test run 41643536367（ainas、DS920+/DS923+、预装模式、
   modules_version=test-modules-26.11.0、全量）验证豁免。
+
+## rr 预处理阶段生成全型号升级包（2026-11-05）
+
+实现：
+- [x] `rr.yml` 的 `prepare-base` 增加“全型号升级包”流程：在 p3 尚未按型号裁剪时
+      用 `pack_update` 生成 `updateall-<RR 版本>.zip`（含所有型号的 lkms/modules/cks/addons）。
+- [x] base 复用（未重建）而升级包缺失时，下载公共 base 解压为 `rr/rr.img` 再打包。
+- [x] 复用策略沿用 `overwrite_update`；上传走 `release_publish.sh`（支持分卷/覆盖）。
+- [x] 打包后删除 `rr/rr.img`、上传 base 后删除本地副本，降低同 job 磁盘峰值。
+- [x] 本地校验 YAML 解析、run 块 bash 语法；复用判定三态单元测试通过。
+
+验证（本地真实镜像 26.10.42，未裁剪的官方 rr.img）：
+- [x] `pack_update` 产出 `updateall-26.10.42.zip`（1.7 GiB，< 2GB 不需分卷）。
+- [x] 包内含 update-list.yml/update-check.sh/RR_VERSION、p1 引导文件、bzImage-rr/initrd-rr，
+      以及 cks.tgz（epyc7002/geminilakenk/r1000nk 等全平台）、lkms.tgz（17 个平台 214 个文件）、
+      modules.tgz（74 个平台/DSM 版本包）、addons.tgz，确认 p3 未被裁剪。

@@ -65,7 +65,7 @@ on:
         type: boolean
         default: false
       overwrite_update:
-        description: "覆盖所选型号的 update 包（默认复用 Release 中已存在的 updateall-<型号>-<RR版本>.zip）"
+        description: "覆盖 update 包（默认复用 Release 中已存在的 updateall-<型号>-<RR版本>.zip / updateall-<RR版本>.zip）"
         type: boolean
         default: false
       build_rr_original:
@@ -174,6 +174,7 @@ jobs:
 
   # 公共 base：下载 RR、cpuinfo/initrd 补丁这些与型号无关的工作每个源只做一次，
   # 作为 Release 资产永久存放。不在本 job 做 patch_part1（grub.cfg 与型号/原版相关）。
+  # 同时用尚未按型号裁剪的 p3 生成全型号 updateall-<RR 版本>.zip。
   prepare-base:
     needs: [plan, ensure-release]
     runs-on: ubuntu-24.04
@@ -215,8 +216,36 @@ jobs:
             echo "rebuild=true" >> "$GITHUB_OUTPUT"
           fi
 
+      # 全型号升级包与 base 同 Release，独立判断是否复用：
+      # base 可能早已存在而升级包尚未生成（例如旧流程的 Release）。
+      - name: 检查是否复用已有全型号升级包
+        id: check_update
+        shell: bash
+        env:
+          ACTION_TOKEN: ${{ secrets.AiNas }}
+          OVERWRITE_UPDATE: ${{ inputs.overwrite_update }}
+        run: |
+          set -euo pipefail
+          : "${ACTION_TOKEN:?缺少 ACTION_TOKEN}"
+          : "${RR_TAG:?缺少 RR_TAG}"
+          export GH_TOKEN="$ACTION_TOKEN"
+          export GH_REPO="myp015/ainas-2in1"
+
+          UPDATE_ASSET="updateall-${RR_TAG}.zip"
+          ASSET_NAMES="$(gh release view "$RELEASE_TAG" --json assets --jq '.assets[].name')"
+          # 超过 2GB 时 Release 只存分卷，判定存在性时与 base 检查保持一致
+          if { printf '%s\n' "$ASSET_NAMES" | grep -Fxq "$UPDATE_ASSET" \
+               || printf '%s\n' "$ASSET_NAMES" | grep -Fxq "${UPDATE_ASSET}.part.000"; } \
+             && [ "${OVERWRITE_UPDATE:-false}" != "true" ]; then
+            echo "[INFO] Release ${RELEASE_TAG}（源=${SOURCE}）已存在 ${UPDATE_ASSET}，复用（未勾选覆盖）"
+            echo "rebuild=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "[INFO] 需要生成全型号升级包 ${UPDATE_ASSET}（p3 不按型号裁剪，含所有型号资产）"
+            echo "rebuild=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: checkout ainas-2in1
-        if: steps.check.outputs.rebuild == 'true'
+        if: steps.check.outputs.rebuild == 'true' || steps.check_update.outputs.rebuild == 'true'
         uses: actions/checkout@v7
         with:
           repository: myp015/ainas-2in1
@@ -251,6 +280,7 @@ jobs:
           sudo apt-get install -y -qq gettext cpio zstd dosfstools rsync qemu-utils >/dev/null
 
           unzip -q "$RR_FILENAME" -d rr rr.img
+          rm -f "$RR_FILENAME"
 
           # ── p3：cpuinfo + initrd 补丁（与型号无关）─────────────────
           DISK_LOOP=$(sudo losetup -f)
@@ -284,8 +314,6 @@ jobs:
           sudo umount "$PART3_PATH"
           sudo losetup --detach "$DISK_LOOP"
           sudo rm -rf "$PART3_PATH"
-
-          rm -rf "$AINAS2IN1_DIR"
 
           # 预压缩；Release 单文件超过 2GB 时上传前再分卷
           zstd -3 -T0 -q -f rr/rr.img -o rr-base.img.zst
@@ -325,7 +353,96 @@ jobs:
           done
 
           gh release upload "$RELEASE_TAG" "${UPLOAD_FILES[@]}"
+          # 上传后释放本地副本，给后面的全型号升级包打包留出磁盘
+          rm -f "$BASE_ASSET" "${BASE_ASSET}".part.*
           echo "[INFO] base 已上传到 Release: ${RELEASE_TAG}"
+
+      # p3 在 prepare-base 中只做了 cpuinfo/initrd 补丁、未按型号裁剪，
+      # 因此这里打出的升级包包含所有型号的 lkms/modules/cks/addons，可直接用于任意型号。
+      - name: 生成全型号升级包（不裁剪 p3）
+        if: steps.check_update.outputs.rebuild == 'true'
+        shell: bash
+        env:
+          ACTION_TOKEN: ${{ secrets.AiNas }}
+        run: |
+          set -euo pipefail
+          : "${ACTION_TOKEN:?缺少 ACTION_TOKEN}"
+          : "${RELEASE_TAG:?缺少 RELEASE_TAG}"
+          : "${BASE_ASSET:?缺少 BASE_ASSET}"
+          : "${RR_TAG:?缺少 RR_TAG}"
+          export GH_TOKEN="$ACTION_TOKEN"
+          export GH_REPO="myp015/ainas-2in1"
+
+          WORKDIR="$PWD"
+          AINAS2IN1_DIR="${WORKDIR}/.2in1"
+
+          if ! command -v zstd >/dev/null 2>&1 || ! command -v zip >/dev/null 2>&1; then
+            echo "[INFO] 安装压缩依赖"
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq zstd zip >/dev/null
+          fi
+
+          # base 未重建时，从 Release 取公共 base 还原为 rr.img；已重建则直接用 rr/rr.img
+          if [ ! -f rr/rr.img ]; then
+            echo "[INFO] 复用公共 base 生成升级包：${BASE_ASSET}"
+            mkdir -p base rr
+            gh release download "$RELEASE_TAG" --pattern "${BASE_ASSET}*" --dir base --clobber
+            if [ -f "base/${BASE_ASSET}" ]; then
+              echo "[INFO] base 为单文件"
+              zstd -d -q -f "base/${BASE_ASSET}" -o rr/rr.img
+            else
+              compgen -G "base/${BASE_ASSET}.part.*" >/dev/null || {
+                echo "[E] Release ${RELEASE_TAG} 中未找到 base 资产 ${BASE_ASSET}" >&2
+                exit 1
+              }
+              echo "[INFO] base 为分卷，流式合并解压"
+              cat base/${BASE_ASSET}.part.* | zstd -d -q -f - -o rr/rr.img
+            fi
+            rm -rf base
+          fi
+
+          . "$AINAS2IN1_DIR/script/2in1func.sh"
+
+          # pack_update 自带 set -e/trap，在子 bash 中调用以保持其进程语义
+          AINAS2IN1_DIR="$AINAS2IN1_DIR" bash -c "$(declare -f pack_update); pack_update \"\$@\"" \
+            _ rr/rr.img "$WORKDIR" "" "rr"
+
+          RAW_UPDATE_ZIP="$(find . -maxdepth 1 -name 'updateall-*.zip' -print -quit)"
+          [ -n "$RAW_UPDATE_ZIP" ] && [ -f "$RAW_UPDATE_ZIP" ] || {
+            echo "[E] 未生成 updateall-*.zip" >&2
+            exit 1
+          }
+          UPDATE_ASSET="updateall-${RR_TAG}.zip"
+          mv -f "$RAW_UPDATE_ZIP" "$UPDATE_ASSET"
+          rm -f rr/rr.img
+          echo "[INFO] 全型号升级包已生成: ${UPDATE_ASSET}（$(du -h "$UPDATE_ASSET" | cut -f1)）"
+          echo "UPDATE_ASSET=${UPDATE_ASSET}" >> "$GITHUB_ENV"
+
+      - name: 上传全型号升级包到 Release
+        if: steps.check_update.outputs.rebuild == 'true'
+        shell: bash
+        env:
+          ACTION_TOKEN: ${{ secrets.AiNas }}
+        run: |
+          set -euo pipefail
+          : "${ACTION_TOKEN:?缺少 ACTION_TOKEN}"
+          : "${RELEASE_TAG:?缺少 RELEASE_TAG}"
+          : "${UPDATE_ASSET:?缺少 UPDATE_ASSET}"
+          export GH_TOKEN="$ACTION_TOKEN"
+          export GH_REPO="myp015/ainas-2in1"
+          export RELEASE_TITLE="${RELEASE_TITLE:-${RELEASE_TAG}}"
+
+          # 先删除同名旧分卷，避免单文件/分卷形态切换后残留旧内容
+          gh release view "$RELEASE_TAG" --json assets --jq '.assets[].name' | while read -r name; do
+            case "$name" in
+              "${UPDATE_ASSET}.part."*) gh release delete-asset "$RELEASE_TAG" "$name" --yes ;;
+            esac
+          done
+
+          # 分卷、Release 自愈、退避重试与覆盖统一在 release_publish.sh 里
+          bash "$GITHUB_WORKSPACE/.github/scripts/release_publish.sh" \
+            "$RELEASE_TAG" "${RELEASE_NOTES:-RR build artifacts}" \
+            "$GITHUB_WORKSPACE/$UPDATE_ASSET"
 
   build:
     name: ${{ matrix.kind == 'original' && 'build (rr-original)' || format('build ({0})', matrix.model) }}
