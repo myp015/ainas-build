@@ -188,3 +188,10 @@
 - [x] 包内含 update-list.yml/update-check.sh/RR_VERSION、p1 引导文件、bzImage-rr/initrd-rr，
       以及 cks.tgz（epyc7002/geminilakenk/r1000nk 等全平台）、lkms.tgz（17 个平台 214 个文件）、
       modules.tgz（74 个平台/DSM 版本包）、addons.tgz，确认 p3 未被裁剪。
+
+CI 验证：
+- [x] run 41976857789（修复 mv 后）：base 复用、全型号包缺失 → 下载 base 还原 rr.img、
+      打包并上传成功，Release `ainas-rr-26.11.1` 出现 `updateall-26.11.1.zip`（1.69 GB）。
+- [x] run 41978110420（选项合并后，overwrite=false）：prepare-base 的 base/全型号包检查
+      均判定复用并跳过全部构建步骤；原版镜像 job 检测到 `ainas_rr-26.11.1.img.zip` 已存在，
+      按预期跳过编译与发布。

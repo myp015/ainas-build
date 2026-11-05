@@ -702,3 +702,12 @@ ln: invalid option -- 'v'
 教训：**先补可诊断输出，再谈根因**。最初“CDN 瞬时断流”的推断是错的——诊断输出一
 上线就暴露出选错了 release。发布流程新增非常规命名的 release（如 `test-*`）时，
 必须同步检查所有消费方的 tag/资产匹配逻辑。
+
+## 2026-11-05 — Release 资产同名时 mv 会失败；覆盖语义别拆成多个开关
+
+- `pack_update` 按镜像内版本命名，目标名可能正好同为 `updateall-<版本>.zip`；直接
+  `mv -f "$RAW" "$TARGET"` 在同名路径上报 `are the same file` 并退出 1。改名逻辑应先比较
+  basename，不同才 mv（rr.yml prepare-base 已按此修正）。
+- 复用/覆盖开关按制品拆成 4 个 boolean（base / 按型号 update / 全型号 update / 原版镜像）
+  容易组合出无效状态、维护成本高。用户要求合并为单个 `overwrite`（rr 与 2in1），默认
+  全部复用；原版镜像始终进矩阵，产物已存在则跳过 job。新增制品时优先并入既有开关语义。
