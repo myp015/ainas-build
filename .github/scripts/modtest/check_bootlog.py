@@ -308,6 +308,16 @@ PANIC = ("[    9.1] BUG: unable to handle kernel NULL pointer dereference\n"
 ECHO = ("root@SynologyNAS:~# dmesg | grep -iE 'BUG:|Oops|Unknown symbol|exports duplicate symbol'\n"
         "[    1.0] Btrfs loaded\n")
 
+# run 42002461964 实测：串口并发写把 ANSI 颜色序列截断（只剩 `;32m`），
+# 并且命令字被打成了 `Unknnown`/`modulles`，整行既不等于命令文件里的原文，
+# 也不以提示符开头。旧 PROMPT_RE（行首锚定）失效，把这条回显当成了真
+# VERMAGIC 报硬失败——这是本轮全矩阵 2 个平台失败的直接原因。
+ECHO_ANSI = (";32mroot@DiskStation:~# tail -c 100000 /var/log/messages "
+             "2>/dev/null | grep -iE 'Unknnown symbol|Invalid module format|"
+             "GPL-only|exports duplicate symbol|Loading modulles failed|"
+             "modprobe.*not found' | tail -n 400\n"
+             "[    1.0] Btrfs loaded\n")
+
 ENV_ALLOW = ("*\t*\t4.4.*\t*\tofficial\tbutton\tBUILTIN_DUP\t"
              "purley 内核内建 ACPI_BUTTON 并导出 acpi_lid_*；RR 包同构\n")
 
@@ -339,6 +349,8 @@ CASES = [
     dict(name="真 vermagic 硬失败", text=VERMAGIC, rc=1, has="[FAIL] VERMAGIC"),
     dict(name="内核崩溃硬失败", text=PANIC, rc=1, has="[FAIL] KERNEL_FAULT"),
     dict(name="命令回显不算异常", text=ECHO, rc=0, has="[PASS]"),
+    dict(name="ANSI 截断/打错字的回显不算异常", text=ECHO_ANSI, rc=0,
+         has="[PASS]", absent=("[FAIL]", "[WARN] VERMAGIC")),
     dict(name="安装日志缺失且未声明可省略", text=CLEAN, rc=1,
          missing_install=True, has="安装日志目录不存在"),
     dict(name="固件路径/depmod 噪声不误报", text=NOISE, rc=0,

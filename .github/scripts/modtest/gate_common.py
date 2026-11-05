@@ -48,6 +48,10 @@ DUMP_DONE_RE = re.compile(r"__DSMEXEC_\d+__DONE")
 # 执行器输出的“命令跑完”标记，过滤掉就没法判断采集完整性了。
 ECHO_MARKERS = ("$(", "${", "`")
 PROMPT_RE = re.compile(r"^[A-Za-z0-9._-]+@[A-Za-z0-9._-]+:.*#")
+# 串口并发写入会把 ANSI 颜色序列截断（只剩 `;32m` 前缀）、或把命令字打错
+# （run 42002461964：`Unknnown symbol`），导致整行精确匹配和行首提示符都失效。
+# 提示符出现在行内任意位置仍是可靠判据——真实内核日志不会包含 `user@host:~#`。
+PROMPT_ANY_RE = re.compile(r"[A-Za-z0-9._-]+@[A-Za-z0-9._-]+:[^\s]*[#$]")
 
 
 def read_lines(path):
@@ -81,6 +85,8 @@ def is_echo(line, echoes):
     if s in echoes:
         return True
     if PROMPT_RE.match(s):
+        return True
+    if PROMPT_ANY_RE.search(s):
         return True
     for marker in ECHO_MARKERS:
         if marker in s:

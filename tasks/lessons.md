@@ -711,3 +711,22 @@ ln: invalid option -- 'v'
 - 复用/覆盖开关按制品拆成 4 个 boolean（base / 按型号 update / 全型号 update / 原版镜像）
   容易组合出无效状态、维护成本高。用户要求合并为单个 `overwrite`（rr 与 2in1），默认
   全部复用；原版镜像始终进矩阵，产物已存在则跳过 job。新增制品时优先并入既有开关语义。
+
+## 2026-11-05 — 串口回显在真实日志里是“坏掉”的，夹具必须覆盖损坏形态
+
+Task#221 全矩阵 run 42002461964：DS918+ / DS925+ 启动日志门禁报 `[FAIL] VERMAGIC`，
+命中行是 `probe.commands` 里那条 `/var/log/messages` 定向 grep 的**命令回显**。
+
+- 串口并发写把 ANSI 颜色序列截断，只剩 `;32m` / `01;32m` 前缀，行首锚定的
+  `PROMPT_RE`（`^user@host:...#`）匹配不上；
+- 同一行里的命令字被打错（`Unknnown symbol`、`Loading modulles failed`），
+  与 `.commands` 原文精确匹配也失效；
+- 结果回显模式串 `Invalid module format` 命中了 VERMAGIC 硬判据 → 假失败。
+
+修法：`gate_common.py` 增加 `PROMPT_ANY_RE`（提示符出现在行内任意位置即判回显），
+`check_bootlog.py` 补夹具「ANSI 截断 + 打错字的 grep 回显」；真实 artifact 回放
+两平台均转 PASS（只报告项不变）。
+
+教训：**过滤规则要按“最坏形态”设计**。串口是并发异步通道，任何按“输出完整、
+无噪声”假设写的精确匹配/行首锚定都会在真机上失效；夹具必须来自真实 artifact 的
+损坏样本，而不是手写的理想样本。
