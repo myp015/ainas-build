@@ -4,7 +4,12 @@
 #   profile  QEMU 设备  host 驱动模块候选（| 分隔）  proc_name 候选（| 分隔）  测试盘扇区数
 #
 # 说明：
-# - QEMU 设备名与 render_test_compose.sh 注入的一致（megasas / mptsas1068）。
+# - QEMU 设备名与 render_test_compose.sh 注入的一致（megasas-gen2 / mptsas1068）。
+#   megaraid 用 gen2（1000:0079）而非 gen1（1000:0060）：4.4.302 的 megaraid_sas
+#   只登记 0079，0060 在 4.4 平台不绑定（2026-11-05 本地 QEMU 复现 + 模块
+#   modinfo alias 全平台核对）。
+# - mptsas 的 scsi-hd 必须带 wwn：SAS 地址为 0 时 mptsas_setup_wide_ports()
+#   直接跳过，host/phy 都正常但不会添加 SCSI 目标（表现为“有控制器无盘”）。
 # - megaraid 的驱动名随内核版本变化：4.4.302 是 megaraid_sas，5.10.55（DSM 定制
 #   源码）把 .name/.proc_name 改成 megaraid_sas_pdoff（见
 #   ainas-modules/src/5.10.55/drivers/scsi/megaraid/megaraid_sas_base.c）。两种都
@@ -12,6 +17,6 @@
 # - 测试盘 = run_profile.sh 生成的 2G 稀疏 raw（2G/512 = 4194304 扇区），
 #   系统盘同 vendor/model（QEMU HARDDISK）但尺寸不同，靠扇区数唯一定位。
 # - mptsas1090 等别名不列：QEMU 只模拟 mptsas1068。
-megaraid	megasas	megaraid_sas|megaraid_sas_pdoff	megaraid_sas|megaraid_sas_pdoff	4194304
+megaraid	megasas-gen2	megaraid_sas|megaraid_sas_pdoff	megaraid_sas|megaraid_sas_pdoff	4194304
 mptsas	mptsas1068	mptsas	mptsas	4194304
 virtio-scsi	virtio-scsi-pci	virtio_scsi	virtio_scsi	4194304
