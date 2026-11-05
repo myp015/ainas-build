@@ -730,7 +730,7 @@ jobs:
             : "${MODULES_KEY:?缺少 MODULES_KEY}"
             printf '%s\n' \
               'echo 1 > /proc/sys/kernel/syno_install_flag; mkdir -p /mnt/modtest; cd /dev; blkid synoboot3 2>&1; mount -t ext4 synoboot3 /mnt/modtest; rc=$?; echo "NIC_MOUNT_RC=$rc"; ls /mnt/modtest 2>&1 | head -n 20' \
-              'echo "@@NICDIAG|begin"; echo "--addr--"; ip -4 -o addr show 2>&1; echo "--route--"; ip route show 2>&1; echo "--netdev--"; for d in /sys/class/net/*; do [ -r "$d/address" ] || continue; echo "$(basename "$d") $(cat "$d/address") $(basename "$(readlink "$d/device/driver" 2>/dev/null)" 2>/dev/null || echo -)"; done; echo "--listen--"; netstat -lnt 2>/dev/null | grep -E ":5000|:5001" || true; echo "@@NICDIAG|end"' \
+              'echo "@@NICDIAG|begin"; echo "--addr--"; ip -4 -o addr show 2>&1; echo "--route--"; ip route show 2>&1; echo "--netdev--"; for d in /sys/class/net/*; do [ -r "$d/address" ] || continue; echo "$(basename "$d") $(cat "$d/address") $(basename "$(readlink "$d/device/driver" 2>/dev/null)" 2>/dev/null || echo -)"; done; echo "--modules--"; for m in vmxnet3 e1000 e1000e ne2k_pci 8139cp virtio_net; do echo "$m srcversion=$(cat /sys/module/$m/srcversion 2>/dev/null || echo -) desc=$(modinfo -F description "$m" 2>/dev/null || echo -)"; done; echo "--listen--"; netstat -lnt 2>/dev/null | grep -E ":5000|:5001" || true; echo "@@NICDIAG|end"' \
               "sh /mnt/modtest/modtest/run-nic-tests.sh ${MODULES_KEY}" \
               > "${CMD_DIR}/nic.commands"
             run_one nic "${CMD_DIR}/nic.commands" soft

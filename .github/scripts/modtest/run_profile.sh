@@ -94,6 +94,12 @@ if [ "${ready}" -ne 1 ]; then
   docker exec "${CONTAINER}" sh -c \
     'ps -eo pid,etime,pcpu,args | grep -E "qemu-system|passt" | grep -v grep' \
     >"${LOGDIR}/${PROFILE}/qemu-ps.txt" 2>&1 || true
+  # 网络现场（仅 nic profile 之类多网卡场景有意义）：qemux 的 NAT/tap 模式给
+  # VM 固定 IP 172.30.0.2、网关是容器内的 bridge `docker`。DNSmasq/iptables
+  # 是否把端口转发指向这个 IP，靠二层可达性和 DNAT 规则来判断。
+  docker exec "${CONTAINER}" sh -c \
+    'echo "--neigh--"; ip neigh show dev docker 2>/dev/null; echo "--ping--"; ping -c 1 -W 2 172.30.0.2 2>&1 | tail -n 3; echo "--dnat--"; iptables -t nat -L PREROUTING -n 2>/dev/null | head -n 12; echo "--forward--"; iptables -L FORWARD -n 2>/dev/null | head -n 6' \
+    >"${LOGDIR}/${PROFILE}/net-probe.txt" 2>&1 || true
   if [ "${WEB_MODE}" != "soft" ]; then
     exit 1
   fi
