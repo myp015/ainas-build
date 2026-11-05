@@ -245,6 +245,11 @@ SCSI 只跑 SAS 两型（megaraid + mptsas）、崩溃硬失败/识别问题先�
       改为上传 base 后删除本地副本；下载 RR zip 解压后立即删除。
 - [x] YAML 解析 + 全部 run 块 `bash -n` 通过（2in1.yml、rr.yml）。
 
-## 待验证
-- [ ] CI 触发一次 2in1（自选单型号、overwrite=false）：确认 base 复用、updateall 缺失时
-      下载 base 打包并上传到 `ainas-2in1_<版本>` Release。
+## 验证
+- [x] run 41978921157（自选 DS918+、overwrite=false）：base 复用（跳过下载/构建/上传），
+      全平台升级包缺失 → 下载 base、`pack_update` 打包并上传成功。
+      `ainas-2in1_26.11.1` Release 出现 `updateall-26.11.1.zip`（1,671,520,492 字节）。
+- [x] 通过 HTTP Range 读取包尾中央目录（不下载整包）：12 个条目 —
+      update-list.yml / update-check.sh / AINAS_VERSION / SynoBootLoader.conf/.efi /
+      bzImage-ainas / initrd-ainas / cks.tgz / lkms.tgz / addons.tgz / modules.tgz /
+      sha256sum，与 2in1 未裁剪结构一致；1.67GB 远大于按型号包（约 0.46GB），确认未裁剪。
