@@ -357,6 +357,17 @@ FIXTURE_FAULT_MODULE = "\n".join([
     "__DSMEXEC_20__DONE",
 ])
 
+# v1000/denverton 实测形态：提示符只剩 `~#`，且前面的 ANSI 序列被截断成
+# `01;34m`，命令字也被串口打错（genneral / duplicate  symbol）。
+FIXTURE_ECHO_TILDE = "\n".join([
+    "01;34m~# dmesg | grep -iE 'BUG:|Oops|Kernel panic|Unable to handle|"
+    "genneral protection|Unknown symbol|Invalid module format|GPL-only|"
+    "exports duplicate  symbol|Loading modules failed' | tail -n 400",
+    "/sys/class/scsi_host/host19 proc_name=mptsas",
+    "/sys/block/sata1 vendor=QEMU model=QEMU HARDDISK size=5242880",
+    "__DSMEXEC_20__DONE",
+])
+
 FIXTURE_FAULT_KERNEL = "\n".join([
     "[    9.1] BUG: unable to handle kernel NULL pointer dereference",
     "[    9.2] IP: [<ffffffff813e6116>] syno_usb_info_enum+0xa6/0x130",
@@ -383,6 +394,8 @@ def selftest():
         ("内核内建崩溃 + RR 证据豁免", FIXTURE_FAULT_KERNEL, EXEMPT_TSV, 0,
          "[EXEMPT]"),
         ("命令回显里的故障模式不算崩溃", FIXTURE_GOOD, None, 0, "无崩溃"),
+        ("截断 ANSI + ~# 提示符 + 打错字的回显不算崩溃", FIXTURE_ECHO_TILDE,
+         None, 0, "无崩溃"),
     ]
     failed = 0
     for name, text, allow, expect_rc, kw in checks:

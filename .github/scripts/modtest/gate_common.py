@@ -52,6 +52,11 @@ PROMPT_RE = re.compile(r"^[A-Za-z0-9._-]+@[A-Za-z0-9._-]+:.*#")
 # （run 42002461964：`Unknnown symbol`），导致整行精确匹配和行首提示符都失效。
 # 提示符出现在行内任意位置仍是可靠判据——真实内核日志不会包含 `user@host:~#`。
 PROMPT_ANY_RE = re.compile(r"[A-Za-z0-9._-]+@[A-Za-z0-9._-]+:[^\s]*[#$]")
+# 另一种提示符形态：登录 shell 未展开 \u@\h 时只剩 `~#` / `~$`（run 42002461964
+# 的 v1000/denverton 等平台，回显行以 `01;34m~# dmesg ...` 开头）。
+TILDE_PROMPT_RE = re.compile(r"[~][#$][ ]")
+# 被截断的 ANSI 序列残留（ESC 丢失，只剩数字+分号+m）：内核日志不会这样开头。
+ANSI_REMNANT_RE = re.compile(r"^[0-9]{1,2}(;[0-9]{1,2})*[mM]")
 
 
 def read_lines(path):
@@ -77,6 +82,24 @@ def load_command_echoes(cmd_dir, profile):
     return lines
 
 
+def _similar_to_command(s, echoes):
+    """按词元重合率判断整行是不是某条命令的回显（容忍串口打错字）。
+
+    实测回显会丢字/多字（`general` → `genneral`、`duplicate symbol` →
+    `duplicate  symbol`），精确匹配和子串匹配都不可靠；命令文件里每条命令
+    词元数量有限，重合率 ≥80% 只有回显能达到，内核日志不会。
+    """
+    low = s.lower()
+    for cmd in echoes:
+        toks = cmd.lower().split()
+        if len(toks) < 3:
+            continue
+        hit = sum(1 for t in toks if t in low)
+        if hit >= 3 and hit * 5 >= len(toks) * 4:
+            return True
+    return False
+
+
 def is_echo(line, echoes):
     """判断一行是否是串口命令回显（而非 guest 真实输出）。"""
     s = line.strip()
@@ -88,9 +111,15 @@ def is_echo(line, echoes):
         return True
     if PROMPT_ANY_RE.search(s):
         return True
+    if TILDE_PROMPT_RE.search(s):
+        return True
+    if ANSI_REMNANT_RE.match(s):
+        return True
     for marker in ECHO_MARKERS:
         if marker in s:
             return True
+    if _similar_to_command(s, echoes):
+        return True
     return False
 
 
