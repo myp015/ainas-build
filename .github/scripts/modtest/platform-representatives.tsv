@@ -15,13 +15,16 @@
 #
 # 型号选择依据：
 #   - 优先选 DSM 7.3 官方确有 PAT 的常规型号；
-#   - broadwell 用 FS3400 而不是 DS3617xs：DS3617xs 只有 DSM 6.2 的 PAT，
-#     plan_sources.sh 在 7.x 会直接报错；
+#   - broadwell 用 DS3617xs：FS3400 在 7.4.1 连续两轮安装阶段失败
+#     （install.cgi rc=3，5 分钟内未进入安装程序，无任何采集数据）；
+#     DS3617xs 在 7.4.1 实测全绿（run 42091848881：SCSI 两型 PASS、
+#     网卡 6/6 取 IP、启动日志硬失败 0、模块测试 failures=0）。
+#     models.json 中 broadwell 的 7.4 版本集含 DS3617xs，PAT 可正常获取；
 #   - 4 个 custom（cks）平台沿用其官方代表型号，只是换 KERNEL=custom。
 #   - epyc7003 / icelaked 只在 DSM 7.4 起有 productvers（7.3 没有），7.4 轮次
 #     才需要它们；7.3 轮次由下面的覆盖校验自动判失败，不会静默漏跑。
 apollolake	DS918+	official
-broadwell	FS3400	official
+broadwell	DS3617xs	official
 broadwellnk	DS3622xs+	official
 broadwellnkv2	FS3410	official
 denverton	DS1819+	official
