@@ -139,19 +139,33 @@ jobs:
           done
           echo "[I] update 模块数: $(ls "${ROOT_PATH}/modules/update/"*.ko | wc -l)"
 
-          # i40e/iavf 闭包（同 cks.yml 的 Task#62 不变量，提前到 build 阶段 fail-fast）：
-          # auxiliary bus 归 i40e.ko 所有并导出 intel_auxiliary_*，iavf 只能引用它。
-          # edc59276 在 epyc7002/v1000nk 停了自编 i40e 却留着 IAVF=m，导致 iavf 的
-          # 两个 intel_auxiliary_* UND 悬空（run 39551787486 实测）。
-          if [ -f "${ROOT_PATH}/modules/iavf.ko" ]; then
-            [ -f "${ROOT_PATH}/modules/i40e.ko" ] || {
-              echo "[E] iavf.ko 存在但 i40e.ko 缺失（intel_auxiliary_* 将悬空）" >&2; exit 1; }
-            modinfo -F depends "${ROOT_PATH}/modules/iavf.ko" | tr ',' ' ' | xargs -n1 | \
-              /bin/grep -qx i40e || {
-              echo "[E] iavf.ko 未依赖 i40e（intel_auxiliary_* 无提供者）" >&2; exit 1; }
-            nm --defined-only "${ROOT_PATH}/modules/i40e.ko" | \
+          # i40e/iavf 闭包（同 cks.yml 的拆分不变量，提前到 build 阶段 fail-fast）：
+          # Intel auxiliary 总线由独立 intel_auxiliary.ko 提供（与主流程 src/5.10.55、
+          # RR cks 成品一致），i40e/iavf 的 modinfo depends=intel_auxiliary，不得再
+          # 折叠 auxiliary.o（双份 bus_register 会 EEXIST）。edc59276 曾停编 i40e
+          # 却留 IAVF=m，导致 iavf 的 intel_auxiliary_* UND 悬空（run 39551787486）。
+          if [ -f "${ROOT_PATH}/modules/i40e.ko" ] || [ -f "${ROOT_PATH}/modules/iavf.ko" ]; then
+            [ -f "${ROOT_PATH}/modules/intel_auxiliary.ko" ] || {
+              echo "[E] intel_auxiliary.ko 缺失（i40e/iavf 依赖它）" >&2; exit 1; }
+            nm --defined-only "${ROOT_PATH}/modules/intel_auxiliary.ko" | \
               /bin/grep -q " T intel_auxiliary_device_init$" || {
-              echo "[E] i40e.ko 未折入 intel_auxiliary_device_init" >&2; exit 1; }
+              echo "[E] intel_auxiliary.ko 未导出 intel_auxiliary_device_init" >&2; exit 1; }
+            if [ -f "${ROOT_PATH}/modules/i40e.ko" ]; then
+              modinfo -F depends "${ROOT_PATH}/modules/i40e.ko" | tr ',' ' ' | xargs -n1 | \
+                /bin/grep -qx intel_auxiliary || {
+                echo "[E] i40e.ko 未依赖 intel_auxiliary" >&2; exit 1; }
+              nm --defined-only "${ROOT_PATH}/modules/i40e.ko" | \
+                /bin/grep -q " T intel_auxiliary_device_init$" && {
+                echo "[E] i40e.ko 仍折叠 auxiliary.o（重复 auxiliary bus）" >&2; exit 1; }
+            fi
+            if [ -f "${ROOT_PATH}/modules/iavf.ko" ]; then
+              modinfo -F depends "${ROOT_PATH}/modules/iavf.ko" | tr ',' ' ' | xargs -n1 | \
+                /bin/grep -qx intel_auxiliary || {
+                echo "[E] iavf.ko 未依赖 intel_auxiliary" >&2; exit 1; }
+              modinfo -F depends "${ROOT_PATH}/modules/iavf.ko" | tr ',' ' ' | xargs -n1 | \
+                /bin/grep -qx i40e && {
+                echo "[E] iavf.ko 不应依赖 i40e（总线由 companion 提供）" >&2; exit 1; }
+            fi
           fi
 
           mkdir -p "${ROOT_PATH}/output/modules"
