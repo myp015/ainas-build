@@ -231,3 +231,20 @@ SCSI 只跑 SAS 两型（megaraid + mptsas）、崩溃硬失败/识别问题先�
   三平台预计 panic，需 RR 对照。
 - apollolake 4.4.302 包内无 coretemp/k10temp（RR 同样没有），启动脚本加载失败属
   环境性，第一轮只报告。
+
+# 2in1 全平台升级包（2026-11-05）
+
+## 变更
+- [x] `2in1.yml` 输入合并为单个 `overwrite`（base + 全平台升级包，默认复用）。
+- [x] `prepare-base` 新增 `check_update`：Release 已有 `updateall-<RR 版本>.zip`（或
+      `.part.000`）且未勾选覆盖时跳过，否则生成。
+- [x] 新增「生成全平台升级包（不裁剪 p3）」：base 已重建直接用 `rr/rr.img`，否则从
+      Release 下载公共 base 解压还原；`pack_update ... "2in1"` 打包后删除本地 img。
+- [x] 新增「上传全平台升级包到 Release」，复用 `release_publish.sh` 的分卷/重试/覆盖。
+- [x] 删除 base 构建末尾的 `rm -rf "$AINAS2IN1_DIR"`（升级包步骤仍需 source 该目录），
+      改为上传 base 后删除本地副本；下载 RR zip 解压后立即删除。
+- [x] YAML 解析 + 全部 run 块 `bash -n` 通过（2in1.yml、rr.yml）。
+
+## 待验证
+- [ ] CI 触发一次 2in1（自选单型号、overwrite=false）：确认 base 复用、updateall 缺失时
+      下载 base 打包并上传到 `ainas-2in1_<版本>` Release。
