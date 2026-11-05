@@ -60,20 +60,8 @@ on:
         description: "自定义型号(工作流未列出的,多个用逗号分隔,如 DS1621+,DVA3221,RS4021xs+)"
         type: string
         default: ""
-      overwrite_base:
-        description: "覆盖所选源的 rr-base（默认复用 Release 中已存在的 base）"
-        type: boolean
-        default: false
-      overwrite_update:
-        description: "覆盖所选型号的 update 包（默认复用 Release 中已存在的 updateall-<型号>-<RR版本>.zip）"
-        type: boolean
-        default: false
-      build_rr_original:
-        description: "生成原版 RR 镜像（rr-版本号.img.zip，跳过 Docker 编译）默认开启，可取消"
-        type: boolean
-        default: true
-      overwrite_updateall:
-        description: "覆盖全型号 update 包（默认复用 Release 中已存在的 updateall-<RR版本>.zip）"
+      overwrite:
+        description: "覆盖 Release 中已存在的 base / update 包 / 原版 RR 镜像（默认复用，原版镜像默认跳过）"
         type: boolean
         default: false
       rr_version:
@@ -121,7 +109,6 @@ jobs:
           DSM_VERSION: ${{ inputs.dsm_version }}
           ALL_MODELS: ${{ inputs.all_models }}
           CUSTOM_MODELS: ${{ inputs.custom_models }}
-          BUILD_RR_ORIGINAL: ${{ inputs.build_rr_original }}
           MODEL_DS918P: ${{ inputs.model_ds918p }}
           MODEL_DS920P: ${{ inputs.model_ds920p }}
           MODEL_DS923P: ${{ inputs.model_ds923p }}
@@ -197,7 +184,7 @@ jobs:
         shell: bash
         env:
           ACTION_TOKEN: ${{ secrets.AiNas }}
-          OVERWRITE_BASE: ${{ inputs.overwrite_base }}
+          OVERWRITE: ${{ inputs.overwrite }}
         run: |
           set -euo pipefail
           : "${ACTION_TOKEN:?缺少 ACTION_TOKEN}"
@@ -212,11 +199,11 @@ jobs:
             EXISTS="true"
           fi
 
-          if [ "$EXISTS" = "true" ] && [ "${OVERWRITE_BASE:-false}" != "true" ]; then
+          if [ "$EXISTS" = "true" ] && [ "${OVERWRITE:-false}" != "true" ]; then
             echo "[INFO] Release ${RELEASE_TAG}（源=${SOURCE}）已存在 ${BASE_ASSET}，复用（未勾选覆盖）"
             echo "rebuild=false" >> "$GITHUB_OUTPUT"
           else
-            echo "[INFO] 需要构建 base（exists=${EXISTS} overwrite=${OVERWRITE_BASE:-false}）"
+            echo "[INFO] 需要构建 base（exists=${EXISTS} overwrite=${OVERWRITE:-false}）"
             echo "rebuild=true" >> "$GITHUB_OUTPUT"
           fi
 
@@ -227,7 +214,7 @@ jobs:
         shell: bash
         env:
           ACTION_TOKEN: ${{ secrets.AiNas }}
-          OVERWRITE_UPDATEALL: ${{ inputs.overwrite_updateall }}
+          OVERWRITE: ${{ inputs.overwrite }}
         run: |
           set -euo pipefail
           : "${ACTION_TOKEN:?缺少 ACTION_TOKEN}"
@@ -240,7 +227,7 @@ jobs:
           # 超过 2GB 时 Release 只存分卷，判定存在性时与 base 检查保持一致
           if { printf '%s\n' "$ASSET_NAMES" | grep -Fxq "$UPDATE_ASSET" \
                || printf '%s\n' "$ASSET_NAMES" | grep -Fxq "${UPDATE_ASSET}.part.000"; } \
-             && [ "${OVERWRITE_UPDATEALL:-false}" != "true" ]; then
+             && [ "${OVERWRITE:-false}" != "true" ]; then
             echo "[INFO] Release ${RELEASE_TAG}（源=${SOURCE}）已存在 ${UPDATE_ASSET}，复用（未勾选覆盖）"
             echo "rebuild=false" >> "$GITHUB_OUTPUT"
           else
@@ -466,6 +453,7 @@ jobs:
       KERNEL: official
       ADDONS: acpid,reboottoloader,addincards,cpuinfo,expands,diskcompat,lsiutil,nvmevolume,powersched,remotefs,storagepanel,smartctl,trivial,apppatch,vmtools
       ACTION_TOKEN: ${{ secrets.AiNas }}
+      OVERWRITE: ${{ inputs.overwrite }}
       LINE: ${{ inputs.dsm_version }}
       SOURCE: ${{ needs.plan.outputs.source }}
       TAG: ${{ needs.plan.outputs.rr_tag }}
@@ -485,7 +473,34 @@ jobs:
           git config --global user.name "github-actions[bot]"
           sudo timedatectl set-timezone "Asia/Shanghai"
 
+      # 原版 RR 镜像始终在任务矩阵中；Release 已有同名制品时默认跳过，
+      # 只有勾选 overwrite 才重新编译。
+      - name: 检查原版 RR 镜像是否已存在
+        id: original
+        shell: bash
+        env:
+          MODEL: ${{ matrix.model }}
+        run: |
+          set -euo pipefail
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+          [ "${MODEL}" = "__RR_ORIGINAL__" ] || exit 0
+
+          export GH_TOKEN="$ACTION_TOKEN"
+          export GH_REPO="myp015/ainas-2in1"
+          if [ "${SOURCE}" = "RROrg" ]; then ARTIFACT_BRAND="RROrg_rr"; else ARTIFACT_BRAND="ainas_rr"; fi
+          ORIGINAL_ASSET="${ARTIFACT_BRAND}-${RR_TAG}.img.zip"
+          ASSET_NAMES="$(gh release view "$RELEASE_TAG" --json assets --jq '.assets[].name')"
+          if { printf '%s\n' "$ASSET_NAMES" | grep -Fxq "$ORIGINAL_ASSET" \
+               || printf '%s\n' "$ASSET_NAMES" | grep -Fxq "${ORIGINAL_ASSET}.part.000"; } \
+             && [ "${OVERWRITE:-false}" != "true" ]; then
+            echo "[INFO] Release ${RELEASE_TAG} 已存在 ${ORIGINAL_ASSET}，跳过（未勾选覆盖）"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "[INFO] 需要编译原版 RR 镜像 ${ORIGINAL_ASSET}（overwrite=${OVERWRITE:-false}）"
+          fi
+
       - name: Checkout ainas-2in1
+        if: steps.original.outputs.skip != 'true'
         uses: actions/checkout@v7
         with:
           repository: myp015/ainas-2in1
@@ -493,6 +508,7 @@ jobs:
           path: .2in1
 
       - name: 下载公共 base
+        if: steps.original.outputs.skip != 'true'
         shell: bash
         env:
           ACTION_TOKEN: ${{ secrets.AiNas }}
@@ -519,10 +535,10 @@ jobs:
           fi
 
       - name: 编译镜像
+        if: steps.original.outputs.skip != 'true'
         shell: bash
         env:
           MODEL: ${{ matrix.model }}
-          OVERWRITE_UPDATE: ${{ inputs.overwrite_update }}
         run: |
           set -euo pipefail
 
@@ -626,7 +642,7 @@ jobs:
             UPDATE_ASSETS="$(GH_TOKEN="$ACTION_TOKEN" GH_REPO="myp015/ainas-2in1" \
               gh release view "$RELEASE_TAG" --json assets --jq '.assets[].name')"
             if printf '%s\n' "$UPDATE_ASSETS" | grep -Fxq "$UPDATE_ASSET" \
-               && [ "${OVERWRITE_UPDATE:-false}" != "true" ]; then
+               && [ "${OVERWRITE:-false}" != "true" ]; then
               echo "[INFO] Release ${RELEASE_TAG} 已存在 ${UPDATE_ASSET}，复用（未勾选覆盖）"
             else
               AINAS2IN1_DIR="$AINAS2IN1_DIR" bash -c "$(declare -f pack_update); pack_update \"\$@\"" _ rr/rr.img "$GITHUB_WORKSPACE" "" "rr"
@@ -696,6 +712,7 @@ jobs:
           echo "ARTIFACT_ZIP=$ARTIFACT_ZIP" >> "$GITHUB_ENV"
 
       - name: 发布制品到 Release
+        if: steps.original.outputs.skip != 'true'
         shell: bash
         env:
           ACTION_TOKEN: ${{ secrets.AiNas }}

@@ -16,7 +16,6 @@
 #   ALL_MODELS        全选 | 自选
 #   CUSTOM_MODELS     自定义型号（逗号分隔）
 #   MODEL_*           各型号勾选状态（字符串 true/false）
-#   BUILD_RR_ORIGINAL rr：是否生成原版 RR 镜像
 #
 # 输出（GITHUB_OUTPUT）：
 #   source / rr_tag / rr_asset_url / release_tag / release_title / release_notes
@@ -45,7 +44,6 @@ ALL_MODELS="${ALL_MODELS:-全选}"
 CUSTOM_MODELS="${CUSTOM_MODELS:-}"
 DSM_VERSION="${DSM_VERSION:-}"
 RR_VERSION="${RR_VERSION:-}"
-BUILD_RR_ORIGINAL="${BUILD_RR_ORIGINAL:-false}"
 
 if [ "${PRODUCT}" = "ova" ] && [ "${DSM_VERSION}" = "6.2.4" ]; then
   echo "[E] OVA 工作流不支持 DSM 6.2.4（仅 7.x）" >&2
@@ -202,14 +200,10 @@ PY
   echo "[INFO] DSM 6.2.4 型号校验通过: ${MODELS[*]}"
 fi
 
-if [ "${#MODELS[@]}" -eq 0 ]; then
-  # rr 允许只编原版 RR 镜像；其余产品必须至少勾选一个型号
-  if [ "${PRODUCT}" = "rr" ] && [ "${BUILD_RR_ORIGINAL}" = "true" ]; then
-    :
-  else
-    echo "[E] 请至少勾选一个型号" >&2
-    exit 1
-  fi
+# rr 始终编原版 RR 镜像，可以不勾型号；其余产品必须至少勾选一个型号
+if [ "${#MODELS[@]}" -eq 0 ] && [ "${PRODUCT}" != "rr" ]; then
+  echo "[E] 请至少勾选一个型号" >&2
+  exit 1
 fi
 
 # ── 3. 逐源解析 RR Release ────────────────────────────────────────────
@@ -314,8 +308,8 @@ for src in "${SOURCES[@]}"; do
   for m in "${MODELS[@]}"; do
     printf '%s\t%s\t%s\n' "${src}" "${m}" "normal" >>"${TASKS_TSV}"
   done
-  # ── 任务：原版 RR 镜像（仅 rr）──
-  if [ "${PRODUCT}" = "rr" ] && [ "${BUILD_RR_ORIGINAL}" = "true" ]; then
+  # ── 任务：原版 RR 镜像（仅 rr，始终加入；产物已存在时由 build job 跳过）──
+  if [ "${PRODUCT}" = "rr" ]; then
     printf '%s\t%s\t%s\n' "${src}" "__RR_ORIGINAL__" "original" >>"${TASKS_TSV}"
   fi
 done

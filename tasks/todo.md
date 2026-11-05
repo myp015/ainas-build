@@ -174,9 +174,14 @@
 - [x] `rr.yml` 的 `prepare-base` 增加“全型号升级包”流程：在 p3 尚未按型号裁剪时
       用 `pack_update` 生成 `updateall-<RR 版本>.zip`（含所有型号的 lkms/modules/cks/addons）。
 - [x] base 复用（未重建）而升级包缺失时，下载公共 base 解压为 `rr/rr.img` 再打包。
-- [x] 复用策略沿用 `overwrite_update`；上传走 `release_publish.sh`（支持分卷/覆盖）。
+- [x] 复用策略：rr/2in1 的 `overwrite_base`、`overwrite_update`（rr 另有 `overwrite_updateall`）
+      合并为单个 `overwrite`，默认不覆盖，同时作用于 base、按型号包、全型号包与原版镜像。
+- [x] `build_rr_original` 输入删除：rr 的 matrix 始终包含 `__RR_ORIGINAL__`；Release 已有
+      `<品牌>-<RR 版本>.img.zip` 时该 job 默认跳过，勾选 `overwrite` 才重新编译。
 - [x] 打包后删除 `rr/rr.img`、上传 base 后删除本地副本，降低同 job 磁盘峰值。
 - [x] 本地校验 YAML 解析、run 块 bash 语法；复用判定三态单元测试通过。
+- [x] CI 首次运行 run 41976503824 暴露：pack_update 产物与目标同名时 `mv` 报
+      "are the same file" 退出 1；已改为仅名称不同时改名。
 
 验证（本地真实镜像 26.10.42，未裁剪的官方 rr.img）：
 - [x] `pack_update` 产出 `updateall-26.10.42.zip`（1.7 GiB，< 2GB 不需分卷）。
