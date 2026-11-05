@@ -10,6 +10,9 @@
 #   4. modtest profile 挂载引导盘 p3（/dev/synoboot3, ext4），安全档逐个 insmod 模块，
 #      结果经串口回读；
 #   5. 可选 SCSI 控制器 profile（virtio-scsi / megaraid / mptsas）验证驱动；
+#      可选 nic profile 给虚拟机挂 6 块不同型号的虚拟网卡（virtio-net/e1000/
+#      e1000e/rtl8139/vmxnet3/ne2k_pci），从测试包 insmod 驱动并逐个验证
+#      DHCP 取 IP（表见 modtest/nic-models.tsv，门禁见 check_nic_result.py）；
 #   6. use_prebuilt=true 时直接复用正式发布 Release 里已安装的成品 OVA
 #      （ainas-ova-<tag> / RROrg-ova-<tag>），跳过 base 构建与 DSM 安装，
 #      仍从 syno-modules 取同一份模块包注入 p3 后逐模块测试。
@@ -75,6 +78,10 @@ on:
         description: "只测清单前 N 个模块（0=全部，CI smoke 建议 20）"
         type: string
         default: "0"
+      run_nic_profile:
+        description: "额外虚拟网卡取 IP 验证（6 种 QEMU 网卡，见 modtest/nic-models.tsv）"
+        type: boolean
+        default: false
       boot_timeout:
         description: "安装阶段引导等待秒数"
         type: string
@@ -352,6 +359,7 @@ jobs:
       SCSI_PROFILES: ${{ inputs.scsi_profiles }}
       RUN_BASE_PROFILE: ${{ inputs.run_base_profile }}
       RUN_MODULE_TEST: ${{ inputs.run_module_test }}
+      RUN_NIC_PROFILE: ${{ inputs.run_nic_profile }}
       PREBUILT: ${{ inputs.use_prebuilt }}
       MODULE_LIMIT: ${{ inputs.module_limit }}
       BOOT_TIMEOUT: ${{ inputs.boot_timeout }}
@@ -583,6 +591,13 @@ jobs:
           # DSM 会把额外 USB 存储命名为 synoboot（与引导盘冲突）、额外 ahci 盘
           # 触发 NCQ 错误，因此模块包直接从引导盘 p3 读取，结果经串口回读。
           # 清单同时保留一份在 $WORKDIR/modtest-meta 供门禁脚本解析并随 artifact 上传。
+          # nic profile：额外虚拟网卡在启动时就位，guest 侧按表从测试包 insmod
+          # 驱动并逐个取 IP（验证我们自己编的 .ko 能真实收发，而非内核内建的）。
+          if [ "${RUN_NIC_PROFILE}" = "true" ]; then
+            sudo mkdir -p "${PART3_PATH}/modtest"
+            sudo cp .github/scripts/modtest/guest/run-nic-tests.sh "${PART3_PATH}/modtest/"
+            sudo cp .github/scripts/modtest/nic-models.tsv "${PART3_PATH}/modtest/"
+          fi
           if [ "${RUN_MODULE_TEST}" = "true" ]; then
             MODTEST_DIR="${PART3_PATH}/modtest"
             META_DIR="$WORKDIR/modtest-meta"
@@ -701,10 +716,32 @@ jobs:
             run_one modtest "${CMD_DIR}/modtest.commands"
           fi
 
+          # 3) nic：额外虚拟网卡取 IP（设备由 render_test_compose.sh 注入，
+          #    驱动从 p3 测试包 insmod；命令文件必须先挂载 p3）
+          if [ "${RUN_NIC_PROFILE}" = "true" ]; then
+            : "${MODULES_KEY:?缺少 MODULES_KEY}"
+            printf '%s\n' \
+              'echo 1 > /proc/sys/kernel/syno_install_flag; mkdir -p /mnt/modtest; cd /dev; blkid synoboot3 2>&1; mount -t ext4 synoboot3 /mnt/modtest; rc=$?; echo "NIC_MOUNT_RC=$rc"; ls /mnt/modtest 2>&1 | head -n 20' \
+              "sh /mnt/modtest/modtest/run-nic-tests.sh ${MODULES_KEY}" \
+              > "${CMD_DIR}/nic.commands"
+            run_one nic "${CMD_DIR}/nic.commands"
+          fi
+
           for p in ${PROFILES}; do
             cp .github/scripts/modtest/probe.commands "${CMD_DIR}/${p}.commands"
             run_one "$p" "${CMD_DIR}/${p}.commands"
           done
+
+      # 网卡取 IP 门禁：六块额外虚拟网卡必须各自绑定驱动并拿到 IPv4。
+      # 与模块门禁分开，避免 nic 日志缺失时把 G-M 系列判据一起拖失败。
+      - name: 网卡取 IP 门禁
+        if: ${{ always() && inputs.run_nic_profile == true }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -I .github/scripts/modtest/check_nic_result.py \
+            --logs /tmp/modtest-logs/nic \
+            --table .github/scripts/modtest/nic-models.tsv
 
       # P0 结果门禁：解析 guest 串口输出，白名单外的失败/缺完成标记/STALE/
       # 内核崩溃/安装集缺口一律让 job 失败。放在采集之后、收尾之前，

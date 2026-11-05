@@ -8,6 +8,7 @@
 # profile：
 #   base / modtest   无额外设备（模块包走引导盘 p3，不需要第二块盘）
 #   virtio-scsi / megaraid / mptsas   注入对应 SCSI 控制器与测试盘
+#   nic              按 modtest/nic-models.tsv 注入额外虚拟网卡（取 IP 验证）
 #
 # 约定：compose 文件放在 rr/ 目录下，volume `./:/storage/alpine`；
 #       scsi-<profile>.img 由调用方放在同目录。
@@ -26,6 +27,25 @@ case "${PROFILE}" in
     EXTRA="-device megasas,id=mr0 -drive file=/storage/alpine/scsi-${PROFILE}.img,media=disk,format=raw,if=none,id=mrdisk -device scsi-hd,drive=mrdisk,bus=mr0.0,channel=0,scsi-id=0,lun=0,rotation_rate=1" ;;
   mptsas)
     EXTRA="-device mptsas1068,id=lsi0 -drive file=/storage/alpine/scsi-${PROFILE}.img,media=disk,format=raw,if=none,id=lsidisk -device scsi-hd,drive=lsidisk,bus=lsi0.0,channel=0,scsi-id=0,lun=0,rotation_rate=1" ;;
+  nic)
+    # 额外虚拟网卡：型号/MAC/网关来自 modtest/nic-models.tsv（唯一来源）。
+    # 每块网卡配独立 user-mode netdev——slirp 自带 DHCP，dhcpstart 由网关
+    # 推出（10.0.N.15）；romfile= 关掉网卡的 option ROM，避免多块网卡带出
+    # 额外 PXE 启动项、拖慢引导或抢占 bootindex。
+    NIC_TABLE="$(cd "$(dirname "$0")/modtest" && pwd)/nic-models.tsv"
+    [ -f "${NIC_TABLE}" ] || { echo "[E] 缺少网卡表 ${NIC_TABLE}" >&2; exit 1; }
+    EXTRA=""
+    idx=0
+    while IFS=$'\t' read -r model mac mods gw; do
+      case "${model}" in
+        ''|'#'*) continue ;;
+      esac
+      idx=$((idx + 1))
+      subnet="${gw%.*}"
+      EXTRA+=" -netdev user,id=nicnet${idx},net=${subnet}.0/24,dhcpstart=${subnet}.15"
+      EXTRA+=" -device ${model},id=nicdev${idx},netdev=nicnet${idx},romfile=,mac=${mac}"
+    done < "${NIC_TABLE}"
+    ;;
   *)
     echo "[E] 未知 profile: ${PROFILE}" >&2
     exit 1 ;;

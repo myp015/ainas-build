@@ -1,0 +1,23 @@
+# 额外虚拟网卡表（ova-test 的 nic profile 唯一来源）
+#
+# 列：QEMU 设备名 <TAB> MAC <TAB> 驱动模块候选（| 分隔的 module 名） <TAB> 网关
+#
+# 约束与理由：
+# - 只能用 QEMU 能模拟、且 DSM 模块包内含驱动的型号；真实芯片（igb/ixgbe/
+#   r8169/r8125/r8168 等）QEMU 无对应设备，只能实机验证。
+# - MAC 必须用群晖厂商前缀 00:11:32：引导 cmdline 的
+#   skip_vender_mac_interfaces=0,1 只放过前两个网口，第 3 个起内核会做厂商
+#   MAC 校验；且不能与 RR 生成的 mac1/mac2（00:11:32:1c:57:aa/ab）重复。
+# - 每个网卡配独立 user-mode netdev（slirp 自带 DHCP 与网关），网关即
+#   10.0.N.1（网段 10.0.N.0/24，dhcpstart=10.0.N.15）；主网卡是 10.0.2.x，
+#   所以从 10.0.3 起避开。
+# - 第三列是模块文件名（去掉 .ko），按候选逐个 insmod，谁绑定算谁：
+#   8139too 只在 4.4 包内有，5.10 包内只有 8139cp；ne2k 的 module 名是
+#   ne2k_pci（下划线），但绑定后的 driver 名会显示成 ne2k-pci，二者不混用。
+# - virtio_net 在官方/自编内核里多为内核内建，脚本见 /sys/module 已存在即跳过。
+virtio-net-pci	00:11:32:1c:57:b1	virtio_net	10.0.3.1
+e1000	00:11:32:1c:57:b2	e1000	10.0.4.1
+e1000e	00:11:32:1c:57:b3	e1000e	10.0.5.1
+rtl8139	00:11:32:1c:57:b4	8139too|8139cp	10.0.6.1
+vmxnet3	00:11:32:1c:57:b5	vmxnet3	10.0.7.1
+ne2k_pci	00:11:32:1c:57:b6	ne2k_pci	10.0.8.1
