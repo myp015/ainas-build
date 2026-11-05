@@ -413,7 +413,11 @@ jobs:
             exit 1
           }
           UPDATE_ASSET="updateall-${RR_TAG}.zip"
-          mv -f "$RAW_UPDATE_ZIP" "$UPDATE_ASSET"
+          # pack_update 已按镜像内版本命名，通常与目标名一致；同名时 mv 会报
+          # "are the same file" 并退出 1，故仅在名称不同时改名
+          if [ "$(basename "$RAW_UPDATE_ZIP")" != "$UPDATE_ASSET" ]; then
+            mv -f "$RAW_UPDATE_ZIP" "$UPDATE_ASSET"
+          fi
           rm -f rr/rr.img
           echo "[INFO] 全型号升级包已生成: ${UPDATE_ASSET}（$(du -h "$UPDATE_ASSET" | cut -f1)）"
           echo "UPDATE_ASSET=${UPDATE_ASSET}" >> "$GITHUB_ENV"
