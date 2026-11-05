@@ -6,9 +6,14 @@
 #   sh /mnt/modtest/modtest/run-nic-tests.sh <modules_key>
 #
 # 模块来源与 modtest 相同：p3 内 modules/<modules_key>.tgz（与本机内核同源）。
-# 额外网卡在启动时就存在，但官方 DSM 系统模块树通常没有 e1000/vmxnet3 等
-# 驱动，这里从测试包 insmod——真正验证的是我们自己编的这份 .ko，而不是
-# 内核里内建的 virtio_net。
+#
+# 驱动来源有两种，脚本不假设是哪一种：
+#   - 目标内核把这些网卡编成内建（=y）：启动时就已绑定，/sys/module 里没有
+#     对应条目，insmod 会被内核拒绝（重复符号），这里只验证内建驱动路径；
+#     官方 DSM 5.10 内核即是如此（实测 e1000/e1000e/vmxnet3/8139cp/ne2k
+#     在启动 ~7s 内全部绑定）。
+#   - 编成模块（=m）且系统未预载：从测试包 insmod，验证的就是我们自己编的
+#     这份 .ko。
 #
 # 安全：只 insmod 网卡驱动（绝不 rmmod 任何模块），DHCP 只对新增网口发起。
 #
@@ -35,13 +40,17 @@ if ! tar xzf "${TGZ}" -C "${WORK}"; then
   exit 1
 fi
 
-# load_mod <module 名>：已在内核里（内建或已加载）直接成功；否则从测试包 insmod
+# load_mod <module 名>：已加载的直接成功；否则从测试包 insmod。
+# 包内文件名可能是连字符形式（ne2k-pci.ko 的模块名是 ne2k_pci），两种都试。
+# 返回 0=已就绪，1=没有该 .ko，2=insmod 失败（多半是内建驱动占用了同名符号）。
 load_mod() {
   m="$1"
   [ -d "/sys/module/${m}" ] && return 0
-  [ -f "${WORK}/${m}.ko" ] || return 1
-  insmod "${WORK}/${m}.ko" 2>/dev/null && return 0
-  return 1
+  f="${WORK}/${m}.ko"
+  [ -f "${f}" ] || f="${WORK}/$(echo "${m}" | tr '_' '-').ko"
+  [ -f "${f}" ] || return 1
+  insmod "${f}" 2>/dev/null && return 0
+  return 2
 }
 
 # 按表加载全部候选驱动：同一设备加载多个候选无害，绑定由内核决定
@@ -52,7 +61,10 @@ while IFS='	' read -r model mac mods gw; do
   old_ifs="${IFS}"
   IFS='|'
   for m in ${mods}; do
-    load_mod "${m}" || true
+    load_mod "${m}"
+    rc=$?
+    # rc=0 已就绪；1=包里没有；2=insmod 失败（内建驱动占用同名符号等）
+    echo "@@NICLOAD|${model}|${m}|rc=${rc}"
   done
   IFS="${old_ifs}"
 done < "${TABLE}"

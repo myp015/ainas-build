@@ -11,8 +11,13 @@
 #      结果经串口回读；
 #   5. 可选 SCSI 控制器 profile（virtio-scsi / megaraid / mptsas）验证驱动；
 #      可选 nic profile 给虚拟机挂 6 块不同型号的虚拟网卡（virtio-net/e1000/
-#      e1000e/rtl8139/vmxnet3/ne2k_pci），从测试包 insmod 驱动并逐个验证
-#      DHCP 取 IP（表见 modtest/nic-models.tsv，门禁见 check_nic_result.py）；
+#      e1000e/rtl8139/vmxnet3/ne2k_pci），逐个验证驱动绑定与 DHCP 取 IP
+#      （表见 modtest/nic-models.tsv，门禁见 check_nic_result.py）。
+#      驱动优先从测试包 insmod；官方 5.10 内核把这几种编成内建（=y），此时
+#      insmod 会被同名符号拒绝，验证到的是内建驱动路径，属预期。
+#      额外网卡会改变 DSM 的网口编号（主 virtio 不再是被安装时记录的 eth0），
+#      Web 端口转发可能不通，所以 nic profile 用 soft 模式等待 Web——超时不
+#      阻塞，串口测试本身不依赖 Web；
 #   6. use_prebuilt=true 时直接复用正式发布 Release 里已安装的成品 OVA
 #      （ainas-ova-<tag> / RROrg-ova-<tag>），跳过 base 构建与 DSM 安装，
 #      仍从 syno-modules 取同一份模块包注入 p3 后逐模块测试。
@@ -689,11 +694,11 @@ jobs:
           esac
 
           run_one() {
-            local profile="$1" cmd="$2"
-            echo "[INFO] profile=${profile}"
+            local profile="$1" cmd="$2" web_mode="${3:-strict}"
+            echo "[INFO] profile=${profile} web_mode=${web_mode}"
             bash .github/scripts/modtest/run_profile.sh \
               "$PWD" "${COMPOSE}" "${profile}" \
-              "${cmd}" "${LOG_DIR}" "${DRIVER}"
+              "${cmd}" "${LOG_DIR}" "${DRIVER}" "${web_mode}"
           }
 
           # 1) base：只做启动日志与设备基线（也是双源对比的干净基线）
@@ -718,13 +723,17 @@ jobs:
 
           # 3) nic：额外虚拟网卡取 IP（设备由 render_test_compose.sh 注入，
           #    驱动从 p3 测试包 insmod；命令文件必须先挂载 p3）
+          #    web_mode=soft：额外网卡会把 DSM 的网口编号整体后移，安装时
+          #    记录的 LAN1 口（eth0）在本次启动里可能变成别的设备，Web 端口
+          #    转发因此可能不通；这里不阻塞，先用串口取现场再做断言。
           if [ "${RUN_NIC_PROFILE}" = "true" ]; then
             : "${MODULES_KEY:?缺少 MODULES_KEY}"
             printf '%s\n' \
               'echo 1 > /proc/sys/kernel/syno_install_flag; mkdir -p /mnt/modtest; cd /dev; blkid synoboot3 2>&1; mount -t ext4 synoboot3 /mnt/modtest; rc=$?; echo "NIC_MOUNT_RC=$rc"; ls /mnt/modtest 2>&1 | head -n 20' \
+              'echo "@@NICDIAG|begin"; echo "--addr--"; ip -4 -o addr show 2>&1; echo "--route--"; ip route show 2>&1; echo "--netdev--"; for d in /sys/class/net/*; do [ -r "$d/address" ] || continue; echo "$(basename "$d") $(cat "$d/address") $(basename "$(readlink "$d/device/driver" 2>/dev/null)" 2>/dev/null || echo -)"; done; echo "--listen--"; netstat -lnt 2>/dev/null | grep -E ":5000|:5001" || true; echo "@@NICDIAG|end"' \
               "sh /mnt/modtest/modtest/run-nic-tests.sh ${MODULES_KEY}" \
               > "${CMD_DIR}/nic.commands"
-            run_one nic "${CMD_DIR}/nic.commands"
+            run_one nic "${CMD_DIR}/nic.commands" soft
           fi
 
           for p in ${PROFILES}; do
