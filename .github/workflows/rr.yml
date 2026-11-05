@@ -65,13 +65,17 @@ on:
         type: boolean
         default: false
       overwrite_update:
-        description: "覆盖 update 包（默认复用 Release 中已存在的 updateall-<型号>-<RR版本>.zip / updateall-<RR版本>.zip）"
+        description: "覆盖所选型号的 update 包（默认复用 Release 中已存在的 updateall-<型号>-<RR版本>.zip）"
         type: boolean
         default: false
       build_rr_original:
         description: "生成原版 RR 镜像（rr-版本号.img.zip，跳过 Docker 编译）默认开启，可取消"
         type: boolean
         default: true
+      overwrite_updateall:
+        description: "覆盖全型号 update 包（默认复用 Release 中已存在的 updateall-<RR版本>.zip）"
+        type: boolean
+        default: false
       rr_version:
         description: "RR version (可选,留空=latest;指定版本必须在所选源中存在，不做回退)"
         type: string
@@ -223,7 +227,7 @@ jobs:
         shell: bash
         env:
           ACTION_TOKEN: ${{ secrets.AiNas }}
-          OVERWRITE_UPDATE: ${{ inputs.overwrite_update }}
+          OVERWRITE_UPDATEALL: ${{ inputs.overwrite_updateall }}
         run: |
           set -euo pipefail
           : "${ACTION_TOKEN:?缺少 ACTION_TOKEN}"
@@ -236,7 +240,7 @@ jobs:
           # 超过 2GB 时 Release 只存分卷，判定存在性时与 base 检查保持一致
           if { printf '%s\n' "$ASSET_NAMES" | grep -Fxq "$UPDATE_ASSET" \
                || printf '%s\n' "$ASSET_NAMES" | grep -Fxq "${UPDATE_ASSET}.part.000"; } \
-             && [ "${OVERWRITE_UPDATE:-false}" != "true" ]; then
+             && [ "${OVERWRITE_UPDATEALL:-false}" != "true" ]; then
             echo "[INFO] Release ${RELEASE_TAG}（源=${SOURCE}）已存在 ${UPDATE_ASSET}，复用（未勾选覆盖）"
             echo "rebuild=false" >> "$GITHUB_OUTPUT"
           else
