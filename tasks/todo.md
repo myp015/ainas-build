@@ -195,3 +195,39 @@ CI 验证：
 - [x] run 41978110420（选项合并后，overwrite=false）：prepare-base 的 base/全型号包检查
       均判定复用并跳过全部构建步骤；原版镜像 job 检测到 `ainas_rr-26.11.1.img.zip` 已存在，
       按预期跳过编译与发布。
+
+# Task#221 全平台 SCSI/SAS 不崩 + 启动日志 LKM 异常核对（2026-11-05）
+
+## 背景
+用户要求：所有平台全部跑一遍测试，加挂 SCSI/SAS 硬盘验证驱动不崩；同时核对所有平台
+启动日志里是否有模块/LKM 异常。口径：官方 13 平台 + custom 4 平台（DSM 7.3.2）、
+SCSI 只跑 SAS 两型（megaraid + mptsas）、崩溃硬失败/识别问题先报告。
+
+## 计划与进度
+- [x] 1. `scsi_profiles` 新增「仅 SAS 两型」（megaraid mptsas）
+- [x] 2. `probe.commands` 增加结构化采集（`@@SCSIHOST|`、`@@BLK|`）与启动期异常 grep
+- [x] 3. `gate_common.py`：按路径加载 parse_results 正则与白名单 + 命令回显过滤
+- [x] 4. `check_scsi_result.py` + `scsi-models.tsv` + `scsi-allowlist.tsv`：
+      G-S1 采集完整性 / G-S2 崩溃（模块归属不豁免，内核归属需 RR 对照证据）/
+      G-S3 驱动加载 / G-S4 proc_name / G-S5 测试盘识别（后三项只报告）
+- [x] 5. `check_bootlog.py` + `bootlog-allowlist.tsv`：硬失败=崩溃/Unknown symbol/
+      真 vermagic/GPL-only/Loading modules failed；BUILTIN_DUP 按 env-fail-allowlist
+      降级；firmware/modprobe/taint/WARNING 只报告；空采集硬失败
+- [x] 6. `platform-representatives.tsv` + `plan_test_sources.sh` 的 `all_platforms`
+      （13 官方 + 4 custom，broadwellntbap 显式排除；与 models.json 双向覆盖校验）
+- [x] 7. `ova-test.yml` 接入：`all_platforms`/`run_bootlog_gate` 输入、两个门禁步骤
+      （always()）、plan 阶段两个 selftest、artifact 追加 `/tmp/bootlog-check`
+- [x] 8. 本地验证：两个脚本 selftest 全过；历史 artifact 回放
+      （SA6400 全 PASS；mptsas 2G 盘未识别只报告）；4.4.302 DS918+ 安装日志回放
+      只命中 TAINT/MODPROBE_MISSING/gpio WARNING（均只报告）
+- [ ] 9. CI 冒烟：SA6400 + 仅 SAS 两型 + run_bootlog_gate
+- [ ] 10. 全矩阵：官方 13 平台、custom 4 平台（use_prebuilt=false、run_bootlog_gate=true）
+- [ ] 11. panic 平台逐个 RR 对照（RR 复现同栈才登记 scsi-allowlist）
+- [ ] 12. 收口：环境性启动日志噪声登记 bootlog-allowlist；模块内崩溃按源码修复
+
+## 关键事实
+- 4.4.302 `sd_probe` 经 DSM 定制 `syno_usb_info_enum` 在非 USB SCSI host 上解引用
+  NULL（v1000/broadwellnkv2/purley 已登记 env-fail-allowlist），SAS 盘走同一路径，
+  三平台预计 panic，需 RR 对照。
+- apollolake 4.4.302 包内无 coretemp/k10temp（RR 同样没有），启动脚本加载失败属
+  环境性，第一轮只报告。

@@ -1,0 +1,36 @@
+# 全平台代表型号表（plan_test_sources.sh 的 ALL_PLATFORMS=true 读取）
+#
+# 为什么一个平台只挑一个型号：模块包 key 是 <platform>-<line>-<kver>，
+# 同平台各型号共用同一份模块包与内核，跑一个代表型号即可覆盖该平台的
+# 模块/LKM 面；全型号逐个跑代价不可接受（13 平台 × N 型号）。
+#
+# 格式（TAB 分隔）：
+#   <platform>	<model>	<kernels>
+#     kernels = official / custom / official,custom（逗号分隔）
+#   !exclude	<platform>	<reason>   显式排除项（触发覆盖校验时不报“表漏了”）
+#
+# 覆盖校验：models.json 中所有对当前 DSM_LINE 有 productvers 条目的平台，
+# 必须等于「本表 rows ∪ exclude 行」的并集；少一个/多一个都直接退出 1，
+# 避免 models.json 新增平台后静默少跑（这是本表存在的第二个原因）。
+#
+# 型号选择依据：
+#   - 优先选 DSM 7.3 官方确有 PAT 的常规型号；
+#   - broadwell 用 FS3400 而不是 DS3617xs：DS3617xs 只有 DSM 6.2 的 PAT，
+#     plan_sources.sh 在 7.x 会直接报错；
+#   - 4 个 custom（cks）平台沿用其官方代表型号，只是换 KERNEL=custom。
+apollolake	DS918+	official
+broadwell	FS3400	official
+broadwellnk	DS3622xs+	official
+broadwellnkv2	FS3410	official
+denverton	DS1819+	official
+geminilake	DS920+	official
+purley	FS6400	official
+r1000	DS923+	official
+v1000	DS1621+	official
+epyc7002	SA6400	official,custom
+geminilakenk	DS425+	official,custom
+r1000nk	DS725+	official,custom
+v1000nk	DS925+	official,custom
+# broadwellntbap：SA3200D/SA3400D 双控机型在 QEMU 里无法完成 DSM 安装
+# （历史 Task#218 实测进不去系统），保留记录但不纳入轮次；环境具备后去掉本行。
+!exclude	broadwellntbap	双控机型 QEMU 无法完成安装（Task#218 实测）

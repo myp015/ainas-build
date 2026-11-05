@@ -21,6 +21,8 @@
 #   MODULES_VERSION   模块包版本（留空=取 myp015/syno-modules 最新 Release）
 #   KERNEL            official|custom（custom=aina-cks 自编 5.10.55 内核）
 #   CKS_VERSION       ainas-cks Release 版本（custom 时留空=用 rr.img p3 内置 cks 快照）
+#   ALL_PLATFORMS     true=按 .github/scripts/modtest/platform-representatives.tsv
+#                     每个平台取一个代表型号（与 TEST_MODELS 互斥）；覆盖不全即退出 1
 #
 # 输出（GITHUB_OUTPUT）：
 #   base_tasks       [{source, rr_tag, rr_asset_url, release_tag, base_asset, docker_image, docker_tag}]
@@ -92,6 +94,87 @@ fi
   echo "[E] 无法解析 syno-modules 模块包 Release 版本" >&2; exit 1; }
 export USE_PREBUILT MODULES_RELEASE_TAG PREBUILT_VERSIONS DSM_VERSION RR_SOURCE
 export KERNEL CKS_VERSION
+
+# ── 全平台模式：按代表型号表展开 TEST_MODELS ───────────────────────────
+# 一个平台一个代表型号即可覆盖该平台的模块包（key 是 platform-line-kver）。
+# 表与 models.json 做双向覆盖校验：新增平台/表项过期都直接退出 1，
+# 防止静默少跑。
+ALL_PLATFORMS="${ALL_PLATFORMS:-false}"
+case "${ALL_PLATFORMS}" in
+  true|false) ;;
+  *) echo "[E] ALL_PLATFORMS 只允许 true/false: ${ALL_PLATFORMS}" >&2; exit 1 ;;
+esac
+PLATFORM_TABLE="${PLATFORM_TABLE:-${SCRIPT_DIR}/modtest/platform-representatives.tsv}"
+if [ "${ALL_PLATFORMS}" = "true" ]; then
+  if [ -n "${TEST_MODELS:-}" ]; then
+    echo "[E] all_platforms 与 test_models 互斥，只能二选一" >&2
+    exit 1
+  fi
+  [ -f "${PLATFORM_TABLE}" ] || {
+    echo "[E] 找不到代表型号表: ${PLATFORM_TABLE}" >&2; exit 1; }
+  TEST_MODELS="$(python3 - "${PLATFORM_TABLE}" "${MODELS_JSON}" \
+    "${DSM_LINE}" "${KERNEL}" <<'PY'
+import json
+import sys
+
+table, models_json, line, kernel = sys.argv[1:5]
+
+rows, excludes = [], {}
+with open(table, encoding="utf-8") as f:
+    for raw in f:
+        s = raw.rstrip("\n")
+        if not s.strip() or s.lstrip().startswith("#"):
+            continue
+        parts = s.split("\t")
+        if parts[0] == "!exclude" and len(parts) >= 3:
+            excludes[parts[1]] = parts[2]
+            continue
+        if len(parts) != 3:
+            sys.exit("[E] 代表型号表格式错误（应为 3 列 TAB）: %r" % s)
+        rows.append({"platform": parts[0], "model": parts[1],
+                     "kernels": [k for k in parts[2].split(",") if k]})
+
+with open(models_json, encoding="utf-8") as f:
+    models = json.load(f)
+
+expected = {p for p, e in models.items()
+            if isinstance(e, dict) and e.get("productvers", {}).get(line)}
+if not expected:
+    sys.exit("[E] models.json 中没有任何平台支持 DSM %s" % line)
+
+known = {r["platform"] for r in rows}
+missing = sorted(expected - known - set(excludes))
+stale = sorted(known - expected)
+if missing or stale:
+    sys.exit("[E] 代表型号表与 models.json 不匹配：缺少 %s，多余 %s"
+             % (", ".join(missing) or "-", ", ".join(stale) or "-"))
+
+sel = [r for r in rows if kernel in r["kernels"]]
+sel_platforms = {r["platform"] for r in sel}
+if kernel == "custom":
+    cks = {"epyc7002", "geminilakenk", "r1000nk", "v1000nk"}
+    want = expected & cks
+    bad = sorted(sel_platforms - cks)
+    if bad:
+        sys.exit("[E] custom 模式下列出了非 cks 平台: %s" % ", ".join(bad))
+else:
+    want = expected - set(excludes)
+if sel_platforms != want:
+    sys.exit("[E] KERNEL=%s 时应覆盖 %d 个平台，表只列出 %d 个：缺少 %s"
+             % (kernel, len(want), len(sel_platforms),
+                ", ".join(sorted(want - sel_platforms)) or "-"))
+
+out = []
+for r in sel:
+    e = models.get(r["platform"], {})
+    if r["model"] not in e.get("models", []):
+        sys.exit("[E] %s 不属于平台 %s（models.json）" % (r["model"], r["platform"]))
+    out.append(r["model"])
+print(",".join(out))
+PY
+  )" || exit 1
+  echo "[INFO] all_platforms 展开 $(printf '%s' "${TEST_MODELS}" | tr ',' '\n' | wc -l) 个型号: ${TEST_MODELS}"
+fi
 
 # TEST_MODELS（逗号分隔）优先于 ALL_MODELS/MODEL_*：
 # 阶段 1 只跑一个型号，脚本把它翻译成 plan_sources.sh 认识的开关。

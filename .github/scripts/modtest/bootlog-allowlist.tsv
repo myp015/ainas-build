@@ -1,0 +1,16 @@
+# 启动日志门禁白名单（check_bootlog.py 读取；格式与 env-fail-allowlist.tsv 一致）
+#
+# 8 列（TAB 分隔）：platform  line  kver  model  kernel  name  category  reason
+# 除 reason 外均支持 glob；* 表示通配。
+#
+# 只能登记「只报告」类（report 级），用于静音已知环境噪声：
+#   FIRMWARE_FAIL      固件请求失败（QEMU 无对应硬件）
+#   MODPROBE_MISSING   启动脚本尝试加载的可选模块不在包里（如 coretemp）
+#   TAINT              Out-of-tree/Proprietary 模块的 taint 提示
+#   DMESG_WARNING      内核 WARNING（如 syno gpio 提示）
+# 硬失败类别（KERNEL_FAULT / UNKNOWN_SYMBOL / VERMAGIC / GPL_ONLY /
+# LOADING_FAILED）**永不读取本表**：确需豁免必须改判据本身并留下实证。
+#
+# 第一条登记须等第一轮全平台实测后按真实命中补；未实测前不预先填。
+# 示例（取消注释并写明跨平台实测依据）：
+# *	*	*	*	*	*	FIRMWARE_FAIL	QEMU 无对应硬件，固件请求失败属环境事实（全平台实测）

@@ -10,6 +10,8 @@
 #   4. modtest profile 挂载引导盘 p3（/dev/synoboot3, ext4），安全档逐个 insmod 模块，
 #      结果经串口回读；
 #   5. 可选 SCSI 控制器 profile（virtio-scsi / megaraid / mptsas）验证驱动；
+#      「仅 SAS 两型」= megaraid + mptsas；采集后由 check_scsi_result.py 做
+#      驱动加载/盘识别/崩溃归因门禁（崩溃硬失败，识别问题只报告）；
 #      可选 nic profile 给虚拟机挂 6 块不同型号的虚拟网卡（virtio-net/e1000/
 #      e1000e/rtl8139/vmxnet3/ne2k_pci），逐个验证驱动绑定与 DHCP 取 IP
 #      （表见 modtest/nic-models.tsv，门禁见 check_nic_result.py）。
@@ -21,6 +23,11 @@
 #   6. use_prebuilt=true 时直接复用正式发布 Release 里已安装的成品 OVA
 #      （ainas-ova-<tag> / RROrg-ova-<tag>），跳过 base 构建与 DSM 安装，
 #      仍从 syno-modules 取同一份模块包注入 p3 后逐模块测试。
+#   7. all_platforms=true 时按 modtest/platform-representatives.tsv 每个平台
+#      取一个代表型号（与 test_models 互斥）；表与 models.json 覆盖不一致即失败。
+#   8. run_bootlog_gate=true 时用 check_bootlog.py 核对 base/SCSI/nic 启动日志
+#      与安装期日志里的模块/LKM 异常（Unknown symbol/vermagic/崩溃硬失败，
+#      BUILTIN_DUP 按 env-fail-allowlist 降级，固件/modprobe/taint 只报告）。
 #
 # 阶段 1 默认：rr_source=ainas、test_models=SA6400、scsi_profiles=跳过。
 name: Build RR-OVA Test
@@ -37,9 +44,13 @@ on:
           - both
         default: ainas
       test_models:
-        description: "测试型号（逗号分隔，阶段 1 只填 SA6400）"
+        description: "测试型号（逗号分隔，阶段 1 只填 SA6400；all_platforms 打开时忽略）"
         type: string
         default: "SA6400"
+      all_platforms:
+        description: "全平台：按代表型号表每个平台跑一个型号（与 test_models 互斥）"
+        type: boolean
+        default: false
       custom_models:
         description: "自定义型号（工作流未列出的，多个用逗号分隔）"
         type: string
@@ -67,6 +78,7 @@ on:
         options:
           - "跳过"
           - "全部三型"
+          - "仅 SAS 两型"
           - "仅 virtio-scsi"
           - "仅 megaraid"
           - "仅 mptsas"
@@ -85,6 +97,10 @@ on:
         default: "0"
       run_nic_profile:
         description: "额外虚拟网卡取 IP 验证（6 种 QEMU 网卡，见 modtest/nic-models.tsv）"
+        type: boolean
+        default: false
+      run_bootlog_gate:
+        description: "启动日志模块/LKM 异常核对（未知符号/vermagic/崩溃硬失败）"
         type: boolean
         default: false
       boot_timeout:
@@ -138,6 +154,14 @@ jobs:
           token: ${{ secrets.AiNas }}
           path: .2in1-plan
 
+      # 门禁脚本自带夹具自测：宁可 plan 阶段失败，也不要带着解析缺陷跑整轮矩阵。
+      - name: 门禁脚本自测
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -I .github/scripts/modtest/check_scsi_result.py --selftest
+          python3 -I .github/scripts/modtest/check_bootlog.py --selftest
+
       - name: 规划源与测试任务
         id: plan
         shell: bash
@@ -146,7 +170,10 @@ jobs:
           RR_SOURCE: ${{ inputs.rr_source }}
           RR_VERSION: ${{ inputs.rr_version }}
           DSM_VERSION: ${{ inputs.dsm_version }}
-          TEST_MODELS: ${{ inputs.test_models }}
+          # all_platforms 优先：此时 test_models 的默认值视为无效，避免因
+          # 忘了清空默认 SA6400 撞上脚本的互斥检查。
+          TEST_MODELS: ${{ inputs.all_platforms && '' || inputs.test_models }}
+          ALL_PLATFORMS: ${{ inputs.all_platforms }}
           CUSTOM_MODELS: ${{ inputs.custom_models }}
           USE_PREBUILT: ${{ inputs.use_prebuilt }}
           PREBUILT_VERSIONS: ${{ inputs.prebuilt_versions }}
@@ -365,6 +392,7 @@ jobs:
       RUN_BASE_PROFILE: ${{ inputs.run_base_profile }}
       RUN_MODULE_TEST: ${{ inputs.run_module_test }}
       RUN_NIC_PROFILE: ${{ inputs.run_nic_profile }}
+      RUN_BOOTLOG_GATE: ${{ inputs.run_bootlog_gate }}
       PREBUILT: ${{ inputs.use_prebuilt }}
       MODULE_LIMIT: ${{ inputs.module_limit }}
       BOOT_TIMEOUT: ${{ inputs.boot_timeout }}
@@ -686,6 +714,7 @@ jobs:
 
           case "${SCSI_PROFILES}" in
             "全部三型") PROFILES="virtio-scsi megaraid mptsas" ;;
+            "仅 SAS 两型") PROFILES="megaraid mptsas" ;;
             "仅 virtio-scsi") PROFILES="virtio-scsi" ;;
             "仅 megaraid") PROFILES="megaraid" ;;
             "仅 mptsas") PROFILES="mptsas" ;;
@@ -740,6 +769,57 @@ jobs:
             cp .github/scripts/modtest/probe.commands "${CMD_DIR}/${p}.commands"
             run_one "$p" "${CMD_DIR}/${p}.commands"
           done
+
+      # SCSI/SAS 设备与崩溃门禁：控制器驱动必须加载、测试盘应被识别、
+      # dmesg 不得出现崩溃。崩溃按 IP 归属判：模块内 ⇒ 我们的缺陷硬失败
+      # （不豁免）；内核内建 ⇒ 只有 scsi-allowlist.tsv 里带 RR 对照 run id
+      # 的条目才降级（用户口径：RR 也 panic 才允许豁免）。
+      - name: SCSI/SAS 设备与崩溃门禁
+        if: ${{ always() && inputs.scsi_profiles != '跳过' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "${SCSI_PROFILES}" in
+            "全部三型") P="virtio-scsi megaraid mptsas" ;;
+            "仅 SAS 两型") P="megaraid mptsas" ;;
+            "仅 virtio-scsi") P="virtio-scsi" ;;
+            "仅 megaraid") P="megaraid" ;;
+            "仅 mptsas") P="mptsas" ;;
+            *) echo "[E] 未知 scsi_profiles: ${SCSI_PROFILES}" >&2; exit 1 ;;
+          esac
+          python3 -I .github/scripts/modtest/check_scsi_result.py \
+            --logs /tmp/modtest-logs --cmds /tmp/modtest-logs/cmds \
+            --profiles "$P" \
+            --table .github/scripts/modtest/scsi-models.tsv \
+            --allowlist .github/scripts/modtest/scsi-allowlist.tsv \
+            --platform "$PLATFORM" --line "$LINE" --kver "$KVER" \
+            --model "$MODEL" --kernel "$KERNEL" \
+            --out /tmp/modtest-logs/scsi-result.json
+
+      # 启动日志 LKM 异常核对：扫 base/SCSI/nic 的串口采集与安装期
+      # serial_full/messages 日志。Unknown symbol / 真 vermagic / GPL-only /
+      # Loading modules failed / 崩溃 = 硬失败；BUILTIN_DUP 按
+      # env-fail-allowlist 降级；firmware / modprobe 找不到可选模块 / taint
+      # 只报告（第一轮全平台实测后再评估是否收紧）。
+      - name: 启动日志 LKM 异常核对
+        if: ${{ always() && inputs.run_bootlog_gate == true }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          EXTRA=()
+          if [ "${PREBUILT:-false}" = "true" ]; then
+            # 预装成品模式没有安装期日志，允许缺失（只核对 profile 采集）
+            EXTRA+=(--install-optional)
+          fi
+          python3 -I .github/scripts/modtest/check_bootlog.py \
+            --logs /tmp/modtest-logs --cmds /tmp/modtest-logs/cmds \
+            --profiles "base megaraid mptsas virtio-scsi nic" \
+            --install-logs /tmp/dsm-install/logs "${EXTRA[@]}" \
+            --module-allowlist .github/scripts/modtest/env-fail-allowlist.tsv \
+            --allowlist .github/scripts/modtest/bootlog-allowlist.tsv \
+            --platform "$PLATFORM" --line "$LINE" --kver "$KVER" \
+            --model "$MODEL" --kernel "$KERNEL" \
+            --out /tmp/bootlog-check/bootlog-result.json
 
       # 网卡取 IP 门禁：六块额外虚拟网卡必须各自绑定驱动并拿到 IPv4。
       # 与模块门禁分开，避免 nic 日志缺失时把 G-M 系列判据一起拖失败。
@@ -817,6 +897,7 @@ jobs:
           name: modtest-${{ matrix.source }}-${{ matrix.model_slug }}-${{ inputs.kernel }}
           path: |
             /tmp/modtest-logs
+            /tmp/bootlog-check
             /tmp/dsm-install/logs
             modtest-meta
           if-no-files-found: warn

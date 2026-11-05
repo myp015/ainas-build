@@ -16,5 +16,15 @@ dmesg | grep -iE 'megaraid|mptsas|mptspi|virtio_scsi|scsi host|Attached SCSI|scs
 ls -l /sys/block
 cat /proc/partitions
 for b in /sys/block/*; do echo "$b vendor=$(cat $b/device/vendor 2>/dev/null) model=$(cat $b/device/model 2>/dev/null) size=$(cat $b/size 2>/dev/null)"; done
-for m in virtio_scsi megaraid_sas mptsas mptspi vmw_pvscsi; do echo "$m srcversion=$(cat /sys/module/$m/srcversion 2>/dev/null || echo absent)"; done
+for m in virtio_scsi megaraid_sas megaraid_sas_pdoff mptsas mptspi vmw_pvscsi; do echo "$m srcversion=$(cat /sys/module/$m/srcversion 2>/dev/null || echo absent)"; done
 dmesg | tail -n 500
+# 结构化采集（门禁脚本优先读这几行；旧 artifact 走回退格式）：
+#   @@SCSIHOST|hostN|proc_name|device 路径 —— host 与盘归属的唯一可靠依据
+#   @@BLK|设备名|扇区数|vendor|model|所属 hostN —— 用 ls -l 符号链接取 host，
+#   因为 busybox 的 readlink -f 不一定可用；拿不到时留空，门禁只做信息展示
+for h in /sys/class/scsi_host/host*; do echo "@@SCSIHOST|${h##*/}|$(cat $h/proc_name 2>/dev/null)|$(readlink -f $h/device 2>/dev/null)"; done
+for b in /sys/block/*; do l=$(ls -l "$b" 2>/dev/null); hn=$(printf '%s' "$l" | sed -n 's#.*/host\([0-9][0-9]*\)/.*#\1#p'); echo "@@BLK|${b##*/}|$(cat $b/size 2>/dev/null)|$(cat $b/device/vendor 2>/dev/null)|$(cat $b/device/model 2>/dev/null)|${hn}"; done
+# 定向故障行：dmesg tail 500 在 5.10 大日志下可能截掉早期 Oops/符号异常
+dmesg | grep -iE 'BUG:|Oops|Kernel panic|Unable to handle|general protection|Unknown symbol|Invalid module format|GPL-only|exports duplicate symbol|Loading modules failed' | tail -n 400
+tail -c 100000 /var/log/messages 2>/dev/null | grep -iE 'Unknown symbol|Invalid module format|GPL-only|exports duplicate symbol|Loading modules failed|modprobe.*not found' | tail -n 400
+echo "@@PROBE_DONE@@"

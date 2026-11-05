@@ -1,0 +1,18 @@
+# SCSI/SAS 门禁崩溃豁免表（check_scsi_result.py 读取）
+#
+# 格式（TAB 分隔）：
+#   platform  profile  verdict  reason  evidence
+#
+# 登记纪律（用户 2026-11-05 定稿）：
+#   1. 崩溃 IP 归属到**模块**（dmesg IP/RIP 行带 [模块名]）⇒ 一律硬失败，
+#      不得登记豁免；按自主修 Bug 流程定位到具体 .ko/源码。
+#   2. 崩溃 IP 落在内核内建代码（无 [模块] 归属）⇒ 先做 RR 对照：
+#      rr_source=RROrg、同型号/同 DSM 版本/同 profile、modules_version 与主 run
+#      一致、use_prebuilt=false。**RR 复现同一栈**才允许在此登记，
+#      evidence 必须写 RR run id；RR 不 panic ⇒ 仍是我们的问题，不得豁免。
+#   3. 本表初始为空，只登记有实证的条目；一条只覆盖一个 (platform, profile)。
+#
+# platform 支持 glob（fnmatch），profile 精确匹配。
+#
+# 示例（仅在 RR 复现后启用，取消注释并填 run id）：
+# v1000	megaraid	KERNEL_INTERNAL	4.4.302 sd_probe syno_usb_info_enum 空指针（RR run <id> 同栈）	<run id>
