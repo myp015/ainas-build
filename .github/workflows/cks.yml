@@ -297,57 +297,54 @@ jobs:
           # 导出 intel_auxiliary_device_init；i40e/iavf 只允许 U 引用、不得再导出
           # （双份 bus 会重复 bus_register 导致 EEXIST）；modules.dep 必须记录
           # 两个消费者到 companion 的硬依赖。
+          # i40e/iavf 实际引用两个导出（auxiliary_device_init 与
+          # __auxiliary_device_add 经 AUX_PREFIX 重命名），两者都要校验：
+          # companion 必须有 T，消费者必须有 U 且不得再出现 T。
+          AUX_SYMS="intel_auxiliary_device_init intel___auxiliary_device_add"
           if [ -f "${MODULES_DIR}/i40e.ko" ] || [ -f "${MODULES_DIR}/iavf.ko" ]; then
             [ -f "${MODULES_DIR}/intel_auxiliary.ko" ] || {
               echo "[E] intel_auxiliary.ko missing (i40e/iavf depend on it)" >&2
               exit 1
             }
             if command -v nm >/dev/null 2>&1; then
-              nm "${MODULES_DIR}/intel_auxiliary.ko" | grep -qE " T intel_auxiliary_device_init$" || {
-                echo "[E] intel_auxiliary.ko does not export intel_auxiliary_device_init" >&2
-                exit 1
-              }
-            fi
-            # i40e.ko: must depend on companion, must reference (U) not export (T)
-            if [ -f "${MODULES_DIR}/i40e.ko" ]; then
-              DEPS="$(modinfo -F depends "${MODULES_DIR}/i40e.ko" 2>/dev/null | sed 's/,/ /g')"
-              echo " ${DEPS} " | grep -q " intel_auxiliary " || {
-                echo "[E] i40e.ko does not depend on intel_auxiliary" >&2
-                exit 1
-              }
-              if command -v nm >/dev/null 2>&1; then
-                nm "${MODULES_DIR}/i40e.ko" | grep -qE " T intel_auxiliary_device_init$" && {
-                  echo "[E] i40e.ko still folds auxiliary.o (duplicate auxiliary bus)" >&2
+              for S in ${AUX_SYMS}; do
+                nm "${MODULES_DIR}/intel_auxiliary.ko" | grep -qE " T ${S}$" || {
+                  echo "[E] intel_auxiliary.ko does not export T ${S}" >&2
                   exit 1
                 }
-                nm "${MODULES_DIR}/i40e.ko" | grep -qE " U intel_auxiliary_device_init$" || {
-                  echo "[E] i40e.ko missing U intel_auxiliary_device_init" >&2
-                  exit 1
-                }
-              fi
+              done
             fi
-            # iavf.ko: must depend on companion (not i40e), must not fold auxiliary.o
-            if [ -f "${MODULES_DIR}/iavf.ko" ]; then
-              DEPS="$(modinfo -F depends "${MODULES_DIR}/iavf.ko" 2>/dev/null | sed 's/,/ /g')"
-              echo " ${DEPS} " | grep -q " intel_auxiliary " || {
-                echo "[E] iavf.ko does not depend on intel_auxiliary" >&2
-                exit 1
-              }
-              echo " ${DEPS} " | grep -q " i40e " && {
-                echo "[E] iavf.ko must not depend on i40e (companion provides the bus)" >&2
-                exit 1
-              }
-              if command -v nm >/dev/null 2>&1; then
-                nm "${MODULES_DIR}/iavf.ko" | grep -qE " T intel_auxiliary_device_init$" && {
-                  echo "[E] iavf.ko must not fold auxiliary.o (duplicate auxiliary bus)" >&2
-                  exit 1
-                }
-              fi
-            fi
-            # modules.dep 硬依赖：两个消费者都须指向 companion（按行首精确匹配，
-            # 依赖顺序不固定，只查行内出现 " intel_auxiliary.ko"）
+            # 两个消费者：depends=intel_auxiliary（iavf 不得再依赖 i40e）、
+            # 符号只许 U 不许 T、modules.dep 必须记录到 companion 的硬依赖。
             for M in i40e.ko iavf.ko; do
               [ -f "${MODULES_DIR}/${M}" ] || continue
+              DEPS="$(modinfo -F depends "${MODULES_DIR}/${M}" 2>/dev/null | sed 's/,/ /g')" || {
+                echo "[E] modinfo -F depends failed for ${M}" >&2
+                exit 1
+              }
+              echo " ${DEPS} " | grep -q " intel_auxiliary " || {
+                echo "[E] ${M} does not depend on intel_auxiliary" >&2
+                exit 1
+              }
+              if [ "${M}" = "iavf.ko" ]; then
+                echo " ${DEPS} " | grep -q " i40e " && {
+                  echo "[E] iavf.ko must not depend on i40e (companion provides the bus)" >&2
+                  exit 1
+                }
+              fi
+              if command -v nm >/dev/null 2>&1; then
+                for S in ${AUX_SYMS}; do
+                  nm "${MODULES_DIR}/${M}" | grep -qE " T ${S}$" && {
+                    echo "[E] ${M} still folds auxiliary bus (T ${S} present)" >&2
+                    exit 1
+                  }
+                  nm "${MODULES_DIR}/${M}" | grep -qE " U ${S}$" || {
+                    echo "[E] ${M} missing U ${S}" >&2
+                    exit 1
+                  }
+                done
+              fi
+              # 按行首精确匹配，依赖顺序不固定，只查行内出现 " intel_auxiliary.ko"
               awk -v p="${M}:" 'substr($0, 1, length(p)) == p && index($0, " intel_auxiliary.ko") { ok = 1 } END { exit !ok }' "${DEPFILE}" || {
                 echo "[E] modules.dep missing ${M} -> intel_auxiliary.ko" >&2
                 exit 1

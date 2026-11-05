@@ -144,28 +144,42 @@ jobs:
           # RR cks 成品一致），i40e/iavf 的 modinfo depends=intel_auxiliary，不得再
           # 折叠 auxiliary.o（双份 bus_register 会 EEXIST）。edc59276 曾停编 i40e
           # 却留 IAVF=m，导致 iavf 的 intel_auxiliary_* UND 悬空（run 39551787486）。
+          #
+          # 上机报错实测两个符号同时缺失（device_init 与 __auxiliary_device_add，
+          # 后者经 AUX_PREFIX 重命名为 intel___auxiliary_device_add），因此两个都要查：
+          # companion 各须有 T；消费者各须有 U 且不得出现 T。
+          AUX_SYMS="intel_auxiliary_device_init intel___auxiliary_device_add"
           if [ -f "${ROOT_PATH}/modules/i40e.ko" ] || [ -f "${ROOT_PATH}/modules/iavf.ko" ]; then
             [ -f "${ROOT_PATH}/modules/intel_auxiliary.ko" ] || {
               echo "[E] intel_auxiliary.ko 缺失（i40e/iavf 依赖它）" >&2; exit 1; }
-            nm --defined-only "${ROOT_PATH}/modules/intel_auxiliary.ko" | \
-              /bin/grep -q " T intel_auxiliary_device_init$" || {
-              echo "[E] intel_auxiliary.ko 未导出 intel_auxiliary_device_init" >&2; exit 1; }
-            if [ -f "${ROOT_PATH}/modules/i40e.ko" ]; then
-              modinfo -F depends "${ROOT_PATH}/modules/i40e.ko" | tr ',' ' ' | xargs -n1 | \
-                /bin/grep -qx intel_auxiliary || {
-                echo "[E] i40e.ko 未依赖 intel_auxiliary" >&2; exit 1; }
-              nm --defined-only "${ROOT_PATH}/modules/i40e.ko" | \
-                /bin/grep -q " T intel_auxiliary_device_init$" && {
-                echo "[E] i40e.ko 仍折叠 auxiliary.o（重复 auxiliary bus）" >&2; exit 1; }
+            if command -v nm >/dev/null 2>&1; then
+              for S in ${AUX_SYMS}; do
+                nm --defined-only "${ROOT_PATH}/modules/intel_auxiliary.ko" | \
+                  /bin/grep -q " T ${S}$" || {
+                  echo "[E] intel_auxiliary.ko 未导出 T ${S}" >&2; exit 1; }
+              done
             fi
-            if [ -f "${ROOT_PATH}/modules/iavf.ko" ]; then
-              modinfo -F depends "${ROOT_PATH}/modules/iavf.ko" | tr ',' ' ' | xargs -n1 | \
-                /bin/grep -qx intel_auxiliary || {
-                echo "[E] iavf.ko 未依赖 intel_auxiliary" >&2; exit 1; }
-              modinfo -F depends "${ROOT_PATH}/modules/iavf.ko" | tr ',' ' ' | xargs -n1 | \
-                /bin/grep -qx i40e && {
-                echo "[E] iavf.ko 不应依赖 i40e（总线由 companion 提供）" >&2; exit 1; }
-            fi
+            for M in i40e.ko iavf.ko; do
+              [ -f "${ROOT_PATH}/modules/${M}" ] || continue
+              DEPS="$(modinfo -F depends "${ROOT_PATH}/modules/${M}" 2>/dev/null | tr ',' ' ')" || {
+                echo "[E] modinfo -F depends 读取失败: ${M}" >&2; exit 1; }
+              echo " ${DEPS} " | xargs -n1 2>/dev/null | /bin/grep -qx intel_auxiliary || {
+                echo "[E] ${M} 未依赖 intel_auxiliary" >&2; exit 1; }
+              if [ "${M}" = "iavf.ko" ]; then
+                echo " ${DEPS} " | xargs -n1 2>/dev/null | /bin/grep -qx i40e && {
+                  echo "[E] iavf.ko 不应依赖 i40e（总线由 companion 提供）" >&2; exit 1; }
+              fi
+              if command -v nm >/dev/null 2>&1; then
+                for S in ${AUX_SYMS}; do
+                  nm --defined-only "${ROOT_PATH}/modules/${M}" | \
+                    /bin/grep -q " T ${S}$" && {
+                    echo "[E] ${M} 仍折叠 auxiliary.o（T ${S} 存在）" >&2; exit 1; }
+                  nm --undefined-only "${ROOT_PATH}/modules/${M}" | \
+                    /bin/grep -q " U ${S}$" || {
+                    echo "[E] ${M} 缺少 U ${S}" >&2; exit 1; }
+                done
+              fi
+            done
           fi
 
           mkdir -p "${ROOT_PATH}/output/modules"
