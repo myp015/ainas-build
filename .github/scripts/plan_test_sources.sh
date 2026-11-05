@@ -143,13 +143,21 @@ if not expected:
     sys.exit("[E] models.json 中没有任何平台支持 DSM %s" % line)
 
 known = {r["platform"] for r in rows}
+# 表里有、models.json 里根本没有的平台 = 表过期（改名/删除），硬失败。
+unknown_rows = sorted(known - set(models))
 missing = sorted(expected - known - set(excludes))
-stale = sorted(known - expected)
-if missing or stale:
-    sys.exit("[E] 代表型号表与 models.json 不匹配：缺少 %s，多余 %s"
-             % (", ".join(missing) or "-", ", ".join(stale) or "-"))
+if missing or unknown_rows:
+    sys.exit("[E] 代表型号表与 models.json 不匹配：缺少 %s，未知平台 %s"
+             % (", ".join(missing) or "-", ", ".join(unknown_rows) or "-"))
+# 表里有、但当前 DSM 线没有 productvers 的平台（如 7.4 才支持的 epyc7003）：
+# 本轮不适用，跳过并提示；这是版本差异，不是缺陷。
+inapplicable = sorted(known - expected)
+if inapplicable:
+    sys.stderr.write("[W] 以下平台在 DSM %s 无 productvers，本轮跳过: %s\n"
+                     % (line, ", ".join(inapplicable)))
 
-sel = [r for r in rows if kernel in r["kernels"]]
+sel = [r for r in rows
+       if kernel in r["kernels"] and r["platform"] in expected]
 sel_platforms = {r["platform"] for r in sel}
 if kernel == "custom":
     cks = {"epyc7002", "geminilakenk", "r1000nk", "v1000nk"}

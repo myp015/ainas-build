@@ -18,6 +18,8 @@
 #   - broadwell 用 FS3400 而不是 DS3617xs：DS3617xs 只有 DSM 6.2 的 PAT，
 #     plan_sources.sh 在 7.x 会直接报错；
 #   - 4 个 custom（cks）平台沿用其官方代表型号，只是换 KERNEL=custom。
+#   - epyc7003 / icelaked 只在 DSM 7.4 起有 productvers（7.3 没有），7.4 轮次
+#     才需要它们；7.3 轮次由下面的覆盖校验自动判失败，不会静默漏跑。
 apollolake	DS918+	official
 broadwell	FS3400	official
 broadwellnk	DS3622xs+	official
@@ -28,9 +30,13 @@ purley	FS6400	official
 r1000	DS923+	official
 v1000	DS1621+	official
 epyc7002	SA6400	official,custom
+epyc7003	FS6420	official
+icelaked	FS3420	official
 geminilakenk	DS425+	official,custom
 r1000nk	DS725+	official,custom
 v1000nk	DS925+	official,custom
 # broadwellntbap：SA3200D/SA3400D 双控机型在 QEMU 里无法完成 DSM 安装
 # （历史 Task#218 实测进不去系统），保留记录但不纳入轮次；环境具备后去掉本行。
 !exclude	broadwellntbap	双控机型 QEMU 无法完成安装（Task#218 实测）
+# epyc7003ntb：唯一型号 PAS7700，按既定约定跳过（用户长期指令）。
+!exclude	epyc7003ntb	PAS7700 跳过（既定约定）

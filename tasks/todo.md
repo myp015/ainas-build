@@ -214,14 +214,21 @@ SCSI 只跑 SAS 两型（megaraid + mptsas）、崩溃硬失败/识别问题先�
       真 vermagic/GPL-only/Loading modules failed；BUILTIN_DUP 按 env-fail-allowlist
       降级；firmware/modprobe/taint/WARNING 只报告；空采集硬失败
 - [x] 6. `platform-representatives.tsv` + `plan_test_sources.sh` 的 `all_platforms`
-      （13 官方 + 4 custom，broadwellntbap 显式排除；与 models.json 双向覆盖校验）
+      （与 models.json 双向覆盖校验：缺平台/未知平台硬失败，版本线不适用的平台
+      只提示跳过）。7.3 = 13 官方平台；**7.4 = 15 官方平台**（新增 epyc7003/FS6420、
+      icelaked/FS3420），custom 恒为 4。显式排除 broadwellntbap（QEMU 装不进）与
+      epyc7003ntb（PAS7700 按既定约定跳过）
 - [x] 7. `ova-test.yml` 接入：`all_platforms`/`run_bootlog_gate` 输入、两个门禁步骤
       （always()）、plan 阶段两个 selftest、artifact 追加 `/tmp/bootlog-check`
 - [x] 8. 本地验证：两个脚本 selftest 全过；历史 artifact 回放
       （SA6400 全 PASS；mptsas 2G 盘未识别只报告）；4.4.302 DS918+ 安装日志回放
       只命中 TAINT/MODPROBE_MISSING/gpio WARNING（均只报告）
-- [ ] 9. CI 冒烟：SA6400 + 仅 SAS 两型 + run_bootlog_gate
-- [ ] 10. 全矩阵：官方 13 平台、custom 4 平台（use_prebuilt=false、run_bootlog_gate=true）
+- [x] 9. CI 冒烟 run 41978816558（SA6400、7.3.2、仅 SAS 两型、run_bootlog_gate）：
+      plan 自测 5+11 全过；megaraid 驱动 `megaraid_sas_pdoff` + 盘 sata3/4194304/host18
+      全 PASS；mptsas 驱动已加载、2G 盘未识别（按口径只报告）；启动日志仅 2 条
+      TAINT 提示 → PASS
+- [ ] 10. 全矩阵（用户 2026-11-05 指定 DSM **7.4.1**）：官方 15 平台、custom 4 平台
+      （use_prebuilt=false、run_bootlog_gate=true）
 - [ ] 11. panic 平台逐个 RR 对照（RR 复现同栈才登记 scsi-allowlist）
 - [ ] 12. 收口：环境性启动日志噪声登记 bootlog-allowlist；模块内崩溃按源码修复
 
