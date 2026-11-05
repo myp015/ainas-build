@@ -253,3 +253,5 @@ SCSI 只跑 SAS 两型（megaraid + mptsas）、崩溃硬失败/识别问题先�
       update-list.yml / update-check.sh / AINAS_VERSION / SynoBootLoader.conf/.efi /
       bzImage-ainas / initrd-ainas / cks.tgz / lkms.tgz / addons.tgz / modules.tgz /
       sha256sum，与 2in1 未裁剪结构一致；1.67GB 远大于按型号包（约 0.46GB），确认未裁剪。
+- [x] 整次运行 conclusion=success：build (DS918+) 使用复用的 base 完成编译与发布，
+      未受 prepare-base 清理逻辑调整影响。
