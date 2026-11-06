@@ -742,3 +742,50 @@ icelaked 等平台的登录 shell 没展开 `\u@\h`，提示符只剩 `~#`，且
 
 教训：串口回显的「坏法」是长尾分布，不要按形态逐个打补丁。只要拿到命令文件，
 用命令词元做模糊匹配就能兜底所有提示符/截断/错字变体；提示符规则只当快路径。
+
+## 2026-11-06 — test.yml 历次矩阵的验证背景（从工作流注释迁入）
+
+以下两段原本长期占用 `test.yml` 的注释，targets 改为 workflow_dispatch 输入后
+已无矩阵上下文，移至此处留档。
+
+### Task#193：与 RR 同样不可加载的模块修复验证
+
+背景：Task#192 把 4.x 残余 35 个不可解析符号判为"与 RR 同样的生态状态、
+不修"。本轮复核后只剩两族真缺陷（另 2 个符号 amd_e400_c1e_detected /
+sk_receive_skb 只在 4.4.180 target 上出现，是"拿 4.4.302 导出面核对
+4.4.180"造成的假阳性——官方 7.1 模块自己就引用它们），本矩阵逐族产物级
+验证：
+
+族1 dib* 28 符号（消费者 dvb-usb-dib0700.ko，4.x 全平台）：
+我们 src 树 dvb-frontends/Makefile 的 dib 行（30-34、68-69）被官方裁剪
+注释，defines 只开了 CONFIG_DVB_USB_DIB0700=m 没开任何 demod/tuner →
+28 个直接引用无提供者，模块永不加载。修复=取消 Makefile 注释 + 20 个
+4.x defines 加 7 个 CONFIG_DVB_DIB*/TUNER_DIB* 键。
+判据：新增 8 个 .ko（dib3000mc/dib7000m/dib7000p/dib8000/dib9000/
+dib0070/dib0090/dibx000_common），且 dvb-usb-dib0700.ko 的 dib* UND
+全部可解析（本 target 全部 .ko 导出面 ∪ 官方导出面）。
+
+族2 syno_libata_* 5 符号（消费者 sata_sil.ko，4.x 全平台）：
+KSRC include/linux/libata.h 的 SYNO_* 宏（MY_ABC_HERE）把 5 个回调塞进
+ATA_BASE_SHT，官方 4.4 内核只导出 syno_libata_index_get 且仅 r1000/v1000
+→ sata_sil.ko 全平台 Unknown symbol。修复=sata_sil.c 里 #undef/#define
+这两个宏：只留 .syno_port_type = SYNO_PORT_TYPE_SATA，去掉 5 个回调。
+判据：sata_sil.ko 无任何 syno_libata_* UND，其余 UND 全在官方导出面内。
+
+平台覆盖：4.4 两树 × MY_DEF_HERE 平台（v1000/r1000，index_get 被官方
+导出的那类）+ 非 MY_DEF_HERE 平台 broadwell（index_get 不导出）。其余
+4.x 平台改动同形，由下一次 modules.yml 全量发布构建复核。
+
+### 5.10 主线 drivers/scsi 官方化验证
+
+背景：src/5.10.55/drivers/scsi 14 个文件（B 类 11 + C 类 3）按官方 GPL
+5.10 源码（linux-5.10-7.3.x.txz，2026-01-30）整份替换，恢复 syno 分支。
+实际参与自编的只有 sg.c（sg.ko）与 libiscsi.c（libiscsi.ko），其余
+12 个文件为官方内核内置（scsi_mod/sd_mod 在 Makefile 中注释），只做
+源码一致性。
+判据：
+- sg.ko 无新增 UND；libiscsi.ko 无新增 UND（taskqueuelock/back_lock
+  两个字段在 KSRC 头中存在，spin_lock_irqsave 分支可编译）；
+- 全部 scsi 系 .ko 的 UND ⊆ 官方导出面 ∪ 本 target 导出面；
+- 所有 target 编译零错误。
+版本取 7.4（最新 dev KSRC）与 7.1（最老 dev KSRC），覆盖头文件跨度。
