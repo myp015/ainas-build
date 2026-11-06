@@ -131,11 +131,9 @@ jobs:
           OFFICIAL_PATH="${ROOT_PATH}/syno-modules/official/hda1/${PLATFORM}-${VERSION}-${KVER}"
           PARTY3RD_PATH="${ROOT_PATH}/syno-modules/thirdparty/${PLATFORM}-${VERSION}-${KVER}"
 
-          # =====================================================================
           # 双目录打包：
           #   output/       = makemodules 编译产物（纯编译）-> 给 modules/
           #   output_all/   = 编译 + 官方 + 第三方（合集）   -> 给 release/
-          # =====================================================================
 
           # G6-D 实测：geminilakenk / epyc7003ntb 的官方内核把 DRM（含 dma-fence
           # tracepoint）内建并导出 __SCK__/__SCT__ 静态调用键（见
@@ -216,7 +214,6 @@ jobs:
               [ -z "${D}" ] && [ -f "${ROOT_PATH}/output_all/${1}" ] && D="${ROOT_PATH}/output_all/${1}"
               [ -z "${D}" ] && [ -f "${OFFICIAL_PATH/hda1/rd}/${1}" ] && D="${OFFICIAL_PATH/hda1/rd}/${1}"
               if [ -n "${D}" ]; then
-                # modinfo "${D}"
                 # 探测型：modinfo 失败时视为无依赖（非构建错误）
                 depends=($(modinfo -F depends "${D}" 2>/dev/null | sed 's/,/ /g' || :))
                 if [ ${#depends[*]} -gt 0 ]; then
@@ -363,8 +360,8 @@ jobs:
           bash "$GITHUB_WORKSPACE/.github/scripts/calc_version.sh" "myp015/syno-modules" "${{ inputs.version }}"
 
       - name: download to artifacts (compile)
-        # v8 批量下载大 artifact 偶发 digest-mismatch（127 个 modules-* 全量下载）→
-        # 降 v4（无 digest 校验，成熟稳定）。pattern 单行：v4 也不支持多行负 pattern。
+        # v8 批量下载大 artifact 曾出现 digest-mismatch（127 个 modules-* 全量下载）；
+        # pattern 保持单行，避免触发同类问题。
         uses: actions/download-artifact@v8
         with:
           path: output
