@@ -241,7 +241,7 @@ jobs:
 
           unzip -q "$FILENAME" -d rr rr.img
 
-          # ── p3：cpuinfo + initrd 补丁（与型号无关）─────────────────
+          # p3：cpuinfo + initrd 补丁（与型号无关）
           DISK_LOOP=$(sudo losetup -f)
           sudo losetup -P "$DISK_LOOP" rr/rr.img
 
@@ -252,7 +252,6 @@ jobs:
           sudo mount "${DISK_LOOP}p3" "$PART3_PATH"
 
           # addons/modules/lkms/cks 全部取自 rr.img：不调用 get* 覆盖 myp015 Release 资产
-          # （RROrg 源的 lkm 例外，见下方分区保护说明）
           for d in cks lkms addons modules; do
             if [ ! -d "${PART3_PATH}/${d}" ] || [ -z "$(ls -A "${PART3_PATH}/${d}")" ]; then
               echo "[E] rr.img 的 p3 缺少内置资产目录或为空: ${d}" >&2
@@ -266,7 +265,6 @@ jobs:
             fi
           done
 
-          # lkm 也直接用 rr.img 内置的（不做 ainas-lkm 覆盖）
           echo "[INFO] 源=${SOURCE}：lkms/cks/addons/modules 均取自 rr.img"
 
           patch_cpuinfo "${PART3_PATH}/addons" "rr"
@@ -278,7 +276,6 @@ jobs:
 
           rm -rf "$AINAS2IN1_DIR"
 
-          # 预压缩；Release 单文件超过 2GB 时上传前再分卷
           zstd -3 -T0 -q -f rr/rr.img -o ova-base.img.zst
 
       # 上传到 ainas-2in1 的 Release（与最终镜像放在一起），Release 资产默认永久保存。
@@ -389,7 +386,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          # ── 目录变量 ──────────────────────────────────────────────
+          # 目录变量
           WORKDIR="$PWD"
           AINAS2IN1_DIR="${WORKDIR}/.2in1"
           PAT_JSON_URL="https://raw.githubusercontent.com/myp015/ainas-rr/main/docs/pats.json"
@@ -429,12 +426,12 @@ jobs:
           ARTIFACT="${MODEL}_${VER_SLUG}${ARTIFACT_BRAND}_${SAFE_TAG}"
           echo "[INFO] 型号=${MODEL} 目标DSM版本=${VERSION} DSM系列=${LINE_REQ} 制品版本=${VER_SLUG} 源=${SOURCE}"
 
-          # ── 系统依赖 ───────────────────────────────────────────────
+          # 系统依赖
           echo "[INFO] 安装构建依赖"
           sudo apt-get update -qq
           sudo apt-get install -y -qq gettext cpio zstd dosfstools rsync qemu-utils >/dev/null
 
-          # ── 恢复公共 base ──────────────────────────────────────────
+          # 恢复公共 base
           # 下载 RR、cpuinfo/initrd 补丁等与型号无关的步骤已在 prepare-base
           # 完成；这里只解压并挂上分区，供型号相关步骤使用。
           mkdir -p rr
@@ -450,7 +447,7 @@ jobs:
           fi
           rm -rf base
 
-          # ── GRUB 修补（只有 grub.cfg 与型号相关，必须在型号 job 内做）──
+          # GRUB 修补（只有 grub.cfg 与型号相关，必须在型号 job 内做）
           # 先让 patch_part1 自己挂/卸 p1，再把 rr.img 长期 attached；
           # 同一镜像同时挂两个 loop 时，第二个 loop 可能不生成分区节点
           # （实测 /dev/loop1p1 不存在导致 mount 失败）。
@@ -460,16 +457,15 @@ jobs:
           DISK_LOOP=$(sudo losetup -f)
           sudo losetup -P "$DISK_LOOP" rr/rr.img
 
-          # 分区节点异步创建，等待就绪后再挂载
           for _ in $(seq 1 40); do [ -b "${DISK_LOOP}p3" ] && break; sleep 0.25; done
           [ -b "${DISK_LOOP}p3" ] || { echo "[E] 镜像分区未就绪：${DISK_LOOP}p3" >&2; exit 1; }
           sudo mkdir -p "$PART1_PATH" "$PART3_PATH"
 
-          # ── 使用 RR Docker 编译镜像 ───────────────────────────────
+          # 使用 RR Docker 编译镜像
           docker_build rr "$MODEL" "$VERSION" "$LANGUAGE" "$ADDONS" "$RR_DOCKER_TAG" \
             "$WORKDIR"
 
-          # ── 清理 p3 临时文件 + 按型号裁剪资产 ────────────────────
+          # 清理 p3 临时文件 + 按型号裁剪资产
           sudo mkdir -p "$PART3_PATH"
           sudo mount "${DISK_LOOP}p3" "$PART3_PATH"
           sudo rm -rf "$PART3_PATH/dl" "$PART3_PATH/auxfiles" "$PART3_PATH/logs"
@@ -480,10 +476,10 @@ jobs:
           sudo losetup --detach "$DISK_LOOP"
           rm -f "$WORKDIR/2in1func.sh"
 
-          # ── 提取 user-config.yml + 选择引导镜像 + Repack 2GB 镜像 ──
+          # 提取 user-config.yml + 选择引导镜像 + Repack 2GB 镜像
           repack_rr rr/rr.img "$TAG" "$WORKDIR" "2.5GB"
 
-          # ── DSM 自动安装（解析 pats.json → 启容器 → 安装 → 停容器）──
+          # DSM 自动安装（解析 pats.json → 启容器 → 安装 → 停容器）
           if [ ! -f "$WORKDIR/rr/rr.img" ]; then
             echo "[E] rr.img 不存在于 $WORKDIR/rr/rr.img"
             exit 1
@@ -494,7 +490,7 @@ jobs:
             "${ARTIFACT_BRAND}" "$SAFE_TAG" "360" \
             "s#file=/rr.img#file=/storage/alpine/rr.img#g"
 
-          # ── 导出 OVA 制品 ─────────────────────────────────────────
+          # 导出 OVA 制品
           repack_ova "$WORKDIR" "$ARTIFACT"
 
           rm -f "$WORKDIR/2in1func.sh"
@@ -552,7 +548,6 @@ jobs:
           export GH_TOKEN="$ACTION_TOKEN"
           export GH_REPO="myp015/ainas-2in1"
 
-          # 分卷、Release 自愈、退避重试统一在 .github/scripts/release_publish.sh 里
           ASSET_ARGS=()
           [ -n "${ARTIFACT_ZIP:-}" ] && ASSET_ARGS+=("$GITHUB_WORKSPACE/$ARTIFACT_ZIP")
 

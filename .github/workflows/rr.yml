@@ -273,7 +273,7 @@ jobs:
           unzip -q "$RR_FILENAME" -d rr rr.img
           rm -f "$RR_FILENAME"
 
-          # ── p3：cpuinfo + initrd 补丁（与型号无关）─────────────────
+          # p3：cpuinfo + initrd 补丁（与型号无关）
           DISK_LOOP=$(sudo losetup -f)
           sudo losetup -P "$DISK_LOOP" rr/rr.img
 
@@ -296,7 +296,6 @@ jobs:
               exit 1
             fi
           done
-          # lkm 也直接用 rr.img 内置的（不做 ainas-lkm 覆盖）
           echo "[INFO] 源=${SOURCE}：lkms/cks/addons/modules 均取自 rr.img"
 
           patch_cpuinfo "${PART3_PATH}/addons" "rr"
@@ -306,7 +305,6 @@ jobs:
           sudo losetup --detach "$DISK_LOOP"
           sudo rm -rf "$PART3_PATH"
 
-          # 预压缩；Release 单文件超过 2GB 时上传前再分卷
           zstd -3 -T0 -q -f rr/rr.img -o rr-base.img.zst
 
       # 上传到 ainas-2in1 的 Release（与最终镜像放在一起），Release 资产默认永久保存。
@@ -434,7 +432,6 @@ jobs:
             esac
           done
 
-          # 分卷、Release 自愈、退避重试与覆盖统一在 release_publish.sh 里
           bash "$GITHUB_WORKSPACE/.github/scripts/release_publish.sh" \
             "$RELEASE_TAG" "${RELEASE_NOTES:-RR build artifacts}" \
             "$GITHUB_WORKSPACE/$UPDATE_ASSET"
@@ -542,12 +539,12 @@ jobs:
         run: |
           set -euo pipefail
 
-          # ── 系统依赖 ───────────────────────────────────────────────
+          # 系统依赖
           echo "[INFO] 安装构建依赖"
           sudo apt-get update -qq
           sudo apt-get install -y -qq gettext cpio zstd dosfstools rsync qemu-utils >/dev/null
 
-          # ── 恢复公共 base ──────────────────────────────────────────
+          # 恢复公共 base
           # 下载 RR、cpuinfo/initrd 补丁等与型号无关的步骤已在 prepare-base 完成，
           # 这里只解压，供后续按型号/场景收尾。
           mkdir -p rr
@@ -563,7 +560,7 @@ jobs:
           fi
           rm -rf base
 
-          # ── 目录与常量 ────────────────────────────────────────────
+          # 目录与常量
           WORKDIR="$PWD"
           AINAS2IN1_DIR="${WORKDIR}/.2in1"
           PART1_PATH="/mnt/p1"
@@ -596,7 +593,7 @@ jobs:
           fi
           echo "[INFO] 型号=${MODEL} 目标DSM版本=${VERSION} DSM系列=${LINE_REQ} 版本slug=${VER_SLUG} 源=${SOURCE}"
 
-          # ── GRUB 修补 ─────────────────────────────────────────────
+          # GRUB 修补
           # RR 原版镜像任务无型号，MODEL_ENV 置空 → patch 脚本默认 model=Boot DSM
           # 官方 p1 没有 .locale，gettext 会回退原始 msgid；显式设为中文，
           # 确保 zh_CN/rr.mo 中的 AiNas 文案生效；后续可在菜单切换其他语言。
@@ -615,16 +612,15 @@ jobs:
             DISK_LOOP=$(sudo losetup -f)
             sudo losetup -P "$DISK_LOOP" rr/rr.img
 
-            # 分区节点异步创建，等待就绪后再挂载
             for _ in $(seq 1 40); do [ -b "${DISK_LOOP}p3" ] && break; sleep 0.25; done
             [ -b "${DISK_LOOP}p3" ] || { echo "[E] 镜像分区未就绪：${DISK_LOOP}p3" >&2; exit 1; }
             sudo mkdir -p "$PART1_PATH" "$PART3_PATH"
 
-            # ── 使用 RR Docker 编译镜像 ─────────────────────────────
+            # 使用 RR Docker 编译镜像
             docker_build rr "$MODEL" "$VERSION" "$LANGUAGE" "$ADDONS" "$RR_DOCKER_TAG" \
               "$WORKDIR"
 
-            # ── 清理 p3 临时文件 + 按型号裁剪资产 ───────────────────
+            # 清理 p3 临时文件 + 按型号裁剪资产
             sudo mkdir -p "$PART3_PATH"
             sudo mount "${DISK_LOOP}p3" "$PART3_PATH"
             sudo rm -rf "$PART3_PATH/dl" "$PART3_PATH/auxfiles" "$PART3_PATH/logs"
@@ -634,7 +630,7 @@ jobs:
             sudo umount "$PART3_PATH"
             sudo losetup --detach "$DISK_LOOP"
 
-            # ── 型号升级包 ──────────────────────────────────────────
+            # 型号升级包
             # p3 已按平台裁剪，lkm/modules/cks 与该型号对应，因此升级包按型号拆分：
             # updateall-<型号>-<RR 版本>.zip。Release 已有且未勾选覆盖时直接复用。
             UPDATE_ZIP=""
@@ -660,7 +656,7 @@ jobs:
             rm -f "$WORKDIR/2in1func.sh"
           fi
 
-          # ── 提取 user-config.yml + 选择引导镜像 + Repack 镜像 ─────
+          # 提取 user-config.yml + 选择引导镜像 + Repack 镜像
           # 镜像大小固定 2.5GB（原 image_size 选项已移除），写法对齐 ova.yml
           if [ "${MODEL}" = "__RR_ORIGINAL__" ]; then
             repack_rr rr/rr.img "$RR_TAG" "$WORKDIR" "2.5GB" keep
@@ -668,7 +664,7 @@ jobs:
             repack_rr rr/rr.img "$RR_TAG" "$WORKDIR" "2.5GB"
           fi
 
-          # ── 导出并打包制品 ────────────────────────────────────────
+          # 导出并打包制品
           case "$IMAGE_FORMAT" in
             img)
               if [ "${MODEL}" = "__RR_ORIGINAL__" ]; then
@@ -724,7 +720,6 @@ jobs:
           export GH_TOKEN="$ACTION_TOKEN"
           export GH_REPO="myp015/ainas-2in1"
 
-          # 分卷、Release 自愈、退避重试统一在 .github/scripts/release_publish.sh 里
           ASSET_ARGS=()
           [ -n "${ARTIFACT_ZIP:-}" ] && ASSET_ARGS+=("$GITHUB_WORKSPACE/$ARTIFACT_ZIP")
           [ -n "${UPDATE_ZIP:-}" ] && ASSET_ARGS+=("$GITHUB_WORKSPACE/$UPDATE_ZIP")

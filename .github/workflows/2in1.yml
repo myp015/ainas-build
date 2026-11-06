@@ -8,7 +8,7 @@
 # 双源 2in1 工作流：每次编译选择一个 RR 源
 #   ainas → myp015/ainas-rr（镜像 myp015/rr）
 #   RROrg → RROrg/rr（镜像 wjz304/rr）
-# 两种源的 addons/modules/lkms/cks 全部取自 rr.img，不再调用 get* 覆盖。
+# addons/modules/cks 全部取自 rr.img，不调用 get*；lkms 仅 RROrg 源改用 ainas-lkm 覆盖。
 # Release 命名：ainas → ainas-2in1_<版本>；RROrg → RROrg-2in1_<版本>
 # 型号勾选项只用 7 个通用型号；DVA 系列等请通过 custom_models 手动输入。
 name: Build RR-2in1
@@ -279,7 +279,7 @@ jobs:
           unzip -q "$FILENAME" -d rr rr.img
           rm -f "$FILENAME"
 
-          # ── 改分区 label ──────────────────────────────────────────
+          # 改分区 label
           GRUB_LOOP=$(sudo losetup -f)
           sudo mkdir -p "$PART1_PATH" "$PART3_PATH"
           sudo losetup -P "$GRUB_LOOP" rr/rr.img
@@ -292,11 +292,10 @@ jobs:
           sudo fatlabel "${GRUB_LOOP}p1" AiNasloader
           sudo losetup --detach "$GRUB_LOOP"
 
-          # ── p3：bzImage 改名 + 资产包 + addons/cpuinfo/initrd 补丁 ──
+          # p3：bzImage 改名 + 资产包 + addons/cpuinfo/initrd 补丁
           DISK_LOOP=$(sudo losetup -f)
           sudo losetup -P "$DISK_LOOP" rr/rr.img
 
-          # 分区节点异步创建，等待就绪后再挂载
           for _ in $(seq 1 40); do [ -b "${DISK_LOOP}p3" ] && break; sleep 0.25; done
           [ -b "${DISK_LOOP}p3" ] || { echo "[E] 镜像分区未就绪：${DISK_LOOP}p3" >&2; exit 1; }
           sudo mount "${DISK_LOOP}p3" "$PART3_PATH"
@@ -308,7 +307,7 @@ jobs:
             echo "[INFO] p3 分区中未找到 bzImage-rr，跳过重命名"
           fi
 
-          # addons/modules/lkms/cks 全部取自 rr.img：不调用 get* 覆盖 myp015 Release 资产。
+          # addons/modules/cks 取自 rr.img；lkms 在 ainas 源也取自 rr.img，RROrg 源见下方分区保护说明。
           # 缺失任何一个都立即失败，避免静默跳过导致产物与源不一致。
           echo "[INFO] 源=${SOURCE}：使用 rr.img 内置资产"
           for d in cks lkms addons modules; do
@@ -344,13 +343,12 @@ jobs:
           sudo losetup --detach "$DISK_LOOP"
           sudo rm -rf "$PART3_PATH"
 
-          # ── p1：生成 AINAS_VERSION ─────────────────────────────────
+          # p1：生成 AINAS_VERSION
           # update 包只从 p1 取 AINAS_VERSION + EFI 两个文件（不含 grub.cfg），
           # 该文件与型号无关，在这里生成后 update job 不再需要 patch_part1。
           PL1=$(sudo losetup -f)
           sudo losetup -P "$PL1" rr/rr.img
 
-          # 分区节点异步创建，等待就绪后再挂载
           for _ in $(seq 1 40); do [ -b "${PL1}p1" ] && break; sleep 0.25; done
           [ -b "${PL1}p1" ] || { echo "[E] 镜像分区未就绪：${PL1}p1" >&2; exit 1; }
           sudo mount "${PL1}p1" "$PART1_PATH"
@@ -368,7 +366,6 @@ jobs:
           sudo umount "$PART1_PATH"
           sudo losetup --detach "$PL1"
 
-          # 预压缩；Release 单文件超过 2GB 时上传前再分卷
           zstd -3 -T0 -q -f rr/rr.img -o 2in1-base.img.zst
 
       # 上传到 ainas-2in1 的 Release（与最终镜像放在一起），Release 资产默认永久保存。
@@ -496,7 +493,6 @@ jobs:
             esac
           done
 
-          # 分卷、Release 自愈、退避重试与覆盖统一在 release_publish.sh 里
           bash "$GITHUB_WORKSPACE/.github/scripts/release_publish.sh" \
             "$RELEASE_TAG" "${RELEASE_NOTES:-2in1 build artifacts}" \
             "$GITHUB_WORKSPACE/$UPDATE_ASSET"
@@ -573,7 +569,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          # ── 目录变量 ──────────────────────────────────────────────
+          # 目录变量
           WORKDIR="$PWD"
           AINAS2IN1_DIR="${WORKDIR}/.2in1"
           REPACK_STAGE_DIR="/tmp/repack-stage"
@@ -619,13 +615,13 @@ jobs:
           ARTIFACT="${MODEL}_${VER_SLUG}_${IMG_GIB}g_${ARTIFACT_BRAND}_${SAFE_TAG}"
           echo "[INFO] 型号=${MODEL} 目标DSM版本=${VERSION} DSM系列=${LINE_REQ} 制品版本=${VER_SLUG} 源=${SOURCE}"
 
-          # ── 系统依赖 ───────────────────────────────────────────────
+          # 系统依赖
           # pigz 用于镜像压缩：gzip -1 单线程约 144s，pigz 可降到数十秒
           echo "[INFO] 安装构建依赖"
           sudo apt-get update -qq
           sudo apt-get install -y -qq gettext cpio zstd dosfstools rsync qemu-utils pigz >/dev/null
 
-          # ── 恢复公共 base ──────────────────────────────────────────
+          # 恢复公共 base
           # 下载 RR、分区 label、资产包、addons/initrd 补丁等与型号无关的步骤
           # 已在 prepare-base 完成；这里只解压并挂上分区，供型号相关步骤使用。
           mkdir -p rr
@@ -645,12 +641,11 @@ jobs:
           DISK_LOOP=$(sudo losetup -f)
           sudo losetup -P "$DISK_LOOP" rr/rr.img
 
-          # 分区节点异步创建，等待就绪后再挂载
           for _ in $(seq 1 40); do [ -b "${DISK_LOOP}p3" ] && break; sleep 0.25; done
           [ -b "${DISK_LOOP}p3" ] || { echo "[E] 镜像分区未就绪：${DISK_LOOP}p3" >&2; exit 1; }
           sudo mkdir -p "$PART1_PATH" "$PART3_PATH"
 
-          # ── docker_build 的 initrd 依赖 ────────────────────────────
+          # docker_build 的 initrd 依赖
           # docker_build 会读取 /tmp/initrd_work/opt/ainas 与 root/.bashrc。
           # base 里已由 patch_ram 生成 initrd-ainas，这里重新解包即可（约 10-20s）。
           sudo mount "${DISK_LOOP}p3" "$PART3_PATH"
@@ -658,14 +653,14 @@ jobs:
           unpackInitrd "${PART3_PATH}/initrd-ainas" /tmp/initrd_work
           sudo umount "$PART3_PATH"
 
-          # ── GRUB 修补（只有 grub.cfg 与型号相关，必须在型号 job 内做）──
+          # GRUB 修补（只有 grub.cfg 与型号相关，必须在型号 job 内做）
           patch_part1 rr/rr.img "$PART1_PATH" 2in1 "$MODEL" "$LINE_SHORT"
 
-          # ── 使用 RR Docker 编译镜像 ───────────────────────────────
+          # 使用 RR Docker 编译镜像
           docker_build 2in1 "$MODEL" "$VERSION" "$LANGUAGE" "$ADDONS" "$RR_DOCKER_TAG" \
             "$WORKDIR" "$REPACK_STAGE_DIR"
 
-          # ── 清理 p3 临时文件 + 按型号裁剪资产 ────────────────────
+          # 清理 p3 临时文件 + 按型号裁剪资产
           sudo mkdir -p "$PART3_PATH"
           sudo mount "${DISK_LOOP}p3" "$PART3_PATH"
           sudo rm -rf "$PART3_PATH/dl" "$PART3_PATH/auxfiles" "$PART3_PATH/logs"
@@ -673,7 +668,7 @@ jobs:
           sudo umount "$PART3_PATH"
           sudo losetup --detach "$DISK_LOOP"
 
-          # ── 型号升级包 ────────────────────────────────────────────
+          # 型号升级包
           # p3 已按平台裁剪，lkm/modules/cks 与该型号对应，因此升级包按型号拆分：
           # updateall-<型号>-<RR 版本>.zip。Release 已有且未勾选覆盖时直接复用。
           UPDATE_ZIP=""
@@ -698,10 +693,10 @@ jobs:
 
           ZIP_NAME=""
 
-          # ── 2in1 镜像重打包 ───────────────────────────────────────
+          # 2in1 镜像重打包
           repack_2in1 "$WORKDIR" "$REPACK_STAGE_DIR"
 
-          # ── DSM 自动安装（解析 pats.json → 启容器 → 安装 → 停容器）──
+          # DSM 自动安装（解析 pats.json → 启容器 → 安装 → 停容器）
           dsm_setup "$MODEL" "$LINE_REQ" "$PAT_JSON_URL" "$DSM_INSTALL_DIR" \
             "$WORKDIR" \
             "$AINAS2IN1_DIR/docker/docker-compose.yaml" "$DSM_INSTALL_DIR/docker-compose.yaml" \
@@ -734,7 +729,6 @@ jobs:
           export GH_TOKEN="$ACTION_TOKEN"
           export GH_REPO="myp015/ainas-2in1"
 
-          # 分卷、Release 自愈、退避重试统一在 .github/scripts/release_publish.sh 里
           ASSET_ARGS=()
           [ -n "${ARTIFACT_ZIP:-}" ] && ASSET_ARGS+=("$GITHUB_WORKSPACE/$ARTIFACT_ZIP")
           [ -n "${UPDATE_ZIP:-}" ] && ASSET_ARGS+=("$GITHUB_WORKSPACE/$UPDATE_ZIP")
