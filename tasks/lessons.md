@@ -817,3 +817,25 @@ Task#221 7.3.2 全平台轮（run 42234387134）：DS1621+ 的模块门禁 G-M1 
 教训：串口 pty 上的**用户态输出**与**内核 printk** 是两个竞争写者。高频、
 自发的 printk（每模块一条 marker）必须用 KERN_DEBUG 级别或降 console_loglevel
 从源头把它挡在控制台之外；只在解析侧做容错，等于每轮矩阵都赌字节不乱序。
+
+## 2026-11-07 — 外部网络命令不给超时，失败只能靠「6 小时后被取消」发现
+
+Task#221 7.4.1 virtio-scsi 轮（run 42234442466）：DS3622xs+ 的 install job
+15:07:06 打印 `[INFO] 安装构建依赖` 后**再无一行输出**，一直挂到 workflow
+的 6 小时上限被取消。同一时段另三个补跑 job（7.3.2 官方 ×2、7.2.2 custom）
+也在同一阶段超过 1 小时无进展，最后被 runner 判「lost communication」。
+
+`apt-get update/install` 没有超时参数，镜像源卡住（DNS/HTTP 半开连接）时
+进程会原地卡死；GitHub 托管 runner 只按 job 总时长兜底，日志也刷不出来
+（`BlobNotFound`，事后无现场）。
+
+修法（`a7264a2e` + `821b6bd0`）：
+- 两处 apt 都包 `timeout 600`，并加 `-o Acquire::http::Timeout=20`
+  `-o Acquire::https::Timeout=20` `-o Acquire::Retries=3`；超时即
+  `[E] apt-get ... 失败或超时（600s）` + `exit 1`（fail fast，不重试吞掉）；
+- install+test job 加 `timeout-minutes: 120`（正常 20~50 分钟，留 2 倍余量），
+  超时后 `always()` 的收尾/上传步骤仍会执行，至少有现场。
+
+教训：CI 里任何会碰网络的 shell 命令都要有**显式边界**。没有超时的
+`apt`/`git clone`/`docker pull` 会让失败表现成「job 卡住」——既拿不到日志，
+也拿不到归因；给 job 加总超时只是把无界等待换成有界无现场，两者都要做。
