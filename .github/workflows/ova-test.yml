@@ -420,6 +420,21 @@ jobs:
           git config --global user.name "github-actions[bot]"
           sudo timedatectl set-timezone "Asia/Shanghai"
 
+      # 托管 runner 只有 14G SSD，预装的 Android SDK/.NET/CodeQL 等约 25G
+      # 与本任务无关。本 job 要解压 2.5G base、拉取并构建 2.5G docker 镜像、
+      # 为每个 profile 生成 qcow2；磁盘写满时 QEMU 块后端返回错误（guest 侧
+      # 表现为 `ata ... ABRT`、「内置套件安装可能中断」），runner 也会因写
+      # 不进日志/心跳被判 lost communication（日志 BlobNotFound）。先腾空间。
+      - name: 释放托管 runner 磁盘
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "[INFO] 清理前磁盘：$(df -h / | awk 'NR==2{print $2" 总量 "$4" 可用"}')"
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc \
+            /opt/hostedtoolcache/CodeQL 2>/dev/null || true
+          sudo docker image prune -af >/dev/null 2>&1 || true
+          echo "[INFO] 清理后磁盘：$(df -h / | awk 'NR==2{print $2" 总量 "$4" 可用"}')"
+
       - name: checkout ainas-2in1
         uses: actions/checkout@v7
         with:
@@ -514,8 +529,10 @@ jobs:
           fi
 
           mkdir -p rr
+          echo "[INFO] 解压 base 前磁盘可用：$(df -h / | awk 'NR==2{print $4}')"
           zstd -d -q -f "base/${BASE_ASSET}" -o rr/rr.img
           rm -rf base
+          echo "[INFO] 解压 base 后磁盘可用：$(df -h / | awk 'NR==2{print $4}')"
 
           # 测试流程不改 grub.cfg：patch_part1 的 rr 变体只替换菜单标题/欢迎文案，
           # 不改变启动项与内核路径；引导由 dsm_setup 传参数直达。跳过可省一次
@@ -605,8 +622,10 @@ jobs:
             rm -rf "$MODPKG_DIR"
           fi
 
+          echo "[INFO] 构建镜像前磁盘可用：$(df -h / | awk 'NR==2{print $4}')"
           docker_build rr "$MODEL" "$VERSION" "$LANGUAGE" "$ADDONS" "$RR_DOCKER_TAG" \
             "$WORKDIR"
+          echo "[INFO] 构建镜像后磁盘可用：$(df -h / | awk 'NR==2{print $4}')"
 
           sudo mkdir -p "$PART3_PATH"
           sudo mount "${DISK_LOOP}p3" "$PART3_PATH"
@@ -707,6 +726,7 @@ jobs:
             "${ARTIFACT_BRAND}" "$SAFE_TAG" "${BOOT_TIMEOUT}" \
             "s#file=/rr.img#file=/storage/alpine/rr.img#g"
 
+          echo "[INFO] 安装完成后磁盘可用：$(df -h / | awk 'NR==2{print $4}')"
           echo "ARTIFACT=${ARTIFACT}" >> "$GITHUB_ENV"
           rm -f "$WORKDIR/2in1func.sh"
 
