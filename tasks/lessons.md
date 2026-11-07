@@ -789,3 +789,31 @@ ATA_BASE_SHT，官方 4.4 内核只导出 syno_libata_index_get 且仅 r1000/v10
 - 全部 scsi 系 .ko 的 UND ⊆ 官方导出面 ∪ 本 target 导出面；
 - 所有 target 编译零错误。
 版本取 7.4（最新 dev KSRC）与 7.1（最老 dev KSRC），覆盖头文件跨度。
+
+## 2026-11-07 — 内核 printk 会插进 guest 的记录行中间（第三种串口坏法）
+
+Task#221 7.3.2 全平台轮（run 42234387134）：DS1621+ 的模块门禁 G-M1 报
+`完成标记=True mount_rc=0 逐条=425 清单=426`。artifact 里 `cmd-4.out` 实际有
+426 条 `@@M` 与 `@@MODTEST_DONE@@ total=426 status=done` —— guest 跑完了，
+解析侧少一条。异常行是：
+
+```
+@@M|354|sound_firmware|INSMOD_OK[   92.785733] modtest-marker idx=355 name=sp2
+```
+
+每个模块 insmod 前写 `/dev/kmsg` 的归因标记（默认 KERN_DEFAULT=4）与 guest
+的 stdout 共用同一个串口 pty，printk 在记录行中间插进来，把 rc/details
+尾段挤掉。与 2026-11-05 的「命令回显损坏」不同：这次是**内核写的**，不是回显。
+
+修法分两层：
+- guest（根因）：标记改写成 `<7>modtest-marker ...`（KERN_DEBUG），
+  console_loglevel=7 时不上控制台、但仍进 dmesg 环形缓冲，归因能力不变；
+  若环境把 console_loglevel 调到 8，进循环前临时降到 7、循环后恢复原值；
+- 解析器（兜底）：`parse_results.py` 新增 `TRUNC_RE`，按前缀恢复
+  idx/name/state 并把记录计入总数；被打断的若是 INSMOD_FAIL，err 文本已丢 →
+  空 err 落进 OTHER 硬失败，不静默放过。夹具加 S23/S24；plan 阶段自测补跑
+  `parse_results.py --selftest`。
+
+教训：串口 pty 上的**用户态输出**与**内核 printk** 是两个竞争写者。高频、
+自发的 printk（每模块一条 marker）必须用 KERN_DEBUG 级别或降 console_loglevel
+从源头把它挡在控制台之外；只在解析侧做容错，等于每轮矩阵都赌字节不乱序。

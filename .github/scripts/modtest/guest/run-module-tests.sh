@@ -45,9 +45,28 @@ skip=0
 
 # 在每个可能触发内核崩溃的动作前打标记，便于 CI 把 Oops/BUG 归因到具体模块。
 # /dev/kmsg 不可写时静默降级（仅失去归因能力，不因此判失败）。
+#
+# 标记固定为 KERN_DEBUG（<7> 前缀）：guest 的 stdout 与内核控制台共用同一个
+# 串口 pty，默认级别（KERN_DEFAULT=4）的 printk 会插进正在输出的 @@M 记录行
+# 中间，把一行截断、尾段丢失（2026-11-06 DS1621+ 实测：426 条记录中 1 条被
+# 下一个模块的 marker 插断，G-M1 误报"逐条=425 清单=426"）。KERN_DEBUG 在
+# console_loglevel=7 时不输出到控制台，但仍进内核环形缓冲，末尾 dmesg 归因不受影响。
 mark() {
-  printf 'modtest-marker idx=%s name=%s\n' "$idx" "$name" > /dev/kmsg 2>/dev/null || true
+  printf '<7>modtest-marker idx=%s name=%s\n' "$idx" "$name" > /dev/kmsg 2>/dev/null || true
 }
+
+# 少数环境把 console_loglevel 调到 8（连 KERN_DEBUG 也上控制台）：
+# 进入循环前临时降到 7，循环结束后恢复原值。
+console_level="$(awk '{print $1}' /proc/sys/kernel/printk 2>/dev/null || echo 7)"
+case "${console_level}" in
+  ''|*[!0-9]*) console_level=7 ;;
+esac
+restore_level=""
+if [ "${console_level}" -gt 7 ]; then
+  if echo 7 > /proc/sys/kernel/printk 2>/dev/null; then
+    restore_level="${console_level}"
+  fi
+fi
 
 while IFS='	' read -r idx name rel depends ko_srcver policy; do
   [ -n "${idx}" ] || continue
@@ -98,6 +117,11 @@ while IFS='	' read -r idx name rel depends ko_srcver policy; do
 
   echo "@@M|${idx}|${name}|${state}|${rc}|src=${sys_src} pkg=${ko_srcver} err=${err}"
 done <"${LIST}"
+
+# 恢复控制台日志级别（仅在循环前为压制 KERN_DEBUG 标记调低过时才动作）。
+if [ -n "${restore_level}" ]; then
+  echo "${restore_level}" > /proc/sys/kernel/printk 2>/dev/null || true
+fi
 
 # 只回传故障相关 dmesg 摘要（不整份回传，避免串口超时）。
 echo "---DMESG-BEGIN---"

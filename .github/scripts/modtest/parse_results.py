@@ -74,6 +74,15 @@ UNKNOWN_SYM_RE = re.compile(r"Unknown symbol (\S+)")
 DUP_EXPORT_RE = re.compile(r"exports duplicate symbol (\S+)")
 
 M_RE = re.compile(r"^@@M\|(\d+)\|([^|]*)\|([^|]*)\|([^|]*)\|(.*)$")
+# 串口控制台消息会插进 guest 输出行的中间，把 @@M 记录截断在 state 之后
+# （2026-11-06 DS1621+ 实测：`@@M|354|sound_firmware|INSMOD_OK[  92.78] ...`，
+# rc/details 尾段丢失）。guest 侧已用 KERN_DEBUG 标记压制，这里再按前缀恢复
+# idx/name/state 三个字段，避免单条记录被插断就让 G-M1 判"逐条比清单少"。
+# state 后必须紧跟 |、[ 或行尾/空白，防止把 "INSMOD_OKX" 这类噪声当状态。
+TRUNC_RE = re.compile(
+    r"^@@M\|(\d+)\|([^|]*)\|"
+    r"(LOADED|SKIP_UPDATE|SKIP_HAZARD|INSMOD_OK|INSMOD_FAIL|MISSING)"
+    r"(?=\||\[|\s|$)")
 DONE_RE = re.compile(
     r"^@@MODTEST_DONE@@(.*)$")
 DONE_KV_RE = re.compile(r"(\w+)=(\S+)")
@@ -243,6 +252,7 @@ def analyze(args):
         lines.extend(read_lines(f))
 
     records, done_kv, mount_rc = [], None, None
+    interleaved = []
     for line in lines:
         s = line.strip()
         m = M_RE.match(s)
@@ -258,8 +268,20 @@ def analyze(args):
                 "rc": m.group(4), "details": details,
                 "src": src_m.group(1) if src_m else "-",
                 "pkg": pkg_val,
-                "err": "",
+                "err": "", "interleaved": False,
             })
+            continue
+        m = TRUNC_RE.match(s)
+        if m:
+            # 记录尾段（rc/details）被控制台输出冲掉：state 可信、错误文本丢失。
+            # 打断的若是 INSMOD_FAIL，err 为空会落进 OTHER 硬失败 —— 不静默放过。
+            records.append({
+                "idx": int(m.group(1)), "name": m.group(2), "state": m.group(3),
+                "rc": "-", "details": "", "src": "-", "pkg": "",
+                "err": "", "interleaved": True,
+            })
+            interleaved.append({"idx": int(m.group(1)), "name": m.group(2),
+                                "state": m.group(3), "raw": s[:200]})
             continue
         m = DONE_RE.match(s)
         if m:
@@ -467,7 +489,8 @@ def analyze(args):
     gate("G-M1", done_kv is not None and mount_rc == 0 and counts_ok
          and total == len(module_list),
          "完成标记=%s mount_rc=%s 逐条=%d 清单=%d" %
-         (done_kv is not None, mount_rc, total, len(module_list)))
+         (done_kv is not None, mount_rc, total, len(module_list)) +
+         ("，其中被控制台插断=%d" % len(interleaved) if interleaved else ""))
 
     hard = [f for f in failures]
     gate("G-M2", not hard,
@@ -655,6 +678,7 @@ def analyze(args):
         "totals": {"total": total, "loaded": loaded, "ok": ok,
                    "fail": fail, "skip": skip, "hazard": hazard},
         "declared": declared,
+        "interleaved": interleaved,
         "failures": [{k: f.get(k) for k in
                       ("idx", "name", "rel", "state", "rc", "category",
                        "err", "symbols")} for f in hard],
@@ -723,6 +747,14 @@ def emit(args, result):
                  % (t["total"], t["loaded"], t["ok"], t["fail"],
                     t["skip"], t["hazard"]))
     lines.append("")
+    if result.get("interleaved"):
+        lines.append("## 控制台插断记录（%d，按前缀恢复 state，details 丢失）"
+                     % len(result["interleaved"]))
+        for x in result["interleaved"]:
+            lines.append("- idx=%d name=%s state=%s raw=%s"
+                         % (x["idx"], x["name"], x["state"],
+                            x["raw"].replace("|", "\\|")))
+        lines.append("")
     lines.append("## 门禁")
     for g in result["gates"]:
         if g.get("level") == "warn":
@@ -873,7 +905,9 @@ def make_fixture(logs_dir, records, done=True, dmesg="", installed=None,
         body += "---DMESG-BEGIN---\n%s\n---DMESG-END---\n" % dmesg
     stats = {"loaded": 0, "ok": 0, "fail": 0, "skip": 0}
     for line in records:
-        state = line.split("|")[3]
+        # 夹具里的"被控制台插断"行同样按前缀取 state（见 S23/S24）
+        m = M_RE.match(line) or TRUNC_RE.match(line)
+        state = m.group(3) if m else ""
         if state == "LOADED":
             stats["loaded"] += 1
         elif state == "INSMOD_OK":
@@ -1080,6 +1114,17 @@ def run_selftest():
                        "[  1.2] BUG: unable to handle kernel NULL pointer\n"
                        "[  1.3] IP: [<ffffffff813e6116>] syno_usb_info_enum+0xa6/0x130\n"
                        "[  1.4] ---[ end trace 1 ]---\n"),
+        # 串口控制台消息插进记录行中间（2026-11-06 DS1621+ 实测形态）：
+        # state 可从前缀恢复、记录计入总数，G-M1 不再假失败（S23）；
+        # 若被打断的是 INSMOD_FAIL，err 文本丢失 → OTHER 硬失败，不静默放过（S24）。
+        scenario("S23 控制台插断记录按前缀恢复", 0, "控制台插断记录（1",
+                 [ok, "@@M|2|b|INSMOD_OK[   92.785733] modtest-marker "
+                       "idx=3 name=c"],
+                 installed=["a.ko", "b.ko"]),
+        scenario("S24 插断的 INSMOD_FAIL 仍硬失败", 1, "OTHER",
+                 ["@@M|1|a|INSMOD_FAIL[   1.123456] modtest-marker "
+                  "idx=2 name=b"],
+                 installed=["a.ko"]),
     ]
 
     failed = 0

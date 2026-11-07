@@ -159,6 +159,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          python3 -I .github/scripts/modtest/parse_results.py --selftest
           python3 -I .github/scripts/modtest/check_scsi_result.py --selftest
           python3 -I .github/scripts/modtest/check_bootlog.py --selftest
 
