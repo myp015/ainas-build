@@ -839,3 +839,30 @@ Task#221 7.4.1 virtio-scsi 轮（run 42234442466）：DS3622xs+ 的 install job
 教训：CI 里任何会碰网络的 shell 命令都要有**显式边界**。没有超时的
 `apt`/`git clone`/`docker pull` 会让失败表现成「job 卡住」——既拿不到日志，
 也拿不到归因；给 job 加总超时只是把无界等待换成有界无现场，两者都要做。
+
+## 2026-11-07 — 托管 runner 失联：日志 BlobNotFound 时先判基础设施，用心跳取证
+
+Task#221 补充轮次（2026-11-07 01:02Z~08:00Z）：5 批共 13 个 install+test job
+在「编译镜像并安装 DSM」阶段 67~94 分钟后被判 `failure`/`cancelled`，注解原文
+`The hosted runner lost communication with the server...`；job 日志 blob 完全不存在
+（`gh api repos/<repo>/actions/jobs/<id>/logs` 返回 215 字节 XML），
+`gh run view --log-failed` 也拿不到任何内容。
+
+排查中被证伪的两个假设（都花了整轮矩阵的时间）：
+1. **apt 无超时挂死**——前一轮已给 apt 加 `timeout 600` + Acquire 超时，仍失联；
+2. **托管 runner 磁盘写满**——加清理步骤 + 打印 df 后实测 145G 总量 / 86G 可用
+   （清理后 107G），DS425+ guest 里的 `ata7 ... ABRT` 是** guest 侧**现象，
+   不是宿主磁盘满。
+
+判据（决定是不是我们的缺陷）：
+- 同 head、同参数在 08:22Z 之后重跑**全部成功**，安装阶段 10~12 分钟，
+  与历史健康轮次一致；
+- 期间 GitHub 状态页无 Actions 事故公告（最近一次是 11-05T23:36Z→11-06T00:20Z）
+  ⇒ 托管 runner 侧偶发，不需要为它改我们的构建逻辑，也**不能据此判定任何
+  平台/驱动失败**（失败 job 无采集数据，结论只能是「未测」）。
+
+取证手段（`f3417f78`）：每个阶段结束把一个 `beat-<MODEL>-<RUN_ID>.txt` 传到
+测试 Release（`gh release upload --clobber`，失败不影响主流程）。runner 被
+硬杀时日志全丢，但 Release 资产还在，能读出「最后完成的阶段」，从而区分
+「卡在某个子步骤（我们可修）」与「整台 runner 掉线（不可修）」。
+教训：**日志拿不到时不要靠猜**——先布置便宜的远端心跳，再重跑。
