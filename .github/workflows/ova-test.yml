@@ -484,7 +484,20 @@ jobs:
           PART1_PATH="/mnt/p1"
           PART3_PATH="/mnt/p3"
 
+          # 失联取证：runner 被硬杀时 job 日志不会上传（BlobNotFound），事后
+          # 完全没有现场。每个阶段往测试 Release 传一个几百字节的心跳文件，
+          # 事后至少能读到「最后一个完成的阶段」。上传失败不阻断主流程
+          # （失联本身就意味着这一步大概率也传不上去）。
+          BEAT_FILE="$WORKDIR/beat-${MODEL//+/p}-${GITHUB_RUN_ID}.txt"
+          beat() {
+            printf '%s %s\n' "$(date -u +%H:%M:%SZ)" "$*" >> "$BEAT_FILE"
+            GH_REPO="${BEAT_REPO:-myp015/ainas-2in1}" GH_TOKEN="${ACTION_TOKEN}" \
+              gh release upload "$RELEASE_TAG" "$BEAT_FILE" --clobber \
+              >/dev/null 2>&1 || true
+          }
+
           . "$AINAS2IN1_DIR/script/2in1func.sh"
+          beat "step6 开始"
 
           LINE_REQ="${LINE:-7.4.1}"
           export LINE_REQ
@@ -528,11 +541,13 @@ jobs:
             exit 1
           fi
 
+          beat "依赖安装完成"
           mkdir -p rr
           echo "[INFO] 解压 base 前磁盘可用：$(df -h / | awk 'NR==2{print $4}')"
           zstd -d -q -f "base/${BASE_ASSET}" -o rr/rr.img
           rm -rf base
           echo "[INFO] 解压 base 后磁盘可用：$(df -h / | awk 'NR==2{print $4}')"
+          beat "base 解压完成"
 
           # 测试流程不改 grub.cfg：patch_part1 的 rr 变体只替换菜单标题/欢迎文案，
           # 不改变启动项与内核路径；引导由 dsm_setup 传参数直达。跳过可省一次
@@ -552,6 +567,7 @@ jobs:
           if [ "${KERNEL}" = "custom" ]; then
             : "${ACTION_TOKEN:?缺少 ACTION_TOKEN}"
             echo "[INFO] 自定义内核资产: ${CKS_KEY}"
+            beat "开始下载 ainas-cks 资产"
             sudo mount "${DISK_LOOP}p3" "$PART3_PATH"
             [ -d "$PART3_PATH/cks" ] || {
               echo "[E] rr.img 的 p3 缺少 cks 目录" >&2; exit 1; }
@@ -593,6 +609,7 @@ jobs:
               exit 1; }
             rm -f /tmp/cks-bzImage
             sudo umount "$PART3_PATH"
+            beat "cks 资产注入完成"
           fi
 
           # ── 官方内核：编译前把 p3/modules 的本平台包换成待测 Release ────
@@ -620,12 +637,15 @@ jobs:
             sudo cp -f "${MOD_TGZ}" "$PART3_PATH/modules/${MODULES_KEY}.tgz"
             sudo umount "$PART3_PATH"
             rm -rf "$MODPKG_DIR"
+            beat "模块包注入完成"
           fi
 
           echo "[INFO] 构建镜像前磁盘可用：$(df -h / | awk 'NR==2{print $4}')"
+          beat "开始 docker_build（编译镜像）"
           docker_build rr "$MODEL" "$VERSION" "$LANGUAGE" "$ADDONS" "$RR_DOCKER_TAG" \
             "$WORKDIR"
           echo "[INFO] 构建镜像后磁盘可用：$(df -h / | awk 'NR==2{print $4}')"
+          beat "docker_build 完成"
 
           sudo mkdir -p "$PART3_PATH"
           sudo mount "${DISK_LOOP}p3" "$PART3_PATH"
@@ -720,11 +740,13 @@ jobs:
             echo "[E] rr.img 不存在于 $WORKDIR/rr/rr.img" >&2
             exit 1
           fi
+          beat "开始 dsm_setup（安装 DSM）"
           dsm_setup "$MODEL" "$LINE_REQ" "$PAT_JSON_URL" "$DSM_INSTALL_DIR" \
             "$WORKDIR" \
             "$AINAS2IN1_DIR/docker/vm-docker-compose.yaml" "$WORKDIR/rr/docker-compose.yaml" \
             "${ARTIFACT_BRAND}" "$SAFE_TAG" "${BOOT_TIMEOUT}" \
             "s#file=/rr.img#file=/storage/alpine/rr.img#g"
+          beat "dsm_setup 完成"
 
           echo "[INFO] 安装完成后磁盘可用：$(df -h / | awk 'NR==2{print $4}')"
           echo "ARTIFACT=${ARTIFACT}" >> "$GITHUB_ENV"
@@ -750,8 +772,19 @@ jobs:
 
       - name: 启动 profile 并采集日志
         shell: bash
+        env:
+          ACTION_TOKEN: ${{ secrets.AiNas }}
         run: |
           set -euo pipefail
+
+          # 与「编译镜像并安装 DSM」同构的失联取证心跳（见该步骤注释）。
+          BEAT_FILE="$PWD/beat-${MODEL//+/p}-${GITHUB_RUN_ID}.txt"
+          beat() {
+            printf '%s %s\n' "$(date -u +%H:%M:%SZ)" "$*" >> "$BEAT_FILE"
+            GH_REPO="${BEAT_REPO:-myp015/ainas-2in1}" GH_TOKEN="${ACTION_TOKEN:-}" \
+              gh release upload "$RELEASE_TAG" "$BEAT_FILE" --clobber \
+              >/dev/null 2>&1 || true
+          }
 
           LOG_DIR="/tmp/modtest-logs"
           CMD_DIR="${LOG_DIR}/cmds"
@@ -774,9 +807,11 @@ jobs:
           run_one() {
             local profile="$1" cmd="$2" web_mode="${3:-strict}"
             echo "[INFO] profile=${profile} web_mode=${web_mode}"
+            beat "profile ${profile} 开始"
             bash .github/scripts/modtest/run_profile.sh \
               "$PWD" "${COMPOSE}" "${profile}" \
               "${cmd}" "${LOG_DIR}" "${DRIVER}" "${web_mode}"
+            beat "profile ${profile} 完成"
           }
 
           # 1) base：只做启动日志与设备基线（也是双源对比的干净基线）
