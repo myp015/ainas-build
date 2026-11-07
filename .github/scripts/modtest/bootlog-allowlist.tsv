@@ -5,12 +5,21 @@
 #
 # 只能登记「只报告」类（report 级），用于静音已知环境噪声：
 #   FIRMWARE_FAIL      固件请求失败（QEMU 无对应硬件）
-#   MODPROBE_MISSING   启动脚本尝试加载的可选模块不在包里（如 coretemp）
-#   TAINT              Out-of-tree/Proprietary 模块的 taint 提示
-#   DMESG_WARNING      内核 WARNING（如 syno gpio 提示）
+#   MODPROBE_MISSING   启动脚本尝试加载的可选模块不在包里（name=模块名）
+#   TAINT              Out-of-tree/Proprietary 模块的 taint 提示（name 恒为 *）
+#   DMESG_WARNING      内核 WARNING（name=warning_tag() 提取的标签，如 RETBleed /
+#                      inconsistent syno gpio info）；未登记的标签照旧只报告
 # 硬失败类别（KERNEL_FAULT / UNKNOWN_SYMBOL / VERMAGIC / GPL_ONLY /
 # LOADING_FAILED）**永不读取本表**：确需豁免必须改判据本身并留下实证。
 #
-# 第一条登记须等第一轮全平台实测后按真实命中补；未实测前不预先填。
-# 示例（取消注释并写明跨平台实测依据）：
-# *	*	*	*	*	*	FIRMWARE_FAIL	QEMU 无对应硬件，固件请求失败属环境事实（全平台实测）
+# 下列条目全部来自 Task#221 五轮全平台实测（2026-11-05~07：DSM 7.2.2/7.3.2/7.4.1，
+# 官方 13~15 平台 + custom 4 平台，每轮 17~19 个 platform-job）；括号内为本地留档
+# 日志的实际命中数。FIRMWARE_FAIL 实测零命中，故不登记（留给未来真回归）。
+*	*	*	*	*	*	TAINT	out-of-tree（redpill）/Proprietary（syno_extent_pool）/Synology Inc.（syno_hddmon）许可提示，全平台必然出现；许可 taint 不代表缺陷（实测 94+83+8 条）
+*	*	*	*	*	k10temp	MODPROBE_MISSING	AMD 温度传感器，QEMU 无对应硬件；启动脚本仍尝试加载可选模块（实测 43 条）
+*	*	*	*	*	virtiofs	MODPROBE_MISSING	DSM 包不提供 virtiofs/9p，启动脚本尝试加载可选模块（实测 43 条）
+*	*	*	*	*	coretemp	MODPROBE_MISSING	Intel 温度传感器，QEMU 无对应硬件/该平台包内无此模块（实测 33 条）
+*	*	*	*	*	hwmon-vid	MODPROBE_MISSING	QEMU 无对应硬件（实测 18 条）
+*	*	*	*	*	adt7475	MODPROBE_MISSING	QEMU 无对应硬件（实测 4 条）
+*	*	*	*	*	RETBleed	DMESG_WARNING	CPU 侧缓解策略提示（Spectre v2 缓解不覆盖 RETBleed），非内核缺陷（实测 19 条）
+*	*	*	*	*	inconsistent syno gpio info	DMESG_WARNING	QEMU 无实际 GPIO/盘位检测硬件，syno gpio 自检提示属环境事实（实测 6 条）

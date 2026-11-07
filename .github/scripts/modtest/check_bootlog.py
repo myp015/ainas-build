@@ -20,6 +20,8 @@ install 阶段的 `_serial_full.log` / `_messages.log` 虽然随 artifact 上传
           的 BUILTIN_DUP 段登记（历史实测 button/i8042/check_signature）
   只报告：exports duplicate symbol（未登记）、modprobe 找不到可选模块、
           firmware 加载失败、taint 提示、WARNING
+          —— 只报告类可用 bootlog-allowlist.tsv 按实测登记静音（打印为
+          [EXEMPT-INFO] 并写入 json），硬失败类永不读该表
 
 去重与防误判：串口回读会打印命令本身（含 `grep -iE 'BUG:|Unknown symbol'`
 模式串），按命令文件整行过滤；同一行在 serial_full 与 messages 重复出现时
@@ -71,6 +73,23 @@ def normalize(line):
     return s.strip(), kernel_ts
 
 
+def warning_tag(text):
+    """提取内核 WARNING 的稳定标签，供 bootlog-allowlist 精确静音。
+
+    标签只用于白名单匹配，不参与判定：`<tag>: WARNING: ...` 取前缀（实测
+    `RETBleed: WARNING: ...`），`WARNING: <短语>, ...` 取冒号后首个短语（实测
+    `WARNING: inconsistent syno gpio info, hdd detect`）。
+
+    为什么要精确标签：若拿空标签（即 `*`）登记 DMESG_WARNING，后来任何模块
+    的 WARN_ON 都会被静音；只有实测登记过的标签才静音，其余照旧只报告。
+    """
+    before, _, after = text.partition("WARNING:")
+    pre = before.rstrip(": ").strip()
+    if pre:
+        return pre
+    return after.strip().split(",")[0].split(":")[0].strip()
+
+
 def dedup_key(text):
     s = re.sub(r"0x[0-9a-fA-F]+", "0xADDR", text)
     s = re.sub(r"\bCPU#\d+", "CPU#N", s)
@@ -110,7 +129,7 @@ def classify(line, kernel_ts, dup_modules):
     if TAINT_RE.search(line):
         out.append(("TAINT", REPORT, "", line))
     if kernel_ts and "WARNING:" in line:
-        out.append(("DMESG_WARNING", REPORT, "", line))
+        out.append(("DMESG_WARNING", REPORT, warning_tag(line), line))
     return out
 
 
@@ -344,6 +363,25 @@ BOOT_ALLOW = ("*\t*\t*\t*\t*\t*\tFIRMWARE_FAIL\t"
 MODPROBE = ("[    9.3] modprobe: FATAL: Module coretemp not found in directory "
             "/lib/modules\n")
 
+# 实测噪声（Task#221 全平台轮次）：taint 提示、modprobe 找不到可选模块、
+# 内核 WARNING 是每轮必现的只报告项；这批用例验证「按实测登记静音」不会连
+# 未登记的同类项一起静音。
+TAINT_NOISE = (
+    "[    7.812] redpill: loading out-of-tree module taints kernel.\n"
+    "[    8.004] syno_extent_pool: module license 'Proprietary' taints kernel.\n")
+
+WARN_RETBLEED = ("[    6.121] RETBleed: WARNING: Spectre v2 mitigation leaves "
+                 "CPU vulnerable to RETBleed attacks, data leaks possible!\n")
+WARN_GPIO = "[    8.232] WARNING: inconsistent syno gpio info, hdd detect\n"
+WARN_NOVEL = ("[    8.301] WARNING: CPU: 3 PID: 1 at lib/foo.c:42 "
+              "foo+0x1a/0x30\n")
+
+BOOT_ALLOW_ENV = (
+    "*\t*\t*\t*\t*\t*\tTAINT\tOut-of-tree/Proprietary 许可提示，全平台必然出现\n"
+    "*\t*\t*\t*\t*\tcoretemp\tMODPROBE_MISSING\tQEMU 无对应硬件\n"
+    "*\t*\t*\t*\t*\tRETBleed\tDMESG_WARNING\tCPU 侧缓解提示\n"
+    "*\t*\t*\t*\t*\tinconsistent syno gpio info\tDMESG_WARNING\tQEMU 无 GPIO\n")
+
 CASES = [
     dict(name="干净日志通过", text=CLEAN, rc=0, has="[PASS]"),
     dict(name="Unknown symbol 硬失败", text=UNKNOWN, rc=1,
@@ -368,6 +406,20 @@ CASES = [
          boot_allow=BOOT_ALLOW),
     dict(name="modprobe 找不到模块只报告", text=MODPROBE, rc=0,
          has="[WARN] MODPROBE_MISSING"),
+    dict(name="TAINT 噪声按白名单静音", text=TAINT_NOISE, rc=0,
+         has="[EXEMPT-INFO] TAINT", absent=("[WARN] TAINT",),
+         boot_allow=BOOT_ALLOW_ENV),
+    dict(name="WARNING 按标签精确静音，未登记的照旧报告",
+         text=WARN_RETBLEED + WARN_GPIO + WARN_NOVEL, rc=0,
+         has="[WARN] DMESG_WARNING: WARNING: CPU: 3",
+         absent=("[WARN] DMESG_WARNING: RETBleed",
+                 "[WARN] DMESG_WARNING: WARNING: inconsistent",
+                 "[EXEMPT-INFO] DMESG_WARNING: WARNING: CPU"),
+         boot_allow=BOOT_ALLOW_ENV),
+    dict(name="已登记的 modprobe 可选模块静音", text=MODPROBE, rc=0,
+         has="[EXEMPT-INFO] MODPROBE_MISSING",
+         absent=("[WARN] MODPROBE_MISSING",),
+         boot_allow=BOOT_ALLOW_ENV),
 ]
 
 
