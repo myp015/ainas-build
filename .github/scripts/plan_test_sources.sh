@@ -183,7 +183,9 @@ for r in sel:
 print(",".join(out))
 PY
   )" || exit 1
-  echo "[INFO] all_platforms 展开 $(printf '%s' "${TEST_MODELS}" | tr ',' '\n' | wc -l) 个型号: ${TEST_MODELS}"
+  # 不能用 `tr ',' '\n' | wc -l`：末项没有换行符，会少数一个（实测 13 个型号
+  # 只报 12 个）。awk 按逗号数字段才准。
+  echo "[INFO] all_platforms 展开 $(printf '%s' "${TEST_MODELS}" | awk -F, '{print NF}') 个型号: ${TEST_MODELS}"
 fi
 
 # TEST_MODELS（逗号分隔）优先于 ALL_MODELS/MODEL_*：
