@@ -282,8 +282,17 @@ jobs:
 
           . "$AINAS2IN1_DIR/script/2in1func.sh"
 
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq zstd >/dev/null
+          # 同 install+test：镜像源挂死要有界（见该 job 的注释）。
+          if ! timeout 600 sudo apt-get update -qq \
+               -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 \
+               -o Acquire::Retries=3; then
+            echo "[E] apt-get update 失败或超时（600s）" >&2
+            exit 1
+          fi
+          if ! timeout 600 sudo apt-get install -y -qq zstd >/dev/null; then
+            echo "[E] apt-get install zstd 失败或超时（600s）" >&2
+            exit 1
+          fi
 
           DISK_LOOP=$(sudo losetup -f)
           sudo losetup -P "$DISK_LOOP" rr/rr.img
@@ -487,8 +496,22 @@ jobs:
           echo "[INFO] 型号=${MODEL} 目标DSM版本=${VERSION} 源=${SOURCE} 平台=${PLATFORM} 内核=${KVER}"
 
           echo "[INFO] 安装构建依赖"
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq gettext cpio zstd dosfstools rsync qemu-utils >/dev/null
+          # 镜像源偶发挂死：2026-11-06 DS3622xs+（run 42234442466）在
+          # `apt-get update -qq` 后无任何输出，一直挂到 6h 上限被取消。
+          # 用 timeout 兜底 + Acquire 超时/重试，把静默挂死变成有界失败。
+          if ! timeout 600 sudo apt-get update -qq \
+               -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 \
+               -o Acquire::Retries=3; then
+            echo "[E] apt-get update 失败或超时（600s）" >&2
+            exit 1
+          fi
+          if ! timeout 600 sudo apt-get install -y -qq \
+               -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 \
+               -o Acquire::Retries=3 \
+               gettext cpio zstd dosfstools rsync qemu-utils >/dev/null; then
+            echo "[E] apt-get install 失败或超时（600s）" >&2
+            exit 1
+          fi
 
           mkdir -p rr
           zstd -d -q -f "base/${BASE_ASSET}" -o rr/rr.img
