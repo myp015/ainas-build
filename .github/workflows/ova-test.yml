@@ -363,6 +363,11 @@ jobs:
     # 因此显式允许 skipped。
     if: ${{ always() && needs.plan.result == 'success' && (needs.prepare-base.result == 'success' || needs.prepare-base.result == 'skipped') }}
     runs-on: ubuntu-24.04
+    # 历史实测正常 job 20~50 分钟；给 120 分钟兜底，避免托管 runner 静默失联时
+    # 一直拖到 6 小时默认上限（2026-11-06、2026-11-07 两轮共 12 个 job 都是
+    # 卡在安装/采集步骤后被 runner lost communication 打断，无任何日志）。
+    # 超时后 always() 的收尾/上传步骤仍会执行，能拿到现场。
+    timeout-minutes: 120
     strategy:
       fail-fast: false
       max-parallel: 2
