@@ -13,17 +13,17 @@
     "logs": "/tmp/modtest-logs"
   },
   "totals": {
-    "total": 661,
-    "loaded": 130,
-    "ok": 514,
+    "total": 663,
+    "loaded": 131,
+    "ok": 515,
     "fail": 17,
     "skip": 0,
     "hazard": 0
   },
   "declared": {
-    "total": "661",
-    "loaded": "130",
-    "ok": "514",
+    "total": "663",
+    "loaded": "131",
+    "ok": "515",
     "fail": "17",
     "skip": "0",
     "status": "done"
@@ -37,97 +37,97 @@
       "err": "insmod: ERROR: could not insert module /tmp/modtest-payload/acpi-cpufreq.ko: No such device"
     },
     {
-      "idx": 89,
+      "idx": 90,
       "name": "binder_linux",
       "category": "BUILTIN",
       "err": "insmod: ERROR: could not insert module /tmp/modtest-payload/binder_linux.ko: File exists"
     },
     {
-      "idx": 128,
+      "idx": 129,
       "name": "ch35x_38x",
       "category": "ENV",
       "err": "insmod: ERROR: could not insert module /tmp/modtest-payload/ch35x_38x.ko: No such device or address"
     },
     {
-      "idx": 136,
+      "idx": 137,
       "name": "coretemp",
       "category": "ENV",
       "err": "insmod: ERROR: could not insert module /tmp/modtest-payload/coretemp.ko: No such device"
     },
     {
-      "idx": 140,
+      "idx": 141,
       "name": "cpufreq_userspace",
       "category": "ENV",
       "err": "insmod: ERROR: could not insert module /tmp/modtest-payload/cpufreq_userspace.ko: Device or resource busy"
     },
     {
-      "idx": 180,
+      "idx": 181,
       "name": "f71882fg",
       "category": "ENV",
       "err": "insmod: ERROR: could not insert module /tmp/modtest-payload/f71882fg.ko: No such device"
     },
     {
-      "idx": 200,
+      "idx": 201,
       "name": "gpio_f7188x",
       "category": "ENV",
       "err": "insmod: ERROR: could not insert module /tmp/modtest-payload/gpio-f7188x.ko: No such device"
     },
     {
-      "idx": 201,
+      "idx": 202,
       "name": "gpio_it87",
       "category": "ENV",
       "err": "insmod: ERROR: could not insert module /tmp/modtest-payload/gpio-it87.ko: No such device"
     },
     {
-      "idx": 203,
+      "idx": 204,
       "name": "gpio_sch311x",
       "category": "ENV",
       "err": "insmod: ERROR: could not insert module /tmp/modtest-payload/gpio-sch311x.ko: No such device"
     },
     {
-      "idx": 235,
+      "idx": 237,
       "name": "intel_idle",
       "category": "ENV",
       "err": "insmod: ERROR: could not insert module /tmp/modtest-payload/intel_idle.ko: No such device"
     },
     {
-      "idx": 267,
+      "idx": 269,
       "name": "ipmi_si",
       "category": "ENV",
       "err": "insmod: ERROR: could not insert module /tmp/modtest-payload/ipmi_si.ko: No such device"
     },
     {
-      "idx": 279,
+      "idx": 281,
       "name": "it87",
       "category": "ENV",
       "err": "insmod: ERROR: could not insert module /tmp/modtest-payload/it87.ko: No such device"
     },
     {
-      "idx": 293,
+      "idx": 295,
       "name": "kvm_amd",
       "category": "ENV",
       "err": "insmod: ERROR: could not insert module /tmp/modtest-payload/kvm-amd.ko: Operation not supported"
     },
     {
-      "idx": 294,
+      "idx": 296,
       "name": "kvm_intel",
       "category": "ENV",
       "err": "insmod: ERROR: could not insert module /tmp/modtest-payload/kvm-intel.ko: Operation not supported"
     },
     {
-      "idx": 353,
+      "idx": 355,
       "name": "nct6683",
       "category": "ENV",
       "err": "insmod: ERROR: could not insert module /tmp/modtest-payload/nct6683.ko: No such device"
     },
     {
-      "idx": 354,
+      "idx": 356,
       "name": "nct6775",
       "category": "ENV",
       "err": "insmod: ERROR: could not insert module /tmp/modtest-payload/nct6775.ko: No such device"
     },
     {
-      "idx": 551,
+      "idx": 553,
       "name": "syno_hddpwrctl_test",
       "category": "ENV",
       "err": "insmod: ERROR: could not insert module /tmp/modtest-payload/syno_hddpwrctl_test.ko: Operation not permitted"
@@ -138,8 +138,8 @@
   "dmesg_warnings": [],
   "firmware_fail": 1,
   "install": {
-    "installed": 689,
-    "boot_loaded": 144,
+    "installed": 691,
+    "boot_loaded": 145,
     "gap": [],
     "extra": [
       "amd-xgbe.ko",
@@ -182,7 +182,7 @@
     "checked": true,
     "pass": true,
     "reluser": "5.10.55+ (RR@RROrg)",
-    "uts": "#1 SMP Wed Nov 4 16:42:37 CST 2026",
+    "uts": "#1 SMP Tue Nov 10 17:26:08 CST 2026",
     "detail": "发现 Linux version 行=1"
   },
   "package_meta": {
@@ -194,11 +194,11 @@
     "kver": "5.10.55",
     "modules_key": "v1000nk-7.4-5.10.55",
     "package_path": "/mnt/p3/cks/modules-v1000nk-7.4-5.10.55.tgz",
-    "package_sha256": "e83921f6ad8fdebe247bed58a817b67b1e6a7ab16abad114a66de9f4c6fed47c",
-    "package_entries": "661",
-    "test_payload_sha256": "e83921f6ad8fdebe247bed58a817b67b1e6a7ab16abad114a66de9f4c6fed47c",
+    "package_sha256": "03ad8fb852076408cefa0b91c991f9edb2175e56bacabbdbd9b39b27a95723ea",
+    "package_entries": "663",
+    "test_payload_sha256": "03ad8fb852076408cefa0b91c991f9edb2175e56bacabbdbd9b39b27a95723ea",
     "profile": "modtest"
   },
-  "module_count": 661,
+  "module_count": 663,
   "install_gap": []
 }
