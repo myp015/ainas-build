@@ -27,4 +27,6 @@ for b in /sys/block/*; do l=$(ls -l "$b" 2>/dev/null); hn=$(printf '%s' "$l" | s
 # 定向故障行：dmesg tail 500 在 5.10 大日志下可能截掉早期 Oops/符号异常
 dmesg | grep -iE 'BUG:|Oops|Kernel panic|Unable to handle|general protection|Unknown symbol|Invalid module format|GPL-only|exports duplicate symbol|Loading modules failed' | tail -n 400
 tail -c 100000 /var/log/messages 2>/dev/null | grep -iE 'Unknown symbol|Invalid module format|GPL-only|exports duplicate symbol|Loading modules failed|modprobe.*not found' | tail -n 400
+# SMB 运行态（安装期已由 dsm_pkg_check_serial 硬校验；这里只记录，供 profile 日志对照）
+echo "@@SMB|$( if [ -x /bin/systemctl ]; then /bin/systemctl is-active pkg-synosamba-smbd.service 2>/dev/null; else /usr/syno/bin/synosystemctl get-active-status samba 2>/dev/null; fi | head -n1 )|445=$( (ss -lnt 2>/dev/null || netstat -lnt 2>/dev/null) | grep -c ':445' )"
 echo "@@PROBE_DONE@@"
