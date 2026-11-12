@@ -451,7 +451,8 @@ jobs:
           # 先让 patch_part1 自己挂/卸 p1，再把 rr.img 长期 attached；
           # 同一镜像同时挂两个 loop 时，第二个 loop 可能不生成分区节点
           # （实测 /dev/loop1p1 不存在导致 mount 失败）。
-          patch_part1 rr/rr.img "$PART1_PATH" rr "$MODEL"
+          # 第 6 参数是菜单标题里的 DSM 系列短版本（如 7.4）
+          patch_part1 rr/rr.img "$PART1_PATH" rr "$MODEL" "" "${VER_MAIN%.*}"
 
           # rr.img 必须保持 attached：容器内 .bashrc 按分区 label 挂载 p1/p2/p3
           DISK_LOOP=$(sudo losetup -f)
