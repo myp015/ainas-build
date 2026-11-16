@@ -287,6 +287,12 @@ SCSI 只跑 SAS 两型（megaraid + mptsas）、崩溃硬失败/识别问题先�
       勾选+custom 同名 `_cks` → 去重 1 个；两个自定义 `_cks` → 2 个；
       6.2.4 + cks 勾选/`_cks` 输入均退出 1；rr 全选 11 任务（含 original）；
       ova 仅 cks 不报「至少一个型号」。
-- [ ] CI：三个工作流各跑一次自选 3 个 cks（ainas、7.4.1），核对 `_cks` 制品名、
-      `已切换自定义内核` / `自定义内核构建校验通过` 日志。
-- [ ] CI：2in1/rr 官方+csk 混合冒烟，确认 cks 跳过升级包、官方任务生成官方名升级包。
+- [x] CI：三个工作流各跑一次自选 3 个 cks（ainas、7.4.1；实际 latest=26.11.2）：
+      2in1 #43826054725、ova #43826091599、rr #43826095421 全部 success。
+      9 个 cks job 均出现 `已切换自定义内核: <platform>-7.4-5.10.55` 与
+      `自定义内核构建校验通过`；Release 出现
+      `DS925+_cks` / `DS425+_cks` / `SA6400_cks` 制品，无 `updateall-*_cks*`。
+- [x] CI：2in1 官方+csk 混合冒烟 #43829190131 成功：cks job `OFFICIAL_PRESENT=true`，
+      实际执行「不再重复打包」跳过分支；官方 job 复用
+      `updateall-DS925+-26.11.2.zip`；两个 dsm-logs artifact 分别为
+      `dsm-logs-DS925+-43829190131` / `dsm-logs-DS925+_cks-43829190131`。
