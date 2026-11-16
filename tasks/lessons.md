@@ -866,3 +866,21 @@ Task#221 补充轮次（2026-11-07 01:02Z~08:00Z）：5 批共 13 个 install+te
 硬杀时日志全丢，但 Release 资产还在，能读出「最后完成的阶段」，从而区分
 「卡在某个子步骤（我们可修）」与「整台 runner 掉线（不可修）」。
 教训：**日志拿不到时不要靠猜**——先布置便宜的远端心跳，再重跑。
+
+## 2026-11-16 — cks 变体与官方型号同批构建：ARTIFACT、升级包与日志名都会撞车
+
+- `dsm_setup` 会用传入的基础 MODEL **无条件覆盖全局 ARTIFACT**（2in1func.sh:2093），
+  函数内只打印不读取；cks 变体必须在调用后按 `NAME_MODEL` 重置，否则产物落在官方名。
+- 同一基础型号的官方任务与 cks 任务共享 `updateall-<基础型号>-<RR tag>.zip`；
+  plan 输出 `official_present=true` 时 cks 任务跳过生成/发布，只有 cks 单独运行
+  才沿用「已存在则复用，否则生成到官方文件名」。
+- `dsm_setup` 的日志文件名自带基础 MODEL，两个变体同名；Actions artifact 用
+  `matrix.label` 区分，失败日志上传 Release 时 cks 任务加 `_cks` 前缀。
+- 2in1 的「编译镜像」run 块仍然不能出现 `${{ }}`：新字段只放 job/step env，
+  run 块内用 `${TASK_KIND}`/`${NAME_MODEL}` 等 shell 变量。
+- **set -e 陷阱**：`[ cond ] && arr+=("$x")` 若是循环体最后一条命令且 cond 为假，
+  整个循环体返回 1，`set -e` 会静默退出（实测去重函数第二次遇到重复时直接退出，
+  无任何报错）。循环里判断必须写成 `if [ cond ]; then arr+=(...); fi`。
+- `custom_models` 的 `_cks` 只做语法展开，不校验资产；当前 p3 cks 只覆盖
+  epyc7002/geminilakenk/r1000nk/v1000nk 的 5.10.55，其它平台会在编译前被
+  `apply_kernel_choice` fail fast（如 DS1621+ 属 v1000/4.4.302，不可用）。

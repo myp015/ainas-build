@@ -262,3 +262,31 @@ SCSI 只跑 SAS 两型（megaraid + mptsas）、崩溃硬失败/识别问题先�
       sha256sum，与 2in1 未裁剪结构一致；1.67GB 远大于按型号包（约 0.46GB），确认未裁剪。
 - [x] 整次运行 conclusion=success：build (DS918+) 使用复用的 base 完成编译与发布，
       未受 prepare-base 清理逻辑调整影响。
+
+# cks 自定义内核型号变体（2026-11-16）
+
+## 变更
+- [x] `plan_sources.sh`：新增 `CKS_MODELS` 与 `kind=cks`；tasks 增 `label` /
+      `official_present`；`custom_models` 支持 `型号_cks`；6.2.4 下 cks 勾选或
+      `_cks` 输入 fail fast；官方/cks 基础型号各自去重。
+- [x] `rr.yml` / `2in1.yml` / `ova.yml`：新增 3 个 cks 布尔输入；build job 用
+      `matrix.label` 命名；`AINAS_KERNEL` 由 `matrix.kind` 推导（cks → custom）；
+      成品名用 `基础型号_cks`，内部编译/菜单/PAT/裁剪仍用基础型号。
+- [x] 2in1/ova：`dsm_setup` 之后按 `NAME_MODEL` 重置被覆盖的 `ARTIFACT`。
+- [x] rr/2in1：同批存在官方型号时，cks 任务跳过 `updateall-<基础型号>-<tag>.zip`
+      的生成与发布；cks 单独运行时仍沿用官方文件名。
+- [x] dsm-logs Actions artifact 与失败镜像名改用 `matrix.label`；失败日志上传
+      Release 时 cks 任务加 `_cks` 前缀，避免与官方任务同名覆盖。
+
+## 验证
+- [x] `bash -n plan_sources.sh`、内嵌 Python AST、三个 workflow PyYAML 解析通过；
+      三个「编译镜像」run 块均无 `${{ }}` 表达式。
+- [x] 假 curl + dummy token 本地干跑（`/www/tmp/plan-dryrun`）：
+      2in1 全选 10 任务（3 个 cks，`official_present=true`）；仅勾 3 个 cks → 3 任务；
+      官方+csk 混合 → cks `official_present=true`；`DS1621+_cks` → 1 个 cks 任务；
+      勾选+custom 同名 `_cks` → 去重 1 个；两个自定义 `_cks` → 2 个；
+      6.2.4 + cks 勾选/`_cks` 输入均退出 1；rr 全选 11 任务（含 original）；
+      ova 仅 cks 不报「至少一个型号」。
+- [ ] CI：三个工作流各跑一次自选 3 个 cks（ainas、7.4.1），核对 `_cks` 制品名、
+      `已切换自定义内核` / `自定义内核构建校验通过` 日志。
+- [ ] CI：2in1/rr 官方+csk 混合冒烟，确认 cks 跳过升级包、官方任务生成官方名升级包。

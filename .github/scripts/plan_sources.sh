@@ -14,15 +14,21 @@
 #   RR_VERSION        指定 RR 版本，留空或 latest 表示取最新
 #   DSM_VERSION       DSM 版本编号
 #   ALL_MODELS        全选 | 自选
-#   CUSTOM_MODELS     自定义型号（逗号分隔）
+#   CUSTOM_MODELS     自定义型号（逗号分隔；<型号>_cks 表示使用 p3 内置 cks 自定义内核）
 #   MODEL_*           各型号勾选状态（字符串 true/false）
+#   MODEL_*_CKS       三个 cks 变体勾选状态（仅 DSM 7.x；6.2.4 下勾选直接报错）
 #
 # 输出（GITHUB_OUTPUT）：
 #   source / rr_tag / rr_asset_url / release_tag / release_title / release_notes
 #   base_asset / docker_image / docker_tag
 #                   选中源的配置；因为每次只允许一个源，直接作为标量输出，
 #                   下游 job 用 needs.plan.outputs.* 读取，不塞整串 JSON 到 env。
-#   tasks           构建任务数组（model/kind），供 build matrix 使用
+#   tasks           构建任务数组（model/kind/label/official_present），供 build matrix 使用
+#                    kind=cks 时 model 仍是基础型号，label 才是成品名（基础型号_cks）；
+#                    official_present 表示同批是否也构建了该基础型号的官方内核版本。
+#
+# cks 变体：全选时额外加入 DS925+_cks / DS425+_cks / SA6400_cks（2in1/ova 共 10 个
+# 任务，rr 另有原版 RR 任务共 11 个）。内部一律按基础型号编译，只有成品名带 _cks。
 #
 # 所有 Release 都发布在 myp015/ainas-2in1 仓库。
 
@@ -72,6 +78,18 @@ fi
 
 # ── 2. 型号选择 ───────────────────────────────────────────────────────
 MODELS=()
+CKS_MODELS=()
+
+# cks 自定义内核只有 DSM 7.2/7.3/7.4 的平台资产，6.2.4 下任何 cks 勾选都提前失败；
+# 6.2.4 的“全选”保持历史行为，不加入 cks 变体。
+if [ "${DSM_VERSION}" = "6.2.4" ]; then
+  for v in "${MODEL_DS925P_CKS:-false}" "${MODEL_DS425P_CKS:-false}" "${MODEL_SA6400_CKS:-false}"; do
+    if [ "${v}" = "true" ]; then
+      echo "[E] cks 变体仅支持 DSM 7.x（内置 cks 资产只有 7.2/7.3/7.4），6.2.4 请取消勾选" >&2
+      exit 1
+    fi
+  done
+fi
 
 # 型号名大小写归一化：pats.json 与 rr 内置型号表区分大小写，
 # 自定义输入写成全小写（如 ds3617xs）会匹配不到型号，先还原成标准写法。
@@ -110,8 +128,9 @@ if [ "${DSM_VERSION}" = "6.2.4" ]; then
     [ "${MODEL_DS425P:-false}"    = "true" ] && MODELS+=("DS425+")
   fi
 elif [ "${ALL_MODELS}" = "全选" ]; then
-  echo "[INFO] 已开启全选，将编译工作流支持的全部型号"
+  echo "[INFO] 已开启全选，将编译工作流支持的全部型号（含 3 个 cks 变体）"
   MODELS+=("DS918+" "DS920+" "DS923+" "DS925+" "DS3622xs+" "SA6400" "DS425+")
+  CKS_MODELS=("DS925+" "DS425+" "SA6400")
 else
   [ "${MODEL_DS918P:-false}"    = "true" ] && MODELS+=("DS918+")
   [ "${MODEL_DS920P:-false}"    = "true" ] && MODELS+=("DS920+")
@@ -120,6 +139,9 @@ else
   [ "${MODEL_DS3622XSP:-false}" = "true" ] && MODELS+=("DS3622xs+")
   [ "${MODEL_SA6400:-false}"    = "true" ] && MODELS+=("SA6400")
   [ "${MODEL_DS425P:-false}"    = "true" ] && MODELS+=("DS425+")
+  [ "${MODEL_DS925P_CKS:-false}" = "true" ] && CKS_MODELS+=("DS925+")
+  [ "${MODEL_DS425P_CKS:-false}" = "true" ] && CKS_MODELS+=("DS425+")
+  [ "${MODEL_SA6400_CKS:-false}" = "true" ] && CKS_MODELS+=("SA6400")
 fi
 
 if [ -n "$(printf '%s' "${CUSTOM_MODELS}" | tr -d '[:space:]')" ]; then
@@ -127,13 +149,22 @@ if [ -n "$(printf '%s' "${CUSTOM_MODELS}" | tr -d '[:space:]')" ]; then
   IFS=',' read -ra CUSTOM_ARR <<< "${CUSTOM_MODELS}"
   for cm in "${CUSTOM_ARR[@]}"; do
     cm="$(printf '%s' "${cm}" | xargs)"
-    [ -n "${cm}" ] && MODELS+=("$(norm_model "${cm}")")
+    [ -n "${cm}" ] || continue
+    if [[ "${cm,,}" == *_cks ]]; then
+      if [ "${DSM_VERSION}" = "6.2.4" ]; then
+        echo "[E] cks 变体仅支持 DSM 7.x: ${cm}" >&2
+        exit 1
+      fi
+      CKS_MODELS+=("$(norm_model "${cm:0:${#cm}-4}")")
+    else
+      MODELS+=("$(norm_model "${cm}")")
+    fi
   done
 fi
 
 # DS3617xs 只有 DSM 6.2 的 PAT；2in1 在 7.x 手动输入也必然在 dsm_setup 阶段才失败，提前拦下
 if [ "${PRODUCT}" = "2in1" ] && [ "${DSM_VERSION}" != "6.2.4" ]; then
-  for m in "${MODELS[@]}"; do
+  for m in "${MODELS[@]}" "${CKS_MODELS[@]}"; do
     if [ "${m}" = "DS3617xs" ]; then
       echo "[E] DS3617xs 仅支持 DSM 6.2.4，请将 DSM 版本改为 6.2.4" >&2
       exit 1
@@ -141,16 +172,30 @@ if [ "${PRODUCT}" = "2in1" ] && [ "${DSM_VERSION}" != "6.2.4" ]; then
   done
 fi
 
-# 去重
-UNIQ_MODELS=()
-for m in "${MODELS[@]}"; do
-  skip=0
-  for u in "${UNIQ_MODELS[@]}"; do
-    [ "${u}" = "${m}" ] && { skip=1; break; }
+# 去重（官方型号与 cks 基础型号各自去重；同型号可同时存在官方与 cks 两个任务）
+dedupe_models() {
+  local -n _src="$1" _dst="$2"
+  _dst=()
+  local m u skip
+  for m in "${_src[@]}"; do
+    skip=0
+    for u in "${_dst[@]}"; do
+      if [ "${u}" = "${m}" ]; then
+        skip=1
+        break
+      fi
+    done
+    if [ "${skip}" -eq 0 ]; then
+      _dst+=("${m}")
+    fi
   done
-  [ "${skip}" -eq 0 ] && UNIQ_MODELS+=("${m}")
-done
+}
+UNIQ_MODELS=()
+dedupe_models MODELS UNIQ_MODELS
 MODELS=("${UNIQ_MODELS[@]}")
+UNIQ_CKS_MODELS=()
+dedupe_models CKS_MODELS UNIQ_CKS_MODELS
+CKS_MODELS=("${UNIQ_CKS_MODELS[@]}")
 
 # ── 6.2 型号前置校验（plan 阶段 fail fast）───────────────────────────────
 # 型号清单以 ainas-rr 的 docs/pats.json 为唯一依据（data.yml 每次刷新的就是它）。
@@ -200,8 +245,8 @@ PY
   echo "[INFO] DSM 6.2.4 型号校验通过: ${MODELS[*]}"
 fi
 
-# rr 始终编原版 RR 镜像，可以不勾型号；其余产品必须至少勾选一个型号
-if [ "${#MODELS[@]}" -eq 0 ] && [ "${PRODUCT}" != "rr" ]; then
+# rr 始终编原版 RR 镜像，可以不勾型号；其余产品必须至少勾选一个官方或 cks 型号
+if [ "${#MODELS[@]}" -eq 0 ] && [ "${#CKS_MODELS[@]}" -eq 0 ] && [ "${PRODUCT}" != "rr" ]; then
   echo "[E] 请至少勾选一个型号" >&2
   exit 1
 fi
@@ -304,13 +349,24 @@ for src in "${SOURCES[@]}"; do
     "RR build artifacts for ${RR_TAG}" \
     >>"${SOURCES_TSV}"
 
-  # ── 任务：型号 ──
+  # ── 任务：官方内核型号 ──
   for m in "${MODELS[@]}"; do
-    printf '%s\t%s\t%s\n' "${src}" "${m}" "normal" >>"${TASKS_TSV}"
+    printf '%s\t%s\t%s\t%s\n' "${src}" "${m}" "normal" "false" >>"${TASKS_TSV}"
+  done
+  # ── 任务：cks 变体（model 是基础型号，label/成品名由 Python 补 _cks）──
+  for m in "${CKS_MODELS[@]}"; do
+    official_present="false"
+    for o in "${MODELS[@]}"; do
+      if [ "${o}" = "${m}" ]; then
+        official_present="true"
+        break
+      fi
+    done
+    printf '%s\t%s\t%s\t%s\n' "${src}" "${m}" "cks" "${official_present}" >>"${TASKS_TSV}"
   done
   # ── 任务：原版 RR 镜像（仅 rr，始终加入；产物已存在时由 build job 跳过）──
   if [ "${PRODUCT}" = "rr" ]; then
-    printf '%s\t%s\t%s\n' "${src}" "__RR_ORIGINAL__" "original" >>"${TASKS_TSV}"
+    printf '%s\t%s\t%s\t%s\n' "${src}" "__RR_ORIGINAL__" "original" "false" >>"${TASKS_TSV}"
   fi
 done
 
@@ -335,8 +391,8 @@ with open(sys.argv[1], encoding="utf-8") as f:
             continue
         sources.append(dict(zip(src_fields, line.split("\t"))))
 
-# 单源：源配置作为 plan 的标量输出，build matrix 只保留 model/kind，
-# 任务名不会被一长串 URL 撑爆，也不再需要向 job env 注入整串 JSON。
+# 单源：源配置作为 plan 的标量输出，build matrix 只保留 model/kind/label/
+# official_present，任务名不会被一长串 URL 撑爆，也不再需要向 job env 注入整串 JSON。
 if len(sources) != 1:
     raise SystemExit("[E] 每次编译只能有一个源，实际解析到 %d 个" % len(sources))
 src = sources[0]
@@ -347,8 +403,13 @@ with open(sys.argv[2], encoding="utf-8") as f:
         line = line.rstrip("\n")
         if not line:
             continue
-        _src, model, kind = line.split("\t")
-        tasks.append({"model": model, "kind": kind})
+        _src, model, kind, official_present = line.split("\t")
+        tasks.append({
+            "model": model,
+            "kind": kind,
+            "label": model + "_cks" if kind == "cks" else model,
+            "official_present": official_present == "true",
+        })
 
 def dump(v):
     return json.dumps(v, ensure_ascii=False, separators=(",", ":"))

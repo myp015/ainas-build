@@ -8,7 +8,10 @@
 #   ainas → myp015/ainas-rr（镜像 myp015/rr），Release ainas-ova-<版本>（新增）
 #   RROrg → RROrg/rr（镜像 wjz304/rr），Release RROrg-ova-<版本>
 # 仅支持 DSM 7.x；p3 资产全部取自 rr.img（不调用 get*）。
-# 型号勾选项只用 7 个通用型号；其它型号请通过 custom_models 手动输入。
+# 型号勾选项为 7 个通用型号 + 3 个 cks 自定义内核变体（DS925+_cks/DS425+_cks/
+# SA6400_cks，全选共 10 个任务）；其它型号请通过 custom_models 手动输入，
+# 末尾加 _cks 表示用 p3 内置 cks 快照编自定义内核。cks 变体内部按基础型号编译，
+# 菜单标题沿用官方型号，只有成品名带 _cks；OVA 不生成按型号升级包。
 name: Build RR-OVA
 on:
   workflow_dispatch:
@@ -55,8 +58,20 @@ on:
         description: "DS425+"
         type: boolean
         default: false
+      model_ds925p_cks:
+        description: "DS925+_cks（内置 cks 自定义内核）"
+        type: boolean
+        default: false
+      model_ds425p_cks:
+        description: "DS425+_cks（内置 cks 自定义内核）"
+        type: boolean
+        default: false
+      model_sa6400_cks:
+        description: "SA6400_cks（内置 cks 自定义内核）"
+        type: boolean
+        default: false
       custom_models:
-        description: "自定义型号(工作流未列出的,多个用逗号分隔,如 DS1621+,DVA3221,RS4021xs+)"
+        description: "自定义型号(工作流未列出的,多个用逗号分隔,如 DS1621+,DVA3221,RS4021xs+；型号_cks 表示用内置 cks 自定义内核)"
         type: string
         default: ""
       overwrite_base:
@@ -114,6 +129,9 @@ jobs:
           MODEL_DS3622XSP: ${{ inputs.model_ds3622xsp }}
           MODEL_SA6400: ${{ inputs.model_sa6400 }}
           MODEL_DS425P: ${{ inputs.model_ds425p }}
+          MODEL_DS925P_CKS: ${{ inputs.model_ds925p_cks }}
+          MODEL_DS425P_CKS: ${{ inputs.model_ds425p_cks }}
+          MODEL_SA6400_CKS: ${{ inputs.model_sa6400_cks }}
         run: bash .github/scripts/plan_sources.sh ova
 
   # 单独串行创建并确认 Release，避免 OVA matrix 任务并发创建同一标签。
@@ -316,7 +334,7 @@ jobs:
           echo "[INFO] base 已上传到 Release: ${RELEASE_TAG}"
 
   build:
-    name: ${{ format('build ({0})', matrix.model) }}
+    name: ${{ format('build ({0})', matrix.label) }}
     needs: [plan, prepare-base]
     runs-on: ubuntu-24.04
     strategy:
@@ -325,7 +343,8 @@ jobs:
         include: ${{ fromJSON(needs.plan.outputs.tasks) }}
     env:
       LANGUAGE: zh_CN
-      KERNEL: official
+      TASK_KIND: ${{ matrix.kind }}
+      AINAS_KERNEL: ${{ matrix.kind == 'cks' && 'custom' || 'official' }}
       ADDONS: acpid,reboottoloader,addincards,cpuinfo,expands,diskcompat,lsiutil,nvmevolume,powersched,remotefs,storagepanel,smartctl,trivial,apppatch,vmtools
       ACTION_TOKEN: ${{ secrets.AiNas }}
       LINE: ${{ inputs.dsm_version }}
@@ -386,6 +405,14 @@ jobs:
         run: |
           set -euo pipefail
 
+          # cks 变体内部仍按基础型号编译（RR 配置/菜单/PAT/裁剪都用 MODEL），
+          # 只有成品文件名用 NAME_MODEL。
+          NAME_MODEL="${MODEL}"
+          if [ "${TASK_KIND}" = "cks" ]; then
+            NAME_MODEL="${MODEL}_cks"
+            echo "[INFO] cks 变体：基础型号=${MODEL}，制品名=${NAME_MODEL}（使用 p3 内置 cks 快照）"
+          fi
+
           # 目录变量
           WORKDIR="$PWD"
           AINAS2IN1_DIR="${WORKDIR}/.2in1"
@@ -423,7 +450,7 @@ jobs:
           else
             ARTIFACT_BRAND="_ainas"
           fi
-          ARTIFACT="${MODEL}_${VER_SLUG}${ARTIFACT_BRAND}_${SAFE_TAG}"
+          ARTIFACT="${NAME_MODEL}_${VER_SLUG}${ARTIFACT_BRAND}_${SAFE_TAG}"
           echo "[INFO] 型号=${MODEL} 目标DSM版本=${VERSION} DSM系列=${LINE_REQ} 制品版本=${VER_SLUG} 源=${SOURCE}"
 
           # 系统依赖
@@ -491,6 +518,10 @@ jobs:
             "${ARTIFACT_BRAND}" "$SAFE_TAG" "360" \
             "s#file=/rr.img#file=/storage/alpine/rr.img#g"
 
+          # dsm_setup 内部会用基础型号覆盖全局 ARTIFACT，这里按 NAME_MODEL 还原，
+          # 保证 cks 变体最终产物名带 _cks。
+          ARTIFACT="${NAME_MODEL}_${VER_SLUG}${ARTIFACT_BRAND}_${SAFE_TAG}"
+
           # 导出 OVA 制品
           repack_ova "$WORKDIR" "$ARTIFACT"
 
@@ -505,6 +536,7 @@ jobs:
         shell: bash
         env:
           MODEL: ${{ matrix.model }}
+          LABEL: ${{ matrix.label }}
         run: |
           # GitHub 调用 shell 时自带 -e，必须显式 +e 才能让收尾步骤把能做的都做完
           set +e -uo pipefail
@@ -532,7 +564,7 @@ jobs:
           fi
           echo "[INFO] rr.img 大小: $(stat -c%s "$WORKDIR/rr/rr.img") 字节"
 
-          OUT="$WORKDIR/rr/rr-failed-${MODEL}.img.gz"
+          OUT="$WORKDIR/rr/rr-failed-${LABEL}.img.gz"
           gzip -1 -c "$WORKDIR/rr/rr.img" > "$OUT"
           echo "[INFO] 失败镜像已保存: $(basename "$OUT")（$(du -h "$OUT" | cut -f1)）"
           echo "DEBUG_IMG=$OUT" >> "$GITHUB_ENV"
@@ -560,7 +592,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: dsm-logs-${{ matrix.model }}-${{ github.run_id }}
+          name: dsm-logs-${{ matrix.label }}-${{ github.run_id }}
           path: /tmp/dsm-install/logs
           if-no-files-found: warn
           retention-days: 30
@@ -573,6 +605,8 @@ jobs:
         shell: bash
         env:
           ACTION_TOKEN: ${{ secrets.AiNas }}
+          LABEL: ${{ matrix.label }}
+          BASE_MODEL: ${{ matrix.model }}
         run: |
           set -euo pipefail
           LOG_DIR=/tmp/dsm-install/logs
@@ -593,7 +627,16 @@ jobs:
           : "${ACTION_TOKEN:?缺少 ACTION_TOKEN}"
           export GH_TOKEN="$ACTION_TOKEN"
           export GH_REPO="myp015/ainas-2in1"
+          # dsm_setup 的日志名以基础型号开头；cks 变体改成 <基础型号>_cks_*，
+          # 避免与同批官方任务上传同名 Release 资产时互相覆盖。
           for f in "${files[@]}"; do
-            gzip -1 -c "$f" > "$f.gz"
+            base="$(basename "$f" .log)"
+            if [ "${LABEL}" != "${BASE_MODEL}" ]; then
+              case "${base}" in
+                "${BASE_MODEL}"*) base="${LABEL}${base#"${BASE_MODEL}"}" ;;
+                *) base="${LABEL}_${base}" ;;
+              esac
+            fi
+            gzip -1 -c "$f" > "$LOG_DIR/${base}.log.gz"
           done
           gh release upload "${RELEASE_TAG}" "$LOG_DIR"/*.log.gz --clobber
