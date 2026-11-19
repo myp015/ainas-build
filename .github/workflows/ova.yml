@@ -345,7 +345,7 @@ jobs:
       LANGUAGE: zh_CN
       TASK_KIND: ${{ matrix.kind }}
       AINAS_KERNEL: ${{ matrix.kind == 'cks' && 'custom' || 'official' }}
-      ADDONS: acpid,reboottoloader,addincards,cpuinfo,expands,diskcompat,lsiutil,nvmevolume,powersched,remotefs,storagepanel,smartctl,trivial,apppatch,vmtools
+      ADDONS: acpid,reboottoloader,addincards,cpuinfo,expands,diskcompat,hdddb,lsiutil,nvmevolume,powersched,remotefs,storagepanel,smartctl,trivial,apppatch,vmtools
       ACTION_TOKEN: ${{ secrets.AiNas }}
       LINE: ${{ inputs.dsm_version }}
       SOURCE: ${{ needs.plan.outputs.source }}
