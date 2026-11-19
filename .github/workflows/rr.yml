@@ -597,20 +597,28 @@ jobs:
           # 流程函数库（patch_* / docker_* / repack_*）
           . "$AINAS2IN1_DIR/script/2in1func.sh"
 
-          # DSM 版本映射由上面 source 的 2in1func.sh 提供（pick_dsm_version）
+          # DSM 版本映射由上面 source 的 2in1func.sh 提供（pick_dsm_version）。
+          # 原版没有 DSM 型号，也不需要 PAT；不能把矩阵哨兵
+          # __RR_ORIGINAL__ 传给依赖 MODEL 的动态版本解析。
+          GRUB_VER_SHORT=""
+          if [ "${MODEL}" = "__RR_ORIGINAL__" ]; then
+            echo "[INFO] 原版 RR：不绑定 DSM 型号，跳过 PAT 版本解析"
+          else
+            LINE_REQ="${LINE:-7.2.1}"
+            if echo "${MODEL}" | grep -Eq '^(DS925\+|DS425\+)$' && [ "${LINE_REQ}" = "7.2.1" ]; then
+              echo "[INFO] ${MODEL} 不支持 DSM 7.2.1，自动切换到 7.2.2"
+              LINE_REQ="7.2.2"
+            fi
 
-          LINE_REQ="${LINE:-7.2.1}"
-          if echo "${MODEL}" | grep -Eq '^(DS925\+|DS425\+)$' && [ "${LINE_REQ}" = "7.2.1" ]; then
-            echo "[INFO] ${MODEL} 不支持 DSM 7.2.1，自动切换到 7.2.2"
-            LINE_REQ="7.2.2"
+            VERSION="$(pick_dsm_version "${LINE_REQ}")"
+            VER_MAIN="${VERSION%%-*}"
+            VER_MAIN_NODOT="${VER_MAIN//./}"
+            VER_BUILD="${VERSION#*-}"
+            VER_BUILD="${VER_BUILD%%-*}"
+            VER_SLUG="${VER_MAIN_NODOT}_${VER_BUILD}"
+            GRUB_VER_SHORT="${VER_MAIN%.*}"
+            echo "[INFO] 型号=${MODEL} 目标DSM版本=${VERSION} DSM系列=${LINE_REQ} 版本slug=${VER_SLUG} 源=${SOURCE}"
           fi
-
-          VERSION="$(pick_dsm_version "${LINE_REQ}")"
-          VER_MAIN="${VERSION%%-*}"
-          VER_MAIN_NODOT="${VER_MAIN//./}"
-          VER_BUILD="${VERSION#*-}"
-          VER_BUILD="${VER_BUILD%%-*}"
-          VER_SLUG="${VER_MAIN_NODOT}_${VER_BUILD}"
           # 制品品牌随源区分：RROrg → RROrg_rr，ainas → ainas_rr
           if [ "${SOURCE}" = "RROrg" ]; then ARTIFACT_BRAND="RROrg_rr"; else ARTIFACT_BRAND="ainas_rr"; fi
           if [ "${MODEL}" = "__RR_ORIGINAL__" ]; then
@@ -619,8 +627,6 @@ jobs:
           else
             ARTIFACT_NAME="${NAME_MODEL}_${VER_SLUG}_${ARTIFACT_BRAND}"
           fi
-          echo "[INFO] 型号=${MODEL} 目标DSM版本=${VERSION} DSM系列=${LINE_REQ} 版本slug=${VER_SLUG} 源=${SOURCE}"
-
           # GRUB 修补
           # RR 原版镜像任务无型号，MODEL_ENV 置空 → patch 脚本默认 model=Boot DSM
           # 官方 p1 没有 .locale，gettext 会回退原始 msgid；显式设为中文，
@@ -632,8 +638,8 @@ jobs:
             GRUB_MODEL_ENV="$MODEL"
             GRUB_LOCALE=""
           fi
-          # 第 6 参数是菜单标题里的 DSM 系列短版本（如 7.4）；原版任务无型号，函数会忽略
-          patch_part1 rr/rr.img "$PART1_PATH" rr "$GRUB_MODEL_ENV" "$GRUB_LOCALE" "${VER_MAIN%.*}"
+          # 第 6 参数是菜单标题里的 DSM 系列短版本（如 7.4）；原版任务显式传空
+          patch_part1 rr/rr.img "$PART1_PATH" rr "$GRUB_MODEL_ENV" "$GRUB_LOCALE" "$GRUB_VER_SHORT"
 
           # 原版 RR 镜像任务跳过 Docker 编译，镜像无需 attached；
           # 其它型号必须保持 attached：容器内 .bashrc 按分区 label 挂载 p1/p2/p3

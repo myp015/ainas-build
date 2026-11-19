@@ -296,3 +296,19 @@ SCSI 只跑 SAS 两型（megaraid + mptsas）、崩溃硬失败/识别问题先�
       实际执行「不再重复打包」跳过分支；官方 job 复用
       `updateall-DS925+-26.11.2.zip`；两个 dsm-logs artifact 分别为
       `dsm-logs-DS925+-43829190131` / `dsm-logs-DS925+_cks-43829190131`。
+
+# RR 原版任务跳过型号 PAT 解析（2026-11-19）
+
+## 变更
+- [x] 修复 `rr.yml`：`__RR_ORIGINAL__` 不再传入依赖真实型号的 `pick_dsm_version`。
+- [x] 原版显式传空 DSM/GRUB 短版本，保持 `Boot DSM`、中文 locale、`repack_rr ... keep`
+      和原版 zip 命名流程；普通型号仍按 PAT 解析并传 DSM 短版本。
+
+## 验证
+- [x] GitHub Actions run `44443211243` 的 attempt 1/2 日志确认根因：
+      `build (rr-original)` 在 `pick_dsm_version` 处报
+      `no pat found for model=__RR_ORIGINAL__ line=7.4.1`，其它矩阵任务成功。
+- [x] 本地静态检查与最小 shell 夹具验证：YAML 解析、编译 run 块 `bash -n`、
+      `git diff --check` 通过；夹具确认原版不调 PAT、patch 参数为空/中文 locale/空短版本，
+      DS918+ 保留 7.4 版本参数，DS925+ 保留 7.2.1→7.2.2 映射。
+- [ ] CI 重跑 RR 原版及至少一个普通型号，确认制品发布成功且普通型号无回归。
